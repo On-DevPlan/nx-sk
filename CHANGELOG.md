@@ -4,6 +4,17 @@
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-09-25
+
+### Fixed
+
+- **密钥页 CRUD 全挂**：`guard` 返回的包装函数不透传参数，所有 `guard(async (row) => …)`
+  形式的行级操作拿到 `undefined`，读 `row.name` 抛
+  "Cannot read properties of undefined (reading 'name')"。改值/改名/删除、
+  栏目页 8 个操作、导出 dry-run 全部中招；blur 触发的改名让「点一下别处就报错」。
+- `kvTable.rename`：改名成功后 `draft` 的键同步迁移到新名（原先留在旧键下，
+  值输入框显示为空、blur 会把值写回旧键名）。
+
 ## [0.3.1] - 2026-09-25
 
 ### Security
