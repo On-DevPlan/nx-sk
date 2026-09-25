@@ -48,9 +48,16 @@ export default function KvTable({ sectionId, sectionTitle }) {
 
   const rename = guard(async (row, newName) => {
     const name = String(newName || '').trim();
-    if (!name || name === row.name) { setDraft((d) => ({ ...d, [row.name]: d[row.name] })); return; }
+    if (!name || name === row.name) return;
     if (data.keys.some((k) => k.name === name)) { toast(`已经有叫「${name}」的键了`, 'bad'); await load(); return; }
     await api(`/api/entries/${encodeURIComponent(row.id)}`, { method: 'PATCH', body: { title: name } });
+    // draft 的键跟着迁移，否则值输入框（以 row.name 为 key）会显示成空、
+    // 下一次 blur 还会把值写到旧键名下
+    setDraft((d) => {
+      const next = {};
+      for (const [k, v] of Object.entries(d)) next[k === row.name ? name : k] = v;
+      return next;
+    });
     toast(`已重命名为 ${name}`);
     await load();
     await reload();

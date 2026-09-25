@@ -65,9 +65,12 @@ export function StoreProvider({ children }) {
     setDialogState((cur) => { cur?.resolve?.(value); return null; });
   }, []);
 
-  const guard = useCallback((fn) => async () => {
+  // 包装函数必须**透传参数**：大量 guard(async (row) => …) 形式的行级操作
+  // 靠调用方传入对象——不透传的话 row 恒为 undefined，
+  // 抛 "Cannot read properties of undefined (reading 'name')"（真实事故：密钥页 CRUD 全挂）。
+  const guard = useCallback((fn) => async (...args) => {
     try {
-      await fn();
+      await fn(...args);
     } catch (e) {
       toast(e?.message || String(e), 'bad');
     }
