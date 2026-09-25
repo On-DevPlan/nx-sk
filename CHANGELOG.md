@@ -4,6 +4,17 @@
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-09-25
+
+### Security
+
+- **清除文档与帮助文本中的真实个人信息**：`真实姓名`→`占位符`、`真实账号`→`占位符`，
+  涉及 skill 文档示例（`assets/nx-sk/references/`）、CLI 帮助文本（`help entry`）、
+  面板 toast 提示与单测夹具；提交作者身份统一为 `nx-sk <nx-sk@local>`。
+  已用 `git filter-repo` 重写全部历史并 force-push。
+- 0.3.0 因包含上述信息已在 npm 标记 deprecated（unpublish 被 granular token
+  2FA 政策拦截，需官网手动删除）。
+
 ## [0.3.0] - 2026-09-25
 
 ### Added
