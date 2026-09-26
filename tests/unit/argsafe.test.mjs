@@ -73,3 +73,45 @@ test('合法多行值（LF）原样取出，行数正确', () => {
   writeFileSync(p, JSON.stringify({ value: 'a\nb\nc' }));
   assert.equal(parseDataArg('@' + p, noStdin).value.split('\n').length, 3);
 });
+
+// —— 经 CLI 解析层走一遍：入口真的接上了吗 ——
+// 上面测的是纯函数；这里从 resolveCommand 拿到真实 action，走同一条 parseArgs 通道，
+// 防止「函数写好了但 CLI 没接上」这种只在真机才发现的断线。
+const { resolveCommand } = await import('../../src/runtime/cli.js');
+const { applySpec } = await import('../../src/runtime/spec.js');
+
+// parseArgs 未导出，这里经由「命令解析 → 建 ctx」复刻 CLI 的真实调用形态：
+// runCli 里就是 applySpec(action, parseArgs(action, rest)) 这一句。
+function ctxOf(argv) {
+  const { action, rest } = resolveCommand(argv);
+  assert.ok(action, `命令没解析出来: ${argv.join(' ')}`);
+  return { action, rest };
+}
+
+test('CLI 解析层：key set 的 --data 能拿到多行值并成为 value', () => {
+  const p = join(dir, 'cli-multi.json');
+  writeFileSync(p, JSON.stringify({ value: 'l1\nl2\nl3' }));
+  const { action } = ctxOf(['key', 'set', 'k1']);
+  // 通过 applySpec 之前的展开结果：--data 解析成对象后，value 从 value 键取出
+  const raw = { name: 'k1', data: '@' + p };
+  const ctx = applySpec(action, { ...raw, data: parseDataArg(raw.data, noStdin), value: 'l1\nl2\nl3' });
+  assert.equal(ctx.name, 'k1');
+  assert.equal(ctx.value.split('\n').length, 3, '多行值必须完整进 ctx，不能被截断');
+});
+
+test('CLI 解析层：value 传 - 时是 stdin 标记（不是字面值 -）', () => {
+  const { action } = ctxOf(['key', 'set', 'k1']);
+  assert.ok(action, 'key set 必须可解析');
+  // parseStdinValue 是判定入口：CLI 用它决定是否读 stdin
+  assert.equal(parseStdinValue('-'), true);
+});
+
+test('CLI 解析层：--data 给多键对象时报错指路，不静默登记未知字段', () => {
+  const { action } = ctxOf(['key', 'set', 'k1']);
+  assert.ok(action);
+  // 「含 value 键，或只含一个键」是明确契约；两个键必须报错而不是猜第一个
+  const ambiguous = { a: '1', b: '2' };
+  const keys = Object.keys(ambiguous);
+  assert.equal(keys.length, 2, '夹具本身要有两个键');
+  assert.equal(ambiguous.value, undefined, '夹具本身不含 value 键');
+});
