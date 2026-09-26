@@ -54,7 +54,7 @@ export default function App() {
   return (
     <div className="app">
       <header className="top">
-        <span className="brand">nx-sk</span>
+        <span className="brand"><img src="/logo-rounded.png" alt="" />nx-sk</span>
         <span className="meta">本机个人资源管理器{boot ? ` · v${boot.app.version}` : ''}</span>
         {boot ? (
           <span className="meta">

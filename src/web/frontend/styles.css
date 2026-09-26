@@ -63,7 +63,8 @@ header.top {
   border-bottom: var(--border);
   flex-shrink: 0;
 }
-header.top .brand { font-weight: 700; letter-spacing: .3px; }
+header.top .brand { font-weight: 700; letter-spacing: .3px; display: inline-flex; align-items: center; gap: 7px; }
+header.top .brand img { width: 20px; height: 20px; border-radius: 5px; display: block; }
 header.top .meta { color: var(--mid); font-size: 11px; }
 
 nav.tabs {

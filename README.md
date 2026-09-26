@@ -197,7 +197,6 @@ nx-sk skill get nx-sk 10-sections-entries   # 裸名 → references/10-sections-
 | `10-sections-entries` | 填/改信息的完整命令与 AI 补全流程 |
 | `20-secrets` | 密文机制、密钥来源、排查「解不开」 |
 | `30-export-backup` | 导出、快照与回滚 |
-| `40-extend` | 改这个项目本身：闭环落点表与静默失效点 |
 
 ## 开发
 
@@ -215,7 +214,9 @@ pnpm test        # = lint + build + 冒烟（56 项断言） + 单测（40 项�
 | `assets/nx-sk/` | 随包分发的 skill（SKILL.md + references/） |
 | `tests/unit/` · `tests/smoke.mjs` | 一致性断言 + 端到端冒烟 |
 
-**加一个功能域要碰的 12 处**（其中 3 处没有任何断言会替你发现）见 `assets/nx-sk/references/40-extend.md`。
+**加一个功能域要碰的 12 处**（其中 3 处没有任何断言会替你发现）属于**开发规范、不属于随包分发的
+agent 手册** —— 它写在创建本项目的脚手架 skill `server-cli-web-scaffold` 的
+`references/A07-extension-loop.md`，`assets/nx-sk/` 里只放「怎么用 nx-sk」。
 
 ## License
 

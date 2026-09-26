@@ -340,27 +340,38 @@ test('SKILL.md 的 ref 路由表 ↔ references/ 目录双向对账', async () =
 /**
  * 上一条断言的**已知盲区**，这条专门补它。
  *
- * 上面的双向对账只能保证「表和目录互相一致」。如果一次编辑把
- * **ref 文件与它的 SKILL.md 路由条目同时删掉**，两边一起变空，对账照样通过
- * （真实事故：40-extend 就这样被删过两次——第二次是在 0.3.4 的开发会话里）。
+ * 双向对账只能保证「表和目录互相一致」。真正的坑是**文档漂移**：
+ * 一次编辑改了 ref 的职责边界，却没同步改动到别处的引用——两边各自自洽，
+ * 合起来矛盾。
  *
- * 所以这里钉住「这套 ref 系统本身还在」：不是逐个文件设白名单（那会变成
- * 每次加 ref 都要改测试的负担），而是要求 ref 集合整体不被悄悄削掉。
+ * 本项目的具体案例（同一个文件被删了两次，两次都被当成「误删」恢复）：
+ * `40-extend.md` 是**开发规范**（改这个项目本身要碰哪 12 处），属于脚手架 skill
+ * `server-cli-web-scaffold` 的 `references/A07-extension-loop.md`；`assets/nx-sk/`
+ * 只放「怎么用 nx-sk」。这个文件被移出去两次，两次都因为没有断言拦住、
+ * 又被后来的人（包括我）按「文件怎么没了」恢复回来。
+ *
+ * 所以这里钉的不是「某个文件必须在」——那正好会把有意的调整压回去——而是
+ * 「已迁走的东西不许重新出现在随包手册里」。
  */
-test('references/ 的 ref 体系不会被整体削掉（对账断言的盲区）', async () => {
+test('已迁走的开发规范不许重新出现在 assets/nx-sk/（文档漂移防护）', async () => {
   const refDir = join(ROOT, 'assets', 'nx-sk', 'references');
-  const onDisk = (await readdir(refDir)).filter((n) => n.endsWith('.md')).sort();
-  // 下限取「文档里已声明的这套」而不是「当前恰好有几个」：
-  // 少一个就红，加了新的不红。
-  const REQUIRED = ['00-design', '10-sections-entries', '20-secrets', '30-export-backup', '40-extend'];
-  const missing = REQUIRED.filter((r) => !onDisk.includes(`${r}.md`));
-  assert.deepEqual(missing, [],
-    `references/ 少了这些 ref: ${missing.join(', ')}。`
-    + '如果是有意删除，请同时更新本测试的 REQUIRED、SKILL.md 路由表、以及 40-extend 里引用它的地方——'
-    + '不要只删文件，那样 agent 会照着路由表去取然后拿到 NOT_FOUND');
+  const skillDir = join(ROOT, 'assets', 'nx-sk');
+  const files = (await readdir(refDir)).filter((n) => n.endsWith('.md'));
+  const skillMd = await readFile(join(skillDir, 'SKILL.md'), 'utf8');
 
-  // 编号连续且唯一：跳号通常意味着「删了一个但没重排」，或复制粘贴时写错了序号
-  const nums = onDisk.map((n) => Number(n.slice(0, 2)));
+  // 「开发规范」类的 ref 已迁到脚手架 skill，随包手册里只该有「怎么用 nx-sk」。
+  // 重新加回来会让两个地方各有一份、然后各改各的。
+  assert.ok(!files.includes('40-extend.md'),
+    '40-extend.md 已迁到 server-cli-web-scaffold 的 references/A07-extension-loop.md（开发规范不属于随包分发的 agent 手册）。'
+    + '要放回来请先想清楚两个副本怎么保持同步，并同步更新本断言与 README 的 ref 表。');
+
+  // 反向：SKILL.md 里也不该残留指向它的路由条目（条目在而文件不在 =
+  // agent 照着取会拿到 NOT_FOUND）
+  assert.ok(!/`40-extend`/.test(skillMd),
+    'SKILL.md 路由表里还留着 40-extend —— 文件已迁走，agent 照它取只会拿到 NOT_FOUND');
+
+  // 编号仍要连续、唯一（跳号通常意味着删了一个没重排，或复制粘贴写错序号）
+  const nums = files.map((n) => Number(n.slice(0, 2)));
   assert.deepEqual(nums, [...nums].sort((a, b) => a - b), 'ref 文件名前缀应按编号升序');
   assert.equal(new Set(nums).size, nums.length, `ref 编号有重复: ${nums.join(', ')}`);
 });
