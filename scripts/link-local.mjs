@@ -205,11 +205,37 @@ function resolveTargets() {
   return null;
 }
 
+/**
+ * 真实 node.exe 的绝对路径 —— 直接写进转发器，绕开 PATH 上的 node。
+ *
+ * 实测（Windows 11 / Volta / Git Bash）：POSIX 转发器里 `exec node "$@"` 走的是
+ * PATH 上的 node，而它可能是 Volta 之类的**转发 shim**；那一跳会把多行参数截断成
+ * 首行（`$'l1\nl2\nl3'` 到达时只剩 `l1`），且**不报错**——一次性凭据就这么丢掉。
+ * 换成本脚本进程自己的 execPath（shim 是先解析再 exec 的，这里拿到的就是真实
+ * node.exe）后，多行参数原样送达。
+ *
+ * 注意这修不了 `.cmd` 那条路：cmd.exe 解析 .cmd 文件内容时就把参数毁了，
+ * 与 node 是不是 shim 无关（实测两种写法结果完全一样）。cmd/PowerShell 的用户
+ * 多行值必须走 --data / stdin，这一条写在 ref 20-secrets 里。
+ */
+function realNodePath() {
+  return process.execPath.replace(/\\/g, '/');
+}
+
 function shimBodyFor(file) {
   const bin = join(ROOT, 'bin', 'nx-sk.mjs').replace(/\\/g, '/');
-  if (file.endsWith('.ps1')) return `# ${SHIM_TAG} -> ${ROOT}\n& node "${bin}" @args\n`;
+  const nodeExe = realNodePath();
+  // 回退是必须的：node 升级会换版本目录（…/image/node/24.18.0/node.exe），
+  // 写死的路径就失效了。失效时退回 PATH 上的 node —— 至少保持可用（代价是多行
+  // 又会被 Volta 那一跳截断），重跑 `pnpm run link:local` 即可恢复直连。
+  const posix = `#!/bin/sh\n# ${SHIM_TAG} -> ${ROOT}\n`
+    + `NODE="${nodeExe}"\n[ -x "$NODE" ] || NODE=node\n`
+    + `exec "$NODE" "${bin}" "$@"\n`;
+  if (file.endsWith('.ps1')) return `# ${SHIM_TAG} -> ${ROOT}\n& "${nodeExe}" "${bin}" @args\n`;
+  // .cmd 保持走 PATH 上的 node：实测直连真实 node.exe 与走 shim 结果完全相同，
+  // 因为瓶颈是 cmd.exe 对 .cmd 内容的解析（%* 展开），换 node 解决不了。
   if (file.endsWith('.cmd') || file.endsWith('.bat')) return `@REM ${SHIM_TAG} -> ${ROOT}\r\n@node "${bin}" %*\r\n`;
-  return `#!/bin/sh\n# ${SHIM_TAG} -> ${ROOT}\nexec node "${bin}" "$@"\n`;
+  return posix;
 }
 
 const isExtensionless = (f) => !basename(f).includes('.');
