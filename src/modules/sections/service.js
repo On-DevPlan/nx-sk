@@ -3,7 +3,7 @@
 import { loadStore, mutateStore, snapshotStore } from '../../core/store.js';
 import { assertFieldKey, assertSafeId } from '../../core/paths.js';
 import { badInput, blocked, conflict, notFound } from '../../core/errors.js';
-import { FILL_POLICIES, FIELD_TYPES, findSection, groupFields, instantiateTemplate, sectionNames, templateSummaries } from '../../core/fields.js';
+import { FILL_POLICIES, FIELD_TYPES, findSection, groupFields, instantiateTemplate, sectionNames, syncSectionGroups, templateSummaries } from '../../core/fields.js';
 import { dumpSection, formatValue } from '../../core/render.js';
 import { sensitiveViewer } from '../../core/vault.js';
 import { nowIso } from '../../core/ids.js';
@@ -116,6 +116,9 @@ export async function addSection({ id, title, template, description, order, fiel
     const defaultGroup = draft.groups[0]?.id || 'other';
     draft.fields = fields.map((x) => validateFieldDef(x, { allowGroup: defaultGroup }));
   }
+  // 与 normalize 同一条规则：--fields 引用了 --groups 没声明的分组时自动补上，
+  // 否则面板按声明数组渲染会整组消失（CLI 从字段推导所以看不出来）。
+  draft.groups = syncSectionGroups(draft.groups, draft.fields);
   draft.createdAt = nowIso();
   draft.updatedAt = draft.createdAt;
 

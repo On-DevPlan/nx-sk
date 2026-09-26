@@ -4,7 +4,7 @@ import fsp from 'node:fs/promises';
 import { join } from 'node:path';
 import { displayPath, snapshotDir, storeFile } from './paths.js';
 import { ensureDir, pathExists, writeAtomic, writeJsonAtomic } from './fsx.js';
-import { instantiateTemplate, seedSections } from './fields.js';
+import { instantiateTemplate, seedSections, syncSectionGroups } from './fields.js';
 import { nowIso, stamp } from './ids.js';
 
 /** v2：密钥栏目从 8 字段模板改成单字段 KV（名称 → 值）。
@@ -38,7 +38,7 @@ function emptyStore(seed) {
 
 function normalizeSection(raw) {
   if (!raw || typeof raw !== 'object' || !raw.id) return null;
-  return {
+  const out = {
     id: String(raw.id),
     title: String(raw.title || raw.id),
     description: String(raw.description || ''),
@@ -52,6 +52,11 @@ function normalizeSection(raw) {
     createdAt: raw.createdAt || null,
     updatedAt: raw.updatedAt || null,
   };
+  // 「分组声明 ⊇ 字段引用」是栏目不变量：字段引用了没声明的分组，面板的分组表单
+  // 会整组消失（真实事故：servers 栏目 groups 为空，Web 端白屏而 CLI 正常）。
+  // 放在 normalize 收口——每条读写路径都会过这里，存量数据读一次就自愈。
+  out.groups = syncSectionGroups(out.groups, out.fields);
+  return out;
 }
 
 function normalizeEntry(raw) {

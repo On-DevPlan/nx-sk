@@ -294,6 +294,25 @@ export function groupFields(fields) {
   return order.map((id) => ({ id, fields: map.get(id) }));
 }
 
+/**
+ * 分组声明的**唯一补全规则**：字段引用了未声明的分组 → 追加 `{ id, title: id }`。
+ *
+ * 背景（servers 栏目事故）：CLI 的分组渲染从字段**推导**（groupFields），
+ * 面板却读**声明数组**（section.groups）——`--fields` 引用了 `--groups`
+ * 没声明的分组时，两端分叉，面板整个字段表单消失而 CLI 看起来一切正常。
+ * 所以「分组声明 ⊇ 字段引用」必须是不变量，在 normalize（读写唯一收口）
+ * 和 section add 的草稿上调用同一个函数，规则就不可能有第二份。
+ */
+export function syncSectionGroups(groups, fields) {
+  const out = [...(groups || [])];
+  const declared = new Set(out.map((g) => g.id));
+  for (const f of fields || []) {
+    const gid = f.group || 'other';
+    if (!declared.has(gid)) { declared.add(gid); out.push({ id: gid, title: gid }); }
+  }
+  return out;
+}
+
 export function fieldByKey(section, key) {
   return (section?.fields || []).find((x) => x.key === key) || null;
 }

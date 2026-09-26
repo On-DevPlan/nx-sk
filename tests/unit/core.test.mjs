@@ -7,7 +7,7 @@ await useTempHome();
 const { decryptValue, deriveKey, encryptValue, isCipherBlob, keyId, maskValue, newKey } = await import('../../src/core/crypto.js');
 const { resolveVaultKey, vaultStatus } = await import('../../src/core/vault.js');
 const { completeness, displaySensitive, dumpSection, formatValue, serializeEntry } = await import('../../src/core/render.js');
-const { findSection, groupFields, instantiateTemplate, isSensitiveField } = await import('../../src/core/fields.js');
+const { findSection, groupFields, instantiateTemplate, isSensitiveField, syncSectionGroups } = await import('../../src/core/fields.js');
 
 const SEC = instantiateTemplate('secret', { id: 'secret', title: '密钥' });
 const JOB = instantiateTemplate('job', { id: 'job', title: '求职' });
@@ -175,4 +175,42 @@ test('密钥模板是严格的 KV：一个字段 + 条目名就是键名', () =>
   assert.equal(SEC.titleField, null, '键名就是条目名，不该再从某个字段推导');
   assert.equal(SEC.titleLabel, '密钥名');
   assert.equal(SEC.kv, true, '密钥模板必须自带 kv 标记 —— 面板据此渲染 KV 表格而不是条目列表');
+});
+
+// —— 分组声明同步（servers 栏目事故回归）——
+// --fields 引用了 --groups 没声明的分组时，CLI 从字段推导分组所以正常，
+// 面板按声明数组渲染 → 整个字段表单消失。不变量：声明 ⊇ 引用。
+test('syncSectionGroups：缺的分组按字段顺序补齐，已声明的不动', () => {
+  const fields = [
+    { key: 'host', group: 'basic' },
+    { key: 'pg', group: 'docker' },
+    { key: 'note', group: 'other' },
+  ];
+  const out = syncSectionGroups([{ id: 'basic', title: '基本信息' }], fields);
+  assert.deepEqual(out, [
+    { id: 'basic', title: '基本信息' },
+    { id: 'docker', title: 'docker' },
+    { id: 'other', title: 'other' },
+  ]);
+  // 幂等：补齐后再跑一遍不产生变化
+  assert.deepEqual(syncSectionGroups(out, fields), out);
+});
+
+test('syncSectionGroups：无 group 的字段归入 other', () => {
+  const out = syncSectionGroups([], [{ key: 'a' }]);
+  assert.deepEqual(out, [{ id: 'other', title: 'other' }]);
+});
+
+test('normalizeSection 收口自愈：groups 为空但字段有引用时，读出来就补齐', async () => {
+  const { normalize } = await import('../../src/core/store.js');
+  const store = normalize({
+    version: 3,
+    sections: [{
+      id: 'servers', title: '服务器', groups: [],
+      fields: [{ key: 'host', label: '公网IP', type: 'text', group: 'basic' }],
+    }],
+    entries: [],
+  });
+  const sec = store.sections.find((s) => s.id === 'servers');
+  assert.deepEqual(sec.groups.map((g) => g.id), ['basic']);
 });
