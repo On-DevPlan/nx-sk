@@ -288,7 +288,7 @@ test('assets/<skill>/ 里的每条命令都真实存在（单向断言：防 age
     }
   };
   await walk(skillRoot);
-  assert.ok(docFiles.length >= 5, `assets 里的 skill 文档太少（${docFiles.length}）——skill 是产品的一部分，不是文档副产品`);
+  assert.ok(docFiles.length >= 4, `assets 里的 skill 文档太少（${docFiles.length}）——skill 是产品的一部分，不是文档副产品`);
 
   const problems = [];
   let hits = 0;
@@ -324,7 +324,7 @@ test('SKILL.md 的 ref 路由表 ↔ references/ 目录双向对账', async () =
   const skillDir = join(ROOT, 'assets', 'nx-sk');
   const skillMd = await readFile(join(skillDir, 'SKILL.md'), 'utf8');
   const named = [...skillMd.matchAll(/`(\d\d-[a-z0-9-]+)`/g)].map((m) => m[1]);
-  assert.ok(named.length >= 5, `SKILL.md 的 ref 路由表只解析出 ${named.length} 条，断言可能失效`);
+  assert.ok(named.length >= 4, `SKILL.md 的 ref 路由表只解析出 ${named.length} 条，断言可能失效`);
 
   const refDir = join(skillDir, 'references');
   const files = (await readdir(refDir)).filter((n) => n.endsWith('.md'));
@@ -335,6 +335,34 @@ test('SKILL.md 的 ref 路由表 ↔ references/ 目录双向对账', async () =
 
   const orphan = onDisk.filter((n) => !named.includes(n));
   assert.deepEqual(orphan, [], `references/ 下这些 ref 没在 SKILL.md 路由表登记（agent 永远不会知道该读它）: ${orphan.join(', ')}`);
+});
+
+/**
+ * 上一条断言的**已知盲区**，这条专门补它。
+ *
+ * 上面的双向对账只能保证「表和目录互相一致」。如果一次编辑把
+ * **ref 文件与它的 SKILL.md 路由条目同时删掉**，两边一起变空，对账照样通过
+ * （真实事故：40-extend 就这样被删过两次——第二次是在 0.3.4 的开发会话里）。
+ *
+ * 所以这里钉住「这套 ref 系统本身还在」：不是逐个文件设白名单（那会变成
+ * 每次加 ref 都要改测试的负担），而是要求 ref 集合整体不被悄悄削掉。
+ */
+test('references/ 的 ref 体系不会被整体削掉（对账断言的盲区）', async () => {
+  const refDir = join(ROOT, 'assets', 'nx-sk', 'references');
+  const onDisk = (await readdir(refDir)).filter((n) => n.endsWith('.md')).sort();
+  // 下限取「文档里已声明的这套」而不是「当前恰好有几个」：
+  // 少一个就红，加了新的不红。
+  const REQUIRED = ['00-design', '10-sections-entries', '20-secrets', '30-export-backup', '40-extend'];
+  const missing = REQUIRED.filter((r) => !onDisk.includes(`${r}.md`));
+  assert.deepEqual(missing, [],
+    `references/ 少了这些 ref: ${missing.join(', ')}。`
+    + '如果是有意删除，请同时更新本测试的 REQUIRED、SKILL.md 路由表、以及 40-extend 里引用它的地方——'
+    + '不要只删文件，那样 agent 会照着路由表去取然后拿到 NOT_FOUND');
+
+  // 编号连续且唯一：跳号通常意味着「删了一个但没重排」，或复制粘贴时写错了序号
+  const nums = onDisk.map((n) => Number(n.slice(0, 2)));
+  assert.deepEqual(nums, [...nums].sort((a, b) => a - b), 'ref 文件名前缀应按编号升序');
+  assert.equal(new Set(nums).size, nums.length, `ref 编号有重复: ${nums.join(', ')}`);
 });
 
 /** 抠出 Markdown 里的行内 code span 与围栏代码块，忽略 frontmatter。 */
