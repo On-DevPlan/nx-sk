@@ -1,6 +1,6 @@
 {
   "name": "nx-sk",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "description": "nx-sk · 本机个人资源管理器（server-cli-web 骨架）：栏目化存储个人信息与大模型密钥，CLI 与 Web 同源，敏感字段密文落盘。",
   "type": "module",
   "bin": {
