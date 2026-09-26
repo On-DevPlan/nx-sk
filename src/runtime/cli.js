@@ -1,8 +1,10 @@
 // 通用 CLI 运行器：解析 → 匹配 → 校验 → 渲染 → help。
 // 命令表由 action 声明派生，所以「Web 上能做的 CLI 都能做」是结构保证，不靠人记。
+import { readFileSync } from 'node:fs';
 import { resolve as resolvePath } from 'node:path';
 import { APP_NAME, DEFAULT_PORT, ENV_STORE, VERSION } from '../core/paths.js';
 import { badInput, external, toErrorShape } from '../core/errors.js';
+import { parseDataArg, parseStdinValue } from '../core/argsafe.js';
 import { ACTIONS, MODULES, MODULE_TITLES, commandEntry } from './registry.js';
 import { applySpec, argSpecsOf, cliPathsOf, flagSpecsOf, usageOf } from './spec.js';
 
@@ -198,7 +200,60 @@ function parseArgs(action, tokens) {
   for (let i = 0; i < positional.length; i++) raw[argSpecs[i].name] = positional[i];
   // 显式 flag 覆盖位置参数：`key set K --value=<值>` 与 `key set K <值>` 必须等价，
   // 而后者在值以 `-` 开头时会被当成 flag（那时只能走前者）。
-  return { ...raw, ...flags };
+  // 位置参数与 flag 一起交给展开函数：`key set K -` 的 `-` 是位置参数，
+  // 不能因为它「看起来像 flag」就漏掉。
+  return expandSafeArgs({ ...raw, ...flags });
+}
+
+/**
+ * 安全通道展开 —— CLI 独有的「通道知识」全部集中在这一个函数里。
+ *
+ * Windows 上值经命令行参数进来时，启动器 shim（Volta / npm 的 .cmd）会把换行
+ * 当命令分隔符截断，而命令**报成功**——一次性凭据就这么静默丢掉大半（真实事故）。
+ * 文件与 stdin 不受影响，所以这里把 `--data @文件` / `-` 在进 applySpec 之前
+ * 换成真正的值。放这里而不是 spec.js：那边的 coerce() 是 CLI 与 HTTP 共用的
+ * 纯净解码器，而 HTTP 没有「命令行通道」这回事。
+ */
+function expandSafeArgs(raw) {
+  const out = { ...raw };
+  let stdinUsed = false;
+  // stdin 只能被消费一次：两个参数都写 `-` 的话第二个读到的是空，
+  // 静默读空比报错危险，所以显式拒绝。
+  const takeStdin = () => {
+    if (stdinUsed) throw badInput('stdin 只能被一个参数使用（已经有一个参数用 - 读过了）');
+    stdinUsed = true;
+    return readFileSync(0, 'utf8');
+  };
+
+  // --data 统一在这里解析成对象：spec.coerce 的 json 分支对「已是对象」的值直接返回，
+  // 所以两处不会各解析一遍，`-`（stdin）这条新通道也自然被 coerce 认作合法输入。
+  //
+  // 注意顺序：**先**解析 --data，再处理 `-`。反过来的话 `--data -` 会在 data 还没读 stdin
+  // 时就被判定成「value 也是 stdin」，把两次消费搅在一起（真实踩到的顺序 bug）。
+  if (typeof out.data === 'string') out.data = parseDataArg(out.data, takeStdin);
+
+  // `--data` 是位置参数 value 的替代给法（KV 表格只有一个值字段，语义确定），
+  // 所以给了 data 就不该再因为缺 value 而报用法错。
+  // 取 value 键；没有 value 键时取对象里唯一那个键。
+  //
+  // 位置参数 `-` 要**先于**这里的提取被认出来，否则 `key set K -` 的 `-` 会被
+  // 当成字面值 `-`。所以 stdin 判定放在 data 提取之后、用「value 是否还等于 -」判断。
+  if (out.value === undefined && out.data && typeof out.data === 'object' && !Array.isArray(out.data)) {
+    const keys = Object.keys(out.data);
+    if (out.data.value !== undefined) out.value = out.data.value;
+    else if (keys.length === 1) out.value = out.data[keys[0]];
+    else throw badInput(`--data 需要含 value 键，或只含一个键（收到 ${keys.length} 个: ${keys.join(', ')}）`);
+  }
+
+  if (typeof out.value === 'string' && parseStdinValue(out.value)) out.value = takeStdin();
+
+  // 注意：这里**没有**「值含换行就报错」的检测，因为做不到。
+  // 实测（Windows 11 / Volta）：损坏后的值里 CR 是被**删掉**而不是保留，
+  // 所以「含 CR」既抓不到损坏（零真阳性），又会拦住用 --data 写入的合法
+  // CRLF 多行值（高假阳性）。而 LF 截断后与合法单行值完全不可区分。
+  // 能做的只有：① 给出可靠通道（--data / stdin，本函数）；② 让通道本身不再损坏
+  // （scripts/link-local.mjs 的转发器直连 node.exe）。
+  return out;
 }
 
 const STATUS_NOTE = {
