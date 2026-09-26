@@ -4,6 +4,25 @@
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-09-26
+
+### Fixed
+
+- **自定义栏目在 Web 面板整页空白**：栏目的分组元数据有两条读取路径——CLI 从字段
+  **推导**（`groupFields(fields)`），面板按**声明数组**（`section.groups`）渲染。
+  用 `section add --fields '{…"group":"basic"…}'` 建栏目而没同时给 `--groups` 时，
+  `groups` 是空数组：CLI 显示正常、面板的字段表单整组消失，而页面本身不报错，
+  看起来就像「这个栏目不存在」。
+- 修复：新增 `syncSectionGroups()` 把「分组声明 ⊇ 字段引用」钉成**栏目不变量**，
+  规则只写一份，在 `normalizeSection`（store 读写的唯一收口）与 `section add` 的
+  草稿两处调用——**存量数据读一次即自愈**，此后 `--add-field` / 面板加字段引用到
+  未声明的分组也会自动补齐声明。
+
+### Changed
+
+- CHANGELOG 中 0.3.1 那条安全说明不再复述被清除的原文（说明「清理了 PII」的句子
+  本身不该再带上那份 PII）。
+
 ## [0.3.2] - 2026-09-25
 
 ### Fixed
@@ -19,10 +38,10 @@
 
 ### Security
 
-- **清除文档与帮助文本中的真实个人信息**：`真实姓名`→`占位符`、`真实账号`→`占位符`，
-  涉及 skill 文档示例（`assets/nx-sk/references/`）、CLI 帮助文本（`help entry`）、
-  面板 toast 提示与单测夹具；提交作者身份统一为 `nx-sk <nx-sk@local>`。
-  已用 `git filter-repo` 重写全部历史并 force-push。
+- **清除文档与帮助文本中的真实个人信息**：真实姓名与邮箱拼音样例统一替换为占位符
+  （姓名→`张三`、邮箱前缀→`zhangsan`），涉及 skill 文档示例（`assets/nx-sk/references/`）、
+  CLI 帮助文本（`help entry`）、面板 toast 提示与单测夹具；提交作者身份统一为
+  `nx-sk <nx-sk@local>`。已用 `git filter-repo` 重写全部历史并 force-push。
 - 0.3.0 因包含上述信息已在 npm 标记 deprecated（unpublish 被 granular token
   2FA 政策拦截，需官网手动删除）。
 
