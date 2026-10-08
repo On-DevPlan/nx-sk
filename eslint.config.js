@@ -29,6 +29,7 @@ const SIBLING_MODULES = [
   '../sections/*',
   '../entries/*',
   '../export/*',
+  '../backup/*',
   '../skill/*',
 ];
 

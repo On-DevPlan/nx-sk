@@ -117,6 +117,8 @@ CLI 与 API 同源，skill 驱动 agent**。落到具体功能上：
 | `nx-sk entry fields [--section job]` | 字段字典 —— 填之前先看这个，别猜字段名 |
 | `nx-sk export run [--format json\|md\|both] [--section id] [--with-secrets] [--out DIR] [--dry-run]` | 整体导出 |
 | `nx-sk export list` | 历次导出与目录内文件 |
+| `nx-sk backup export [--password 口令] [--out DIR] [--dry-run]` | 口令对称加密整库，导出单个 `.nxskbak`（口令不落盘） |
+| `nx-sk backup import --file <备份> [--password 口令] [--dry-run]` | 输入口令解密、整份恢复（恢复前自动留安全快照） |
 | `nx-sk setting get \| set` | 全局设置 |
 | `nx-sk skill list \| install \| get` | 把内置 skill 装给 agent / 给外部 agent 取上下文 |
 
@@ -161,6 +163,18 @@ nx-sk export run --format both --out D:/备份/nx-sk
 nx-sk export list
 ```
 
+加密备份 / 恢复（口令对称加密，AES-256-GCM；导出设口令、恢复输口令）：
+
+```bash
+nx-sk backup export --password '你的备份口令'            # 写成 ~/nx-sk/backup/*.nxskbak
+nx-sk backup import --file ~/nx-sk/backup/xxx.nxskbak --password '你的备份口令' --dry-run  # 先只解密校验
+nx-sk backup import --file ~/nx-sk/backup/xxx.nxskbak --password '你的备份口令'            # 整份恢复
+# 口令也可用环境变量 NX_SK_BACKUP_PASSWORD 提供
+```
+
+Web 面板的「加密备份」页同样支持：导出在浏览器下载 `.nxskbak`，导入选择文件并输入口令；
+口令错误或文件损坏会明确报错、不改动当前数据。
+
 ## 数据与安全
 
 | 项 | 位置 / 做法 |
@@ -170,6 +184,7 @@ nx-sk export list
 | 密文密钥 | 环境变量 `NX_SK_PASSPHRASE`（scrypt 派生 + 盐）优先，否则 `~/nx-sk/.vaultkey`（32 字节随机，0600） |
 | 快照 | 每次破坏性写入前整库备份到 `~/nx-sk/backup/`（最多 20 份），拷回即回滚 |
 | 导出 | `~/nx-sk/export/`，默认不含凭据明文 |
+| 加密备份 | `.nxskbak`：整库经 scrypt(口令)+AES-256-GCM 加密，口令不落盘；恢复前自动留安全快照 |
 | 服务绑定 | 默认 `127.0.0.1`，不暴露到局域网；写操作校验 `Origin` |
 | 数据损坏 | `store.json` 解析失败会先被改名为 `.corrupt-<时间戳>.json`，不会静默覆盖 |
 
