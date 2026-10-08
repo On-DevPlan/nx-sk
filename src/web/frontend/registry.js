@@ -11,6 +11,7 @@ export const VIEWS = [
   { id: 'sections', title: '栏目', order: 500, component: lazy(() => import('../../modules/sections/view.jsx')) },
   { id: 'entries', title: '条目', order: 600, tab: false, component: lazy(() => import('../../modules/entries/view.jsx')) },
   { id: 'export', title: '导出', order: 700, component: lazy(() => import('../../modules/export/view.jsx')) },
+  { id: 'backup', title: '加密备份', order: 750, component: lazy(() => import('../../modules/backup/view.jsx')) },
   { id: 'settings', title: '设置', order: 900, component: lazy(() => import('../../modules/settings/view.jsx')) },
 ];
 

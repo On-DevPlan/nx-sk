@@ -78,3 +78,19 @@ cp ~/nx-sk/backup/20260924-144238-entry-remove-e_xxx.json ~/nx-sk/store.json
 | 内容 | 结构化 + 可读的 Markdown；凭据默认含明文（`--no-secrets` 可打码） | 原样的整库 JSON（含密文） |
 | 位置 | `~/nx-sk/export/`（可改） | `~/nx-sk/backup/`（固定） |
 | 回滚用 | 不能直接回滚（形状不同） | 能，拷回 store.json 即可 |
+
+## 五、口令加密备份 / 恢复（导入导出）
+
+整份数据用**口令派生密钥 + AES-256-GCM** 对称加密为单个 `.nxskbak` 文件；口令不落盘。
+
+```bash
+nx-sk backup export --password '备份口令'                 # → ~/nx-sk/backup/nx-sk-backup-<时间>.nxskbak
+nx-sk backup export --password '备份口令' --out D:/备份    # 指定输出目录
+nx-sk backup import --file <备份>.nxskbak --password '备份口令' --dry-run  # 只解密校验，不改动
+nx-sk backup import --file <备份>.nxskbak --password '备份口令'            # 整份恢复
+```
+
+- 导出时文件内写入**随机盐**，密钥由 `scrypt(口令, 盐)` 派生；恢复时用同一口令派生同一把密钥。
+- **口令错误 / 文件被篡改**：GCM 认证失败、明确报 BLOCKED，且不改动当前数据。
+- 恢复（整份替换）前会**自动给当前数据另留一份安全快照**（`…-before-restore.json`），可回滚。
+- 口令也可用环境变量 `NX_SK_BACKUP_PASSWORD` 提供；Web「加密备份」页提供同样能力（浏览器下载 / 选择文件导入）。

@@ -4,6 +4,16 @@
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-08
+
+### Added
+
+- **口令对称加密的整库备份 / 恢复（导入导出）**：新增「加密备份」模块（CLI `backup export|import`，Web 同名面板，HTTP `POST /api/backup` 与 `POST /api/backup/restore`）。
+  - 导出：设置口令 → 整份数据（栏目 / 条目 / 设置）经 **scrypt 口令派生密钥 + AES-256-GCM** 加密为单个 `.nxskbak` 文件并在浏览器下载；文件内含随机盐，**口令不落盘**。
+  - 导入：选择备份文件并输入口令 → 解密校验后整份恢复；**恢复前自动给当前数据留安全快照**（可回滚）。
+  - 口令错误或文件被篡改：GCM 认证失败、明确报 BLOCKED，且不改动当前数据；两个动作均支持 `--dry-run`（只演练 / 只解密校验）。
+  - 口令也可用环境变量 `NX_SK_BACKUP_PASSWORD` 提供；复用 `core/crypto.js` 原语，与字段级密钥库（`core/vault.js`）相互独立。
+
 ## [0.3.4] - 2026-09-26
 
 ### Added
