@@ -253,17 +253,18 @@ nx-sk skill get nx-sk 10-sections-entries   # 裸名 → references/10-sections-
 | `10-sections-entries` | 填/改信息的完整命令与 AI 补全流程 |
 | `20-secrets` | 密文机制、密钥来源、排查「解不开」 |
 | `30-export-backup` | 导出、快照与回滚 |
+| `40-files` | 附件库：导入（默认移动）与还原、`file` 字段与条目的链接、附件中心由栏目驱动 |
 
 ## 开发
 
 ```bash
-pnpm test        # = lint + build + 冒烟（56 项断言） + 单测（40 项）
+pnpm test        # = lint + build + 冒烟（91 项断言） + 单测（116 项）
 ```
 
 | 目录 | 职责 |
 | --- | --- |
 | `bin/nx-sk.mjs` | 唯一入口，只转发 argv + 兜异常 |
-| `src/core/` | 零业务语义：paths / errors / store / fsx / crypto / vault / fields / render / ids / open |
+| `src/core/` | 零业务语义：paths / errors / store / fsx / crypto / vault / fields / attachments / render / ids / open |
 | `src/modules/<域>/` | `index.js`(action 声明) + `service.js`(业务) + `view.jsx`(面板) |
 | `src/runtime/` | registry / spec / cli / api / server —— 装配层，不写业务 |
 | `src/web/frontend/` | React 壳 + 组件 + 视图注册表 |
