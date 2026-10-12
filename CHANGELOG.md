@@ -2,6 +2,12 @@
 
 本文件格式参考 [Keep a Changelog](https://keepachangelog.com/)，中文正文。
 
+## [0.6.1] - 2026-10-12
+
+### Changed
+
+- **加密备份跨机器恢复：密钥栏目与其他栏目走同一路径**。`backup export --password` 导出时，先把 secret 栏目的密文字段用本机 vaultKey **解开为明文**，再随整份 payload 一起用口令派生密钥（AES-256-GCM）加密入 `.nxskbak`；导入时直接拿明文落回 store.json，B 机不需要 A 机的 `~/.vaultkey` 即可 `key get` 出原文。理由：密钥条目就是一段文本，"跨机器恢复要看"才是它的实际场景，再绕一层「reWrapped 兑回本机 vaultKey」是多余的间接层。落回 store.json 后，下次写入会由 B 机 vaultKey 重新加密（落盘仍是密文），所以单机"store.json 泄露不等于密钥泄露"这条不变量没退化。
+
 ## [0.6.0] - 2026-10-12
 
 ### Added
