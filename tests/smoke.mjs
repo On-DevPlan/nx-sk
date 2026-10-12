@@ -14,10 +14,6 @@ const BIN = join(ROOT, 'bin', 'nx-sk.mjs');
 const NODE = process.execPath;
 const BACKUP_SERVICE = new URL('../src/modules/backup/service.js', import.meta.url).pathname;
 
-function isCipherBlob(v) {
-  return !!v && typeof v === 'object' && typeof v.ct === 'string' && typeof v.iv === 'string';
-}
-
 const home = await mkdtemp(join(tmpdir(), 'nx-sk-smoke-'));
 const env = { ...process.env, NX_SK_HOME: home, NX_SK_STORE: join(home, 'store.json') };
 delete env.NX_SK_PASSPHRASE;
@@ -230,8 +226,8 @@ const exportList = await cliJson(['export', 'list']);
 step('export list 给出历史与目录内文件', exportList.history.length >= 2 && exportList.disk.length >= 2);
 
 // ── 加密备份 + 跨机器口令解开 ────────────────────────────────
-// 关键回归：导出用「A 机的 vaultkey」加密的密文，原本无法在「B 机」（换了 vaultkey）解开。
-// 修复：备份打包时给每条密文挂一份口令派生的 reWrapped；导入时兑回本机 vaultKey。
+// 关键回归：A 机 export --password 出的 .nxskbak 在 B 机（换了 vaultkey）
+// 用口令导入后能直接 key get 出明文。导出时 secret 字段被解开为明文。
 const backupText = await (async () => {
   const { code, out } = await cli(['backup', 'export', '--password', 'smoke-pw-123', '--out', join(home, 'backup')]);
   assert.equal(code, 0, `backup export 失败: ${out}`);
@@ -242,14 +238,12 @@ const backupText = await (async () => {
 const archiveJson = JSON.parse(backupText);
 step('加密备份文件包含归档头', archiveJson.kind === 'encrypted-backup' && archiveJson.app === 'nx-sk');
 
-// 解码 archive 看一眼里面有没有 reWrapped
+// 解码 archive 看 secret 是否已解开为明文
 const { decryptBackup } = await import(BACKUP_SERVICE);
 const decoded = decryptBackup(backupText, 'smoke-pw-123').payload;
 const secrets = decoded.entries.filter((e) => e.section === 'secret');
-step('解密后能看到 secret 栏目的密文',
-  secrets.length === 1 && isCipherBlob(secrets[0].values.value));
-step('secret 密文上挂着口令派生的 reWrapped（这是跨机能解的关键）',
-  !!secrets[0].values.value.reWrapped && isCipherBlob(secrets[0].values.value.reWrapped));
+step('解密后 secret 字段已是明文（不再带密文对象）',
+  secrets.length === 1 && typeof secrets[0].values.value === 'string');
 
 // 模拟「换机器」：先在 B 机器上跑一次解密让 .vaultkey 自动生成，
 // 立刻删掉它——后续所有解密都跑在「B 机用户从没见过 A 机旧 key」的状态下。
@@ -285,17 +279,11 @@ const restoredB = await cliJsonB(['backup', 'import', '--password', 'smoke-pw-12
     const xs = await (await import('node:fs/promises')).readdir(join(home, 'backup'));
     return join(home, 'backup', xs.find((n) => n.endsWith('.nxskbak')));
   })())]);
-step('B 机用口令恢复：状态=restored', restoredB.status === 'restored' && restoredB.reWrapped === 1);
+step('B 机用口令恢复：状态=restored', restoredB.status === 'restored' && restoredB.unsealed === 1);
 
 const gotB = await cliJsonB(['key', 'get', 'SMOKE_KEY']);
 step('B 机恢复后 key get 默认能解出明文（原 vaultkey 完全无关）',
   gotB.value === 'sk-smoke-NEW-0987654321fedcba');
-
-// 加密后的密文应当**不带** reWrapped 了（已被兑回本机 vaultkey）
-const storeB = JSON.parse(await readFile(join(homeB, 'store.json'), 'utf8'));
-const entryB = storeB.entries.find((e) => e.section === 'secret');
-step('恢复后密文不再带 reWrapped（已被兑回本机 vaultkey）',
-  !!entryB && !entryB.values.value.reWrapped && isCipherBlob(entryB.values.value));
 
 // 错误口令在 B 机也明确报错
 const wrongPw = await cliB(['backup', 'import', '--password', 'wrong-pw-12345', '--file',
