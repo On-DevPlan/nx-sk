@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useMemo } from 'react';
+import { Fragment, Suspense, useEffect, useMemo } from 'react';
 import { SECTION_VIEW, VIEWS } from './registry.js';
 import { Copyable, DialogHost, ErrorBoundary, Toasts } from './components/ui.jsx';
 import { useStore } from './store.jsx';
@@ -26,7 +26,11 @@ export default function App() {
       .filter((t) => (seen.has(t.id) ? false : (seen.add(t.id), true)));
   }, [boot]);
 
-  const current = tabs.find((t) => t.id === ui.view) || tabs[0] || null;
+  // 没 boot 之前**不要**拿 tabs[0] 兜底：那时动态栏目还没到，tabs 里只有静态视图，
+  // 兜底会选中第一个静态视图并由下面的 effect 写进 ui —— 于是「默认视图 = 求职」被顶掉、
+  // 头部高亮也错位成「栏目」，连 `#/job` 这类深链都会被首屏覆盖。
+  const booted = !!boot;
+  const current = tabs.find((t) => t.id === ui.view) || (booted ? tabs[0] : null) || null;
 
   // hash 与 localStorage 双写对齐：只在挂载时对齐一次，之后交给 hashchange
   useEffect(() => {
@@ -43,8 +47,8 @@ export default function App() {
   }, [patchUi]);
 
   useEffect(() => {
-    if (current && current.id !== ui.view) patchUi({ view: current.id });
-  }, [current, ui.view, patchUi]);
+    if (booted && current && current.id !== ui.view) patchUi({ view: current.id });
+  }, [booted, current, ui.view, patchUi]);
 
   const go = (id) => {
     patchUi({ view: id });
@@ -53,27 +57,40 @@ export default function App() {
 
   return (
     <div className="app">
+      {/* 身份栏：左边只说「我是谁」，右边才是「存储在哪 / 能做什么」。
+          原先 4 段信息（品牌 / 副标题 / 版本 / 存储路径）平铺成一行、字号相近，
+          读起来分不出主次；现在按 品牌 ▸ 定位 ▸ 版本 三级收拢，元信息整体右移。 */}
       <header className="top">
-        <span className="brand"><img src="/logo-rounded.png" alt="" />nx-sk</span>
-        <span className="meta">本机个人资源管理器{boot ? ` · v${boot.app.version}` : ''}</span>
-        {boot ? (
-          <span className="meta">
-            存储 <Copyable className="mono" text={boot.storePathRaw}>{boot.storePath}</Copyable>
-          </span>
-        ) : null}
+        <span className="brand">
+          <img src="/logo-rounded.png" alt="" />
+          nx-sk
+        </span>
+        <span className="tagline">本机个人资源管理器</span>
+        {boot ? <span className="ver mono">v{boot.app.version}</span> : null}
         <span className="right rowgap">
+          {boot ? (
+            <span className="store" title={`存储目录：${boot.storePathRaw}`}>
+              <span className="store-label">存储</span>
+              <Copyable className="mono nowrap" text={boot.storePathRaw}>{boot.storePath}</Copyable>
+            </span>
+          ) : null}
           <button className="btn small ghost" onClick={() => reload()}>刷新数据</button>
         </span>
       </header>
 
+      {/* 导航栏：内容（栏目）在前、工具（栏目/附件/导出/…）在后，中间加一道细线分组，
+          否则十几个同级 pill 连成一排，看不出「哪些是自己的数据、哪些是系统功能」。 */}
       <nav className="tabs">
-        {tabs.map((t) => (
-          <button key={t.id} className={`tab ${t.id === current?.id ? 'active' : ''}`} onClick={() => go(t.id)}>
-            {t.title}
-            {typeof t.count === 'number' ? <span className="count">{t.count}</span> : null}
-          </button>
+        {tabs.map((t, i) => (
+          <Fragment key={t.id}>
+            {i > 0 && tabs[i - 1].kind !== t.kind ? <span className="tabs-sep" aria-hidden /> : null}
+            <button className={`tab ${t.id === current?.id ? 'active' : ''}`} onClick={() => go(t.id)}>
+              {t.title}
+              {typeof t.count === 'number' ? <span className="count">{t.count}</span> : null}
+            </button>
+          </Fragment>
         ))}
-        {!tabs.length ? <span className="meta">正在装载…</span> : null}
+        {!tabs.length ? <span className="muted">正在装载…</span> : null}
       </nav>
 
       <main className="body">
@@ -84,7 +101,8 @@ export default function App() {
             <div className="hint">确认 nx-sk serve 正在运行；或点右上角「刷新数据」重试。</div>
           </div>
         ) : null}
-        {!bootError && current ? (
+        {!bootError && !booted ? <div className="pad muted">正在装载…</div> : null}
+        {!bootError && booted && current ? (
           <ErrorBoundary key={current.id}>
             <Suspense fallback={<div className="pad muted">加载中…</div>}>
               {current.kind === 'section'

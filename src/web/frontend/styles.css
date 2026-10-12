@@ -58,23 +58,43 @@ header.top {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
-  padding: 6px 14px;
+  gap: 12px;
+  padding: 10px 14px;
   border-bottom: var(--border);
   flex-shrink: 0;
 }
-header.top .brand { font-weight: 700; letter-spacing: .3px; display: inline-flex; align-items: center; gap: 7px; }
-header.top .brand img { width: 20px; height: 20px; border-radius: 5px; display: block; }
-header.top .meta { color: var(--mid); font-size: 11px; }
+/* 品牌：头部唯一的「标题级」元素，字号/字重都要压过其它所有文字 */
+header.top .brand { font-size: 15px; font-weight: 700; letter-spacing: .2px; line-height: 1; display: inline-flex; align-items: center; gap: 8px; }
+header.top .brand img { width: 22px; height: 22px; border-radius: 6px; display: block; }
+/* 定位语：紧贴品牌但从属——更小更淡，别和品牌抢第一眼 */
+header.top .tagline { color: var(--mid); font-size: 11px; }
+/* 版本：做成 chip，避免「本机个人资源管理器 v0.5.0」连成一句话读 */
+header.top .ver {
+  font-size: 10px;
+  color: var(--mid);
+  background: var(--soft);
+  border: var(--border);
+  border-radius: 999px;
+  padding: 1px 8px;
+  line-height: 1.7;
+}
+/* 右侧元信息 + 操作：存储路径降级成弱信息，别在头部最显眼处**
+   挤一段长路径（超长时省略号截断，完整值看 title） */
+header.top .store { display: inline-flex; align-items: center; gap: 6px; min-width: 0; font-size: 11px; color: var(--mid); }
+header.top .store .store-label { color: var(--mid); }
+header.top .store .copyable { max-width: 30ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 nav.tabs {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 6px;
   padding: 6px 14px;
   border-bottom: var(--border);
   flex-shrink: 0;
 }
+/* 分组细线：内容栏目 ‖ 系统工具 */
+.tabs-sep { width: 1px; height: 18px; background: var(--soft-2); margin: 0 4px; }
 
 main.body { flex: 1; min-height: 0; overflow: auto; }
 
@@ -91,9 +111,10 @@ main.body { flex: 1; min-height: 0; overflow: auto; }
   cursor: pointer;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
 }
-.tab .count { color: var(--mid); font-size: 11px; }
+/* 计数是「元数据」不是名字的一部分：更小 + 等宽数字，让它退到标签之后 */
+.tab .count { color: var(--mid); font-size: 10px; font-variant-numeric: tabular-nums; }
 .tab.active { background: var(--paper); box-shadow: var(--shadow-relief); font-weight: 600; }
 
 /* ── 按钮：凸起 → 按下内嵌 + 下沉 1px ── */
