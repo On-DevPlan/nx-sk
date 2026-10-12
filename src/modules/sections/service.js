@@ -3,7 +3,7 @@
 import { loadStore, mutateStore, snapshotStore } from '../../core/store.js';
 import { assertFieldKey, assertSafeId } from '../../core/paths.js';
 import { badInput, blocked, conflict, notFound } from '../../core/errors.js';
-import { FILL_POLICIES, FIELD_TYPES, findSection, groupFields, instantiateTemplate, sectionNames, syncSectionGroups, templateSummaries } from '../../core/fields.js';
+import { FILL_POLICIES, FIELD_TYPES, findSection, getTemplate, groupFields, instantiateTemplate, mergeTemplate, sectionNames, syncSectionGroups, templateSummaries } from '../../core/fields.js';
 import { dumpSection, formatValue } from '../../core/render.js';
 import { sensitiveViewer } from '../../core/vault.js';
 import { nowIso } from '../../core/ids.js';
@@ -207,6 +207,15 @@ export async function updateSection(ref, patch = {}) {
     }
   }
 
+  // 不变量：分组声明 ⊇ 字段引用。add-field 若引用了未声明的分组，
+  // 必须在这里补上声明——否则面板读声明数组渲染，整组字段会静默消失
+  // （CLI 从字段推导所以看不出来，这个坑在 servers 栏目踩过一次）。
+  if (changes.fields) {
+    const base = changes.groups || target.groups;
+    const synced = syncSectionGroups(base, changes.fields);
+    if (synced.length !== base.length) changes.groups = synced;
+  }
+
   if (!Object.keys(changes).length) {
     throw badInput('没有要修改的内容（可改 title / description / order / fields / groups / add-field / remove-field / fill）');
   }
@@ -222,6 +231,41 @@ export async function updateSection(ref, patch = {}) {
   });
   const after = await loadStore();
   return { status: 'ok', id: target.id, changed: Object.keys(changes), added, removed, fillChanged, section: summarize(after, mustFind(after, target.id)), snapshot };
+}
+
+/**
+ * 按模板补齐栏目字段：把模板里新增、而本栏目还缺的分组与字段补进来（只增不改不删）。
+ *
+ * 用途：栏目字段字典是持久化数据，模板演进不会回溯。用户在模板里加了字段
+ * （例如给求职加了 `file` 类型的「附件资料」组），但**已经建好的栏目**看不到——
+ * 跑一次 `section sync` 就能把缺口补上，且不动用户已有的定义与数据。
+ */
+export async function syncSection(ref, { 'dry-run': dryRun } = {}) {
+  const store = await loadStore();
+  const target = mustFind(store, ref);
+  if (!target.template) {
+    throw badInput(`栏目「${target.title}」不是由模板创建的（template 为空），没有可同步的模板；加字段请用 section update --add-field。`);
+  }
+  const tpl = getTemplate(target.template);
+  if (!tpl) throw badInput(`栏目记录了模板 ${target.template}，但该模板已不存在（可能被重命名或移除）。`);
+
+  const { groups, fields, addedGroups, addedFields } = mergeTemplate(target, tpl);
+  if (!addedGroups.length && !addedFields.length) {
+    return { status: 'ok', upToDate: true, id: target.id, addedGroups: [], addedFields: [], section: summarize(store, target) };
+  }
+  if (dryRun) {
+    return { status: 'skipped', dryRun: true, wouldSync: { groups: addedGroups, fields: addedFields } };
+  }
+
+  const snapshot = await snapshotStore(`section-sync-${target.id}`);
+  await mutateStore((s) => {
+    const t = mustFind(s, ref);
+    t.groups = groups;
+    t.fields = fields;
+    t.updatedAt = nowIso();
+  });
+  const after = await loadStore();
+  return { status: 'ok', id: target.id, addedGroups, addedFields, section: summarize(after, mustFind(after, target.id)), snapshot };
 }
 
 /**
@@ -322,7 +366,7 @@ export function renderSectionDump(d) {
 }
 
 export function renderSectionChange(d) {
-  if (d.status === 'skipped') return `试运行（未落盘）：${JSON.stringify(d.wouldCreate || d.wouldChange || d.wouldRemove)}`;
+  if (d.status === 'skipped') return `试运行（未落盘）：${JSON.stringify(d.wouldCreate || d.wouldChange || d.wouldRemove || d.wouldSync)}`;
   // `removed` 在两条路径上形状不同：remove 给的是**对象** {id,title,entries}，
   // update 给的是**被删字段 key 的数组**。数组恒为真值，所以必须显式排除数组——
   // 否则 `section update` 会打印「已删除栏目 undefined」，
@@ -330,7 +374,16 @@ export function renderSectionChange(d) {
   if (d.removed && !Array.isArray(d.removed)) {
     return `已删除栏目 ${d.removed.id}（连带 ${d.removed.entries} 条条目）\n快照: ${d.snapshot}`;
   }
+  if (d.upToDate) return `栏目 ${d.id} 已是最新：模板里没有需要补的分组或字段。`;
   if (d.created) return `已创建栏目 ${d.section.id} · ${d.section.title}（${d.section.fields} 字段）\n快照: ${d.snapshot}`;
+  // sync：只增不改——把模板新增、栏目还缺的分组/字段补进来
+  if (d.addedFields || d.addedGroups) {
+    const bits = [
+      d.addedGroups?.length ? `新增分组 ${d.addedGroups.join(', ')}` : '',
+      d.addedFields?.length ? `新增字段 ${d.addedFields.join(', ')}` : '',
+    ].filter(Boolean).join('；');
+    return `已同步栏目 ${d.id} 的模板字段：${bits}\n快照: ${d.snapshot}`;
+  }
   const extra = [
     d.added?.length ? `新增字段 ${d.added.join(', ')}` : '',
     d.removed?.length ? `删除字段 ${d.removed.join(', ')}` : '',

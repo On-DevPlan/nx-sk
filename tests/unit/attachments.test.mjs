@@ -30,7 +30,7 @@ test('本机路径导入默认移动原件，台账记录物理路径与链接',
   // 原件已不在原位
   await assert.rejects(fsp.access(src), /ENOENT/);
   // 库内物理文件存在
-  const stored = join(filesDir(), r.rel.split('/').join('\\'));
+  const stored = join(filesDir(), ...r.rel.split('/'));
   assert.equal(await fsp.readFile(stored, 'utf8'), 'resume-pdf-bytes');
   assert.equal(r.url, `/api/files/${r.id}/content`);
   assert.equal(r.downloadUrl, `${r.url}?download=1`);
@@ -61,7 +61,7 @@ test('Web 上传（base64 / data URL）写入附件库', async () => {
   assert.equal(r.created, true);
   assert.equal(r.isImage, true);
   assert.equal(r.mode, 'upload');
-  const stored = join(filesDir(), r.rel.split('/').join('\\'));
+  const stored = join(filesDir(), ...r.rel.split('/'));
   assert.equal(await fsp.readFile(stored, 'utf8'), 'avatar-binary');
 });
 
@@ -77,11 +77,11 @@ test('分类与名称过滤、搜索生效', async () => {
 test('改分类会把物理文件搬到新目录', async () => {
   const list = await svc.listFiles({ q: '成绩单' });
   const target = list.files[0];
-  const oldAbs = join(filesDir(), target.rel.split('/').join('\\'));
+  const oldAbs = join(filesDir(), ...target.rel.split('/'));
   const r = await svc.updateFile(target.id, { category: 'certificate' });
   assert.equal(r.category, 'certificate');
   await assert.rejects(fsp.access(oldAbs), /ENOENT/);
-  const newAbs = join(filesDir(), r.rel.split('/').join('\\'));
+  const newAbs = join(filesDir(), ...r.rel.split('/'));
   await fsp.access(newAbs);
 });
 
@@ -120,7 +120,7 @@ test('restore --copy 只导出副本，库中保留', async () => {
 test('删除附件连物理原件一起删除', async () => {
   const list0 = await svc.listFiles({ q: 'note.txt' });
   const f = list0.files[0];
-  const abs = join(filesDir(), f.rel.split('/').join('\\'));
+  const abs = join(filesDir(), ...f.rel.split('/'));
   await svc.removeFile(f.id, {});
   await assert.rejects(fsp.access(abs), /ENOENT/);
 });
@@ -205,7 +205,7 @@ test('listFiles 由栏目驱动：sections 汇总 + unlinked 计数 + 按栏目/
 test('附件目录不可重复导入自身目录内的文件', async () => {
   const list = await svc.listFiles({});
   const f = list.files[0];
-  const abs = join(filesDir(), f.rel.split('/').join('\\'));
+  const abs = join(filesDir(), ...f.rel.split('/'));
   await assert.rejects(svc.addFile({ path: abs }), /已经在附件库/);
 });
 

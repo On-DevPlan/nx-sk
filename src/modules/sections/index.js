@@ -88,6 +88,16 @@ export default {
       render: (d) => service.renderSectionChange(d),
     },
     {
+      id: 'section.sync',
+      cli: ['section', 'sync'],
+      http: ['POST', '/api/sections/:ref/sync'],
+      summary: '按模板补齐字段：把模板新增、本栏目还缺的分组与字段补进来（只增不改不删）。模板演进不会回溯到已建栏目，用它追上',
+      args: ['ref'],
+      flags: { 'dry-run': { type: 'boolean', hint: '只列出会补哪些分组/字段，不落盘' } },
+      run: (ctx) => service.syncSection(ctx.ref, ctx),
+      render: (d) => service.renderSectionChange(d),
+    },
+    {
       id: 'section.remove',
       cli: ['section', 'remove'],
       http: ['DELETE', '/api/sections/:ref'],

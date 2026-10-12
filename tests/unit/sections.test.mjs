@@ -4,7 +4,9 @@ import { useTempHome } from '../helpers.mjs';
 
 await useTempHome();
 
-const { renderSectionChange } = await import('../../src/modules/sections/service.js');
+const service = await import('../../src/modules/sections/service.js');
+const { mergeTemplate } = await import('../../src/core/fields.js');
+const { renderSectionChange } = await service;
 
 // 回归：`removed` 在两条路径上**形状不同**——removeSection 给的是对象
 // `{id,title,entries}`，updateSection 给的是**被删字段 key 的数组**。
@@ -42,4 +44,102 @@ test('remove 的对象形状仍走删除分支（别把修复改过头）', () =
     status: 'ok', removed: { id: 'job', title: '求职', entries: 3 }, snapshot: 'S',
   });
   assert.match(out, /已删除栏目 job（连带 3 条条目）/);
+});
+
+// —— 模板增量合并 / section sync ——
+// 背景：栏目字段字典是持久化数据，模板演进（例如给求职加 `file` 类型的「附件资料」组）
+// **不会回溯**到已建栏目，老栏目里看不到上传入口。section sync 用来补这个缺口。
+
+test('mergeTemplate 只增不改：补进缺失字段、保留已有定义与自定义字段', () => {
+  const section = {
+    groups: [{ id: 'a', title: '自定义标题A' }, { id: 'z', title: '自定义组' }],
+    fields: [
+      { key: 'f1', label: '我自己改过的标签', type: 'text', group: 'a' },
+      { key: 'custom', label: '自定义字段', type: 'text', group: 'z' },
+    ],
+  };
+  const template = {
+    groups: [{ id: 'a', title: '模板里的A' }, { id: 'b', title: '模板里的B' }],
+    fields: [
+      { key: 'f1', label: '模板标签', type: 'text', group: 'a' },
+      { key: 'f2', label: '新字段', type: 'text', group: 'b' },
+    ],
+  };
+  const r = mergeTemplate(section, template);
+  // 已有字段的定义（label）与位置不动
+  assert.equal(r.fields[0].key, 'f1');
+  assert.equal(r.fields[0].label, '我自己改过的标签');
+  // 自定义字段保留
+  assert.ok(r.fields.some((f) => f.key === 'custom'));
+  // 新字段被补进来
+  assert.deepEqual(r.addedFields, ['f2']);
+  assert.deepEqual(r.addedGroups, ['b']);
+  // 分组：模板顺序优先（a、b），栏目已有的沿用自身标题，自定义分组 z 附在后面
+  assert.deepEqual(r.groups.map((g) => g.id), ['a', 'b', 'z']);
+  assert.equal(r.groups[0].title, '自定义标题A');
+});
+
+test('mergeTemplate 字段插到「模板序前驱」之后，不会被甩到末尾', () => {
+  const section = {
+    groups: [{ id: 'g', title: 'g' }],
+    fields: [
+      { key: 'x1', type: 'text', group: 'g' },
+      { key: 'x3', type: 'text', group: 'g' },
+    ],
+  };
+  const template = {
+    groups: [{ id: 'g', title: 'g' }],
+    fields: [
+      { key: 'x1', type: 'text', group: 'g' },
+      { key: 'x2', type: 'text', group: 'g' }, // 缺失，应插在 x1 与 x3 之间
+      { key: 'x3', type: 'text', group: 'g' },
+    ],
+  };
+  const r = mergeTemplate(section, template);
+  assert.deepEqual(r.fields.map((f) => f.key), ['x1', 'x2', 'x3']);
+});
+
+test('section sync 把模板新增的 file 字段/分组补给老栏目，且可重复执行', async () => {
+  // 造一个「老栏目」：从 job 模板建，然后删掉文件字段与 files 分组（模拟模板演进前建的栏目）
+  await service.addSection({ id: 'jobsync', title: '求职(旧)', template: 'job' });
+  await service.updateSection('jobsync', {
+    fields: [
+      { key: 'name', label: '姓名', type: 'text', group: 'basic' },
+    ],
+    groups: [{ id: 'basic', title: '基本信息' }],
+  });
+
+  const before = await service.getSection('jobsync');
+  assert.ok(!before.fieldList.some((f) => f.type === 'file'), '造数据：不该还有 file 字段');
+
+  const r = await service.syncSection('jobsync');
+  assert.equal(r.status, 'ok');
+  assert.ok(r.addedFields.includes('resumeFile'));
+  assert.ok(r.addedFields.includes('avatar'));
+  assert.ok(r.addedGroups.includes('files'));
+
+  const after = await service.getSection('jobsync');
+  assert.ok(after.fieldList.some((f) => f.key === 'resumeFile' && f.type === 'file'));
+  assert.ok(after.fieldList.some((f) => f.key === 'avatar' && f.type === 'file'));
+  assert.ok(after.groupList.some((g) => g.id === 'files'));
+  // 原有字段没被动
+  assert.equal(after.fieldList.find((f) => f.key === 'name').label, '姓名');
+
+  // 幂等：再跑一次没有可补的
+  const again = await service.syncSection('jobsync');
+  assert.equal(again.upToDate, true);
+  assert.deepEqual(again.addedFields, []);
+});
+
+test('section sync 对非模板栏目报错（没有模板可同步）', async () => {
+  await service.addSection({ id: 'customsec', title: '自定义', fields: [{ key: 'a', label: 'A', type: 'text' }] });
+  await assert.rejects(service.syncSection('customsec'), /模板/);
+});
+
+test('renderSectionChange 覆盖 sync / upToDate 分支', () => {
+  const synced = renderSectionChange({ status: 'ok', id: 'job', addedGroups: ['files'], addedFields: ['resumeFile'], snapshot: 'S' });
+  assert.match(synced, /已同步栏目 job/);
+  assert.match(synced, /新增字段 resumeFile/);
+  const up = renderSectionChange({ status: 'ok', upToDate: true, id: 'job' });
+  assert.match(up, /已是最新/);
 });

@@ -320,6 +320,55 @@ export function syncSectionGroups(groups, fields) {
   return out;
 }
 
+/**
+ * 模板增量合并：把模板里**尚未出现在栏目**的分组与字段补进去（只增，绝不改/删）。
+ *
+ * 为什么需要它：栏目实例化时字段字典是**深拷贝**（见 instantiateTemplate），
+ * 从此「栏目自己的字段集独立演化」。于是模板后续新增的字段（例如给求职加
+ * 「附件资料」组的 4 个 `file` 字段）**不会回溯**到已经存在的栏目——
+ * 面板按栏目自己的字典渲染，老栏目里就永远看不到上传入口。
+ *
+ * 合并规则（尽量少动用户数据）：
+ *   - 分组：按模板顺序排列；栏目已有的分组**沿用栏目自己的定义**（标题可能被改过），
+ *     模板没有的自定义分组原顺序附在后面。
+ *   - 字段：栏目已有的字段原样保留（含用户改过的 label/hint/fill）；缺的模板字段
+ *     插到「模板顺序里它前一个字段」之后，未在模板中的自定义字段保持原位。
+ */
+export function mergeTemplate(section, template) {
+  const existingGroups = section?.groups || [];
+  const existingFields = section?.fields || [];
+  const groupById = new Map(existingGroups.map((g) => [g.id, g]));
+  const fieldKeys = new Set(existingFields.map((f) => f.key));
+
+  const groups = [];
+  const seenGroup = new Set();
+  for (const g of template?.groups || []) {
+    groups.push(groupById.get(g.id) || { ...g });
+    seenGroup.add(g.id);
+  }
+  for (const g of existingGroups) if (!seenGroup.has(g.id)) groups.push(g);
+  const addedGroups = (template?.groups || []).filter((g) => !existingGroups.some((x) => x.id === g.id)).map((g) => g.id);
+
+  const tplOrder = new Map((template?.fields || []).map((f, i) => [f.key, i]));
+  const fields = [...existingFields];
+  const addedFields = [];
+  for (const tf of template?.fields || []) {
+    if (fieldKeys.has(tf.key)) continue;
+    // 插到第一个「模板序更靠后」的既有字段之前；找不到就追加到末尾
+    const ti = tplOrder.get(tf.key);
+    let insertAt = fields.length;
+    for (let i = 0; i < fields.length; i += 1) {
+      const oi = tplOrder.get(fields[i].key);
+      if (oi !== undefined && oi > ti) { insertAt = i; break; }
+    }
+    fields.splice(insertAt, 0, { ...tf });
+    fieldKeys.add(tf.key);
+    addedFields.push(tf.key);
+  }
+
+  return { groups, fields, addedGroups, addedFields };
+}
+
 export function fieldByKey(section, key) {
   return (section?.fields || []).find((x) => x.key === key) || null;
 }
