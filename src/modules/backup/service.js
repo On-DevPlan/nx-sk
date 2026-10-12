@@ -39,8 +39,8 @@ function passwordFrom(ctx) {
 }
 
 /**
- * 把 payload 里 secret 栏目的密文字段解开成明文（不修改其他字段）。
- * 用本机 vaultKey 解：A 机本地能解；导出文件不依赖 A 机后续状态。
+ * 导出时：用本机 vaultKey **解开** secret 栏目的密文字段。
+ * 导出文件不再依赖 A 机的 ~/.vaultkey / NX_SK_PASSPHRASE。
  */
 async function unsealSecretsForExport(payload) {
   const sections = payload.sections || [];
@@ -64,6 +64,38 @@ async function unsealSecretsForExport(payload) {
     newEntries.push(touched ? { ...e, values: nextValues } : e);
   }
   return { ...payload, entries: newEntries, _unsealed: unsealed };
+}
+
+/**
+ * 导入时：payload 里的 secret 字段已是明文，**用本机 vaultKey 重新加密**后落盘。
+ * 这样 store.json 里仍是密文（落盘防护不丢），B 机后续 key get 走 B 机 vaultKey 解密。
+ * 历史 store 里残留的明文 secret 也会被本步统一收紧成密文。
+ */
+async function resealSecretsForImport(payload) {
+  const sections = payload.sections || [];
+  const entries = payload.entries || [];
+  const { key: vaultKey } = await resolveVaultKey();
+
+  const newEntries = [];
+  let resealed = 0;
+  for (const e of entries) {
+    const sec = sections.find((s) => s.id === e.section);
+    if (!sec || !e.values) { newEntries.push(e); continue; }
+    const nextValues = { ...e.values };
+    let touched = false;
+    for (const def of sec.fields || []) {
+      if (!isSensitiveField(sec, def.key)) continue;
+      const v = nextValues[def.key];
+      // 已是本机 vaultKey 加密形态就跳过；明文或旧 kid 都重加密
+      if (isCipherBlob(v) && !v.kid) continue;
+      const plain = isCipherBlob(v) ? decryptValue(vaultKey, v) : (typeof v === 'string' ? v : null);
+      if (plain === null) continue;
+      nextValues[def.key] = encryptValue(vaultKey, plain);
+      touched = true; resealed++;
+    }
+    newEntries.push(touched ? { ...e, values: nextValues } : e);
+  }
+  return { ...payload, entries: newEntries, _resealed: resealed };
 }
 
 /** 生成加密备份：返回归档对象（HTTP 端据此让浏览器下载）与条目计数。 */
@@ -156,7 +188,7 @@ export function decryptBackup(text, password) {
   return { payload, createdAt: archive.createdAt };
 }
 
-/** 恢复：解密 → 留安全快照 → 整份替换（secret 字段已是明文，落盘后下次写入时由 B 机 vaultKey 重新加密）。 */
+/** 恢复：解密整包 → 把 secret 明文用本机 vaultKey 重新加密 → 留安全快照 → 整份替换。 */
 export async function restoreBackup({ content, password, 'dry-run': dryRun }) {
   const { payload, createdAt } = decryptBackup(String(content ?? ''), password);
 
@@ -170,23 +202,26 @@ export async function restoreBackup({ content, password, 'dry-run': dryRun }) {
     };
   }
 
+  // 把 payload 里的 secret 明文用**本机 vaultKey** 重新加密——落回 store.json 仍是密文形态。
+  const resealed = await resealSecretsForImport(payload);
+
   // 覆盖前留一份可回滚快照（落到 backup/ 目录），避免误操作丢数据
   const safety = await snapshotStore('before-restore');
 
   await saveStore({
-    version: payload.version,
-    settings: payload.settings,
-    sections: payload.sections,
-    entries: payload.entries,
-    exports: Array.isArray(payload.exports) ? payload.exports : [],
+    version: resealed.version,
+    settings: resealed.settings,
+    sections: resealed.sections,
+    entries: resealed.entries,
+    exports: Array.isArray(resealed.exports) ? resealed.exports : [],
   });
 
   return {
     status: 'restored',
     backupCreatedAt: createdAt || '',
-    sections: payload.sections.length,
-    entries: payload.entries.length,
-    unsealed: payload._unsealed || 0,
+    sections: resealed.sections.length,
+    entries: resealed.entries.length,
+    resealed: resealed._resealed || 0,
     safetySnapshot: displayPath(safety),
   };
 }
@@ -226,7 +261,7 @@ export function renderRestore(d) {
   }
   return [
     `已从加密备份恢复：${d.sections} 个栏目 / ${d.entries} 条条目`,
-    `从备份中拿到的明文密钥字段: ${d.unsealed || 0} 个`,
+    `用本机密钥库重新加密的密钥字段: ${d.resealed || 0} 个`,
     `备份生成于: ${d.backupCreatedAt || '未知'}`,
     `恢复前的当前数据已留安全快照: ${d.safetySnapshot}`,
   ].join('\n');

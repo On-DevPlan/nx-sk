@@ -227,7 +227,7 @@ step('export list 给出历史与目录内文件', exportList.history.length >= 
 
 // ── 加密备份 + 跨机器口令解开 ────────────────────────────────
 // 关键回归：A 机 export --password 出的 .nxskbak 在 B 机（换了 vaultkey）
-// 用口令导入后能直接 key get 出明文。导出时 secret 字段被解开为明文。
+// 用口令导入后，secret 字段已用 B 机 vaultKey 重新加密、key get 能解出原文。
 const backupText = await (async () => {
   const { code, out } = await cli(['backup', 'export', '--password', 'smoke-pw-123', '--out', join(home, 'backup')]);
   assert.equal(code, 0, `backup export 失败: ${out}`);
@@ -242,7 +242,7 @@ step('加密备份文件包含归档头', archiveJson.kind === 'encrypted-backup
 const { decryptBackup } = await import(BACKUP_SERVICE);
 const decoded = decryptBackup(backupText, 'smoke-pw-123').payload;
 const secrets = decoded.entries.filter((e) => e.section === 'secret');
-step('解密后 secret 字段已是明文（不再带密文对象）',
+step('导出时 secret 字段被解开为明文（不再带密文对象）',
   secrets.length === 1 && typeof secrets[0].values.value === 'string');
 
 // 模拟「换机器」：先在 B 机器上跑一次解密让 .vaultkey 自动生成，
@@ -279,11 +279,19 @@ const restoredB = await cliJsonB(['backup', 'import', '--password', 'smoke-pw-12
     const xs = await (await import('node:fs/promises')).readdir(join(home, 'backup'));
     return join(home, 'backup', xs.find((n) => n.endsWith('.nxskbak')));
   })())]);
-step('B 机用口令恢复：状态=restored', restoredB.status === 'restored' && restoredB.unsealed === 1);
+step('B 机用口令恢复：状态=restored，resealed=1（用 B 机 vaultKey 重新加密）',
+  restoredB.status === 'restored' && restoredB.resealed === 1);
 
 const gotB = await cliJsonB(['key', 'get', 'SMOKE_KEY']);
 step('B 机恢复后 key get 默认能解出明文（原 vaultkey 完全无关）',
   gotB.value === 'sk-smoke-NEW-0987654321fedcba');
+
+// 落盘后 secret 应当**仍是密文对象**（落盘防护不丢），且 kid 指向 B 机
+const storeB = JSON.parse(await readFile(join(homeB, 'store.json'), 'utf8'));
+const entryB = storeB.entries.find((e) => e.section === 'secret');
+function isCipher(v) { return !!v && typeof v === 'object' && typeof v.ct === 'string' && typeof v.iv === 'string'; }
+step('导入后 secret 落盘仍是密文（已用 B 机 vaultKey 重新加密）',
+  !!entryB && isCipher(entryB.values.value));
 
 // 错误口令在 B 机也明确报错
 const wrongPw = await cliB(['backup', 'import', '--password', 'wrong-pw-12345', '--file',
