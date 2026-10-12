@@ -74,6 +74,24 @@ export default function SectionsView() {
     await load();
   });
 
+  // 按模板补齐：模板新增的字段不会回溯到已建栏目，这里把缺口补上（只增不改不删）
+  const syncFields = guard(async (m) => {
+    const r = await api(`/api/sections/${encodeURIComponent(m.id)}/sync`, { method: 'POST' });
+    if (r.upToDate) {
+      toast('已是最新，模板里没有需要补的字段');
+      return;
+    }
+    const bits = [
+      r.addedGroups?.length ? `分组 ${r.addedGroups.join('、')}` : '',
+      r.addedFields?.length ? `字段 ${r.addedFields.join('、')}` : '',
+    ].filter(Boolean).join('；');
+    toast(`已按模板补齐：${bits || '无变化'}`);
+    const fresh = await api(`/api/sections/${encodeURIComponent(m.id)}`);
+    setModal({ ...m, full: fresh });
+    await load();
+    await reload();
+  });
+
   const removeField = guard(async (m, key) => {
     const ok = await dialog({ message: `从字段字典里删掉「${key}」？已填的值会留在条目里（只是不再显示/校验）。`, danger: true, confirmText: '删除字段' });
     if (!ok) return;
@@ -157,6 +175,7 @@ export default function SectionsView() {
               modal={modal}
               onChange={(f) => setModal((m) => ({ ...m, form: { ...m.form, ...f } }))}
               onSave={() => saveEdit(modal)}
+              onSync={() => syncFields(modal)}
               onAddField={(def) => addField(modal, def)}
               onRemoveField={(key) => removeField(modal, key)}
               onClose={() => setModal(null)}
@@ -212,7 +231,7 @@ function CreateForm({ templates, form, onChange, onSubmit }) {
   );
 }
 
-function EditForm({ modal, onChange, onSave, onAddField, onRemoveField, onClose }) {
+function EditForm({ modal, onChange, onSave, onSync, onAddField, onRemoveField, onClose }) {
   const [nf, setNf] = useState({ key: '', label: '', type: 'text', group: '' });
   const full = modal.full;
   const groups = full?.groupList || [];
@@ -247,8 +266,17 @@ function EditForm({ modal, onChange, onSave, onAddField, onRemoveField, onClose 
       </div>
       <div className="rowgap">
         <button className="btn" onClick={onSave}>保存栏目属性</button>
+        {full?.template ? (
+          <button className="btn ghost" onClick={onSync} title={`按模板「${full.template}」补齐新增的分组与字段（只增不改不删）`}>同步模板字段</button>
+        ) : null}
         <button className="btn ghost" onClick={onClose}>关闭</button>
       </div>
+      {full?.template ? (
+        <div className="hint">
+          本栏目由模板「{full.template}」创建。模板后来新增的字段**不会自动**出现在这里，
+          点「同步模板字段」补齐（例如求职模板新增的「附件资料」组 / 简历、头像等 file 字段）。
+        </div>
+      ) : null}
 
       <div className="card" style={{ border: '1px solid var(--soft-2)', borderRadius: 4 }}>
         <div className="colhead">字段字典（{full?.fieldList?.length || 0}）</div>

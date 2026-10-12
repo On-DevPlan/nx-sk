@@ -113,6 +113,7 @@ CLI 与 API 同源，skill 驱动 agent**。落到具体功能上：
 | `nx-sk section list \| get \| add \| update \| remove` | 栏目 CRUD |
 | `nx-sk section dump <id> [--mask]` | **一个栏目的全部信息**：字段台账 + 全部条目 + 每个条目的未填清单 |
 | `nx-sk section templates` | 内置模板（job / secret） |
+| `nx-sk section sync <id> [--dry-run]` | 按模板**补齐**本栏目缺的分组与字段（只增不改不删）——模板演进后让老栏目追上 |
 | `nx-sk entry list \| get \| add \| update \| remove` | 条目 CRUD（PATCH 语义） |
 | `nx-sk entry fields [--section job]` | 字段字典 —— 填之前先看这个，别猜字段名 |
 | `nx-sk file list \| get \| add \| update \| remove` | 附件 CRUD（原件在 `~/nx-sk/files/`，同内容去重） |
@@ -189,6 +190,11 @@ nx-sk file get $FID                             # 反查「被引用：求职 / 
 工作台支持拖拽 / 点按钮上传、本机路径导入、搜索、图片缩略图、内联预览、下载、复制物理路径 / 链接、
 编辑名称与备注、还原。求职条目表单的「附件资料」组里，
 **简历附件 / 头像图片 / 成绩单 / 证书扫描件** 直接就地「上传文件」或从库里选。
+
+> **看不到这些上传框？** 栏目的字段字典是**持久化数据**：栏目在实例化时把模板字段**深拷贝**下来，
+> 此后独立演化，所以**模板后来新增的字段不会自动出现在已建好的栏目里**。
+> 若你的求职栏目是很早建的，跑一次 `nx-sk section sync job`（或面板「栏目 → 编辑 → 同步模板字段」）
+> 就能把模板新增的「附件资料」组与 4 个 `file` 字段补进来，且不改动你已有的字段与数据。
 
 整体导出（凭据默认**含明文**——本机自己用；要分享给别人时加 `--no-secrets` 打码）：
 
