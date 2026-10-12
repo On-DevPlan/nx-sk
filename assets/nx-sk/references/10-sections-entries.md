@@ -25,13 +25,18 @@ store.json（~/nx-sk/store.json 或 $NX_SK_STORE）
 | 修改 | `nx-sk section update <id> [--title …] [--add-field '{…}'] [--remove-field a --remove-field b]` | `PATCH /api/sections/:ref` |
 | 删除 | `nx-sk section remove <id> [--force]` | `DELETE /api/sections/:ref` |
 | **全量** | `nx-sk section dump <id> [--mask]` | `GET /api/sections/:ref/dump` |
+| **同步模板** | `nx-sk section sync <id> [--dry-run]` | `POST /api/sections/:ref/sync` |
 | 模板 | `nx-sk section templates` | `GET /api/sections/templates` |
 
 - **`remove` 在栏目非空时会被 `blocked` 挡住**（除非 `--force`）——防止一键抹掉全部档案。
 - `remove` 目标不存在时**报 `NOT_FOUND`**（不静默成功），就是为了让「打错一个字」当场暴露。
 - `dump` 是「快速获得一个栏目的全部信息」的正解：字段字典 + 全部条目 + 每个条目的完整度与**未填清单**。
+- **`sync` 按模板补齐字段**：栏目字段字典是**持久化数据**——实例化时深拷贝模板字段，此后独立演化，
+  所以模板**后来**新增的分组与字段不会自动出现在老栏目里（典型症状：求职没显示附件上传框）。
+  `section sync <id>` 把模板有、本栏目还缺的分组与字段补进来（**只增不改不删**，保持模板顺序；
+  已有字段含改过的 label / hint / fill 原样保留），带快照与 `--dry-run`；面板侧是「栏目 → 编辑 → 同步模板字段」。
 
-内置模板 5 个：`job`（求职 / 个人信息，75 字段 / 9 分组）、`projects`（项目经历）、`internships`（实习/工作经历）、`campus`（校内职务/实践）、`secret`（密钥，**单字段 KV**——细节见 `20-secrets`）。三类经历栏目（projects / internships / campus）**一个项目 / 一段经历 = 一个条目**，角色、时间、技术栈都是独立字段——不要往 job 栏目里塞经历。
+内置模板 5 个：`job`（求职 / 个人信息，79 字段 / 10 分组——含「附件资料」组：简历附件 / 头像图片 / 成绩单 / 证书扫描件）、`projects`（项目经历）、`internships`（实习/工作经历）、`campus`（校内职务/实践）、`secret`（密钥，**单字段 KV**——细节见 `20-secrets`）。三类经历栏目（projects / internships / campus）**一个项目 / 一段经历 = 一个条目**，角色、时间、技术栈都是独立字段——不要往 job 栏目里塞经历。
 
 ## 三、条目命令
 
@@ -110,9 +115,12 @@ nx-sk section update job --remove-field blog
 nx-sk section update job --fields @fields.json
 ```
 
-字段定义支持：`key`（字母开头）、`label`、`type`（`text|textarea|number|date|month|bool|select|tags|secret`）、
+字段定义支持：`key`（字母开头）、`label`、`type`（`text|textarea|number|date|month|bool|select|tags|secret|file`）、
 `group`、`hint`、`options`（候选项）、`sensitive`（true 则密文落盘）、`maxItems`（tags 上限）、
 `fill`（填写策略，见下）。
+
+> `type: 'file'` 是**附件字段**：值存的是一个**附件 id**（不是路径），导入原件、附件库台账、
+> 以及「文件统一放 `~/nx-sk/files/`」的完整口径见 `40-files`。
 
 > `select` 的 `options` 是**候选项不是白名单**：真实值（如某个少数民族）不在候选里也允许写入。
 

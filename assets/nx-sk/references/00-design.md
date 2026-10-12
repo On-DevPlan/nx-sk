@@ -18,7 +18,7 @@
                        ▼                            ▼
                 service 层（业务）              CLI（同一条链）
                        ▼                            │
-         core（存储 / 密文 / 字段字典 / 渲染）          │
+         core（存储 / 密文 / 字段字典 / 附件 / 渲染）  │
                                                     ▼
                           skill install ──► ~/.claude/skills ──► agent
 ```
@@ -31,7 +31,7 @@
 ## 二、分层与依赖方向
 
 ```
-core/       零业务语义：paths / errors / store / fsx / crypto / vault / fields / render / ids / open
+core/       零业务语义：paths / errors / store / fsx / crypto / vault / fields / attachments / render / ids / open
 modules/    功能域，每个自包含：index.js(声明) + service.js(业务) + view.jsx(面板)
 runtime/    装配层：registry / spec / cli / api / server —— 不写业务
 web/frontend/  React 壳，只 import 各模块的 view.jsx
@@ -114,3 +114,4 @@ CLI 侧这四个取值分别渲染成不同的可读提示，退出码只有「�
 | 前端 import 了 `node:*` 或 `core/` | Vite 把 Node 侧代码打进浏览器包，dev 模式白屏 | lint 的 `files` 同时覆盖 `view.jsx`，禁掉 `node:*` / `core` / `runtime` / `service.js` |
 | 新增模块忘了往 eslint 互依禁列里补一行 | **静默**：新模块变成「谁都可以依赖」，且规则随模块数增加持续衰减 | 在禁列旁留注释说明它是**逐模块枚举**的、漏补是静默的；加模块前先读 `eslint.config.js` |
 | 代理前缀 `/api` 与前端源码目录 `api/` 撞车 | 只在 dev 模式整页白屏，报错却是 404 / ECONNREFUSED，离根因很远 | vite 代理加 `bypass`，按「是不是前端资源」分流；并用测试钉住 `shouldServeLocally` |
+| 把附件的「上传 / 选择」放到附件中心，再让条目去引用 | 条目里看不到上传入口，用户不知道该在哪儿加文件；附件中心还被迫预定义分类与槽位，跟栏目脱节 | **上传 / 选择发生在栏目条目里**（`file` 字段的值 = 附件 id）；附件中心由栏目驱动、只做统一展示与库存管理，**不预定义分类、不做指派** |

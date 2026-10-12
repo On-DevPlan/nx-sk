@@ -101,12 +101,14 @@ nx-sk file get f_xxxx                             # 反查「被引用：求职 
 | `10-sections-entries` | **动手填/改信息时必读**——栏目与条目的完整命令、AI 补全个人信息的推荐流程、字段字典怎么扩、读命令与写命令的参数陷阱 |
 | `20-secrets` | 存/读大模型 key、密文机制、密钥来源（环境变量 vs 本机密钥文件）、什么时候会解不开 |
 | `30-export-backup` | 整体导出、只导出某个栏目、快照与回滚、明文密钥的取舍 |
+| `40-files` | **传/换简历头像成绩单等二进制原件时读**——附件库台账、导入（默认移动）与还原、`file` 字段怎么和条目建立链接、附件中心为什么由栏目驱动、看不到上传字段怎么办 |
 
 取 ref 全文（外部 agent 用这条，不必进终端翻文件）：
 
 ```bash
 nx-sk skill get nx-sk                          # SKILL.md 全文
 nx-sk skill get nx-sk 10-sections-entries      # 裸名 → references/10-sections-entries.md
+nx-sk skill get nx-sk 40-files                 # 附件库：导入 / 链接 / 还原
 nx-sk skill get nx-sk references/20-secrets.md # 也可写完整路径
 nx-sk skill get nx-sk --json                   # 四元 JSON：{skillName, ref, content, contentBytes, install}
 ```
