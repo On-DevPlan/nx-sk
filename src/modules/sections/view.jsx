@@ -3,7 +3,7 @@ import { api } from '../../web/frontend/api/client.js';
 import { useStore } from '../../web/frontend/store.jsx';
 import { CliHints, Empty, Modal, Tag } from '../../web/frontend/components/ui.jsx';
 
-const TYPES = ['text', 'textarea', 'number', 'date', 'month', 'bool', 'select', 'tags', 'secret'];
+const TYPES = ['text', 'textarea', 'number', 'date', 'month', 'bool', 'select', 'tags', 'secret', 'file'];
 
 export default function SectionsView() {
   const { reload, toast, guard, dialog } = useStore();

@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { displayPath, snapshotDir, storeFile } from './paths.js';
 import { ensureDir, pathExists, writeAtomic, writeJsonAtomic } from './fsx.js';
 import { instantiateTemplate, seedSections, syncSectionGroups } from './fields.js';
+import { normalizeFileRecord } from './attachments.js';
 import { nowIso, stamp } from './ids.js';
 
 /** v2：密钥栏目从 8 字段模板改成单字段 KV（名称 → 值）。
@@ -32,6 +33,7 @@ function emptyStore(seed) {
     // 说明用户自己删光了栏目——这时候再播种会把它变回来，等于删不掉。
     sections: seed ? seedSections(at) : [],
     entries: [],
+    files: [],
     exports: [],
   };
 }
@@ -176,6 +178,7 @@ export function normalize(data) {
   delete base.settings.kvSection;
   base.sections = (Array.isArray(data.sections) ? data.sections : []).map(normalizeSection).filter(Boolean);
   base.entries = (Array.isArray(data.entries) ? data.entries : []).map(normalizeEntry).filter(Boolean);
+  base.files = (Array.isArray(data.files) ? data.files : []).map(normalizeFileRecord).filter(Boolean);
   base.exports = Array.isArray(data.exports) ? data.exports.slice(0, MAX_EXPORT_HISTORY) : [];
   if (oldVersion < 2) base._migration = migrateSecretToKv(base);
   if (oldVersion < 3) {

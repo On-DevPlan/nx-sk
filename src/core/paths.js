@@ -50,6 +50,11 @@ export function exportDir() {
   return join(appHome(), 'export');
 }
 
+/** 附件统一存储目录：`~/nx-sk/files/`（简历、头像、成绩单等二进制原件都落在这里）。 */
+export function filesDir() {
+  return join(appHome(), 'files');
+}
+
 export function snapshotDir() {
   return join(appHome(), 'backup');
 }

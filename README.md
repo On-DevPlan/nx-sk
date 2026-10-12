@@ -115,6 +115,12 @@ CLI 与 API 同源，skill 驱动 agent**。落到具体功能上：
 | `nx-sk section templates` | 内置模板（job / secret） |
 | `nx-sk entry list \| get \| add \| update \| remove` | 条目 CRUD（PATCH 语义） |
 | `nx-sk entry fields [--section job]` | 字段字典 —— 填之前先看这个，别猜字段名 |
+| `nx-sk file list \| get \| add \| update \| remove` | 附件 CRUD（原件在 `~/nx-sk/files/`，同内容去重） |
+| `nx-sk file add --path <文件> [--copy] [--category C]` | 导入附件：**默认移动原件**，`--copy` 仅复制 |
+| `nx-sk file list [--section <栏目\|none>] [--q 关键字]` | 列附件：按「哪些栏目在引用」筛选（`none` = 未引用）；返回栏目汇总与存储目录 |
+| `nx-sk file restore <id> [--to DIR] [--copy]` | **可逆**：移回原始位置并撤销台账；`--copy` 只导出副本 |
+| `nx-sk file content <id>` | 浏览器链接（内联预览 / `?download=1` 下载）；CLI 打印物理路径 |
+| `nx-sk file open <id>` | 用系统默认程序打开原件 |
 | `nx-sk export run [--format json\|md\|both] [--section id] [--with-secrets] [--out DIR] [--dry-run]` | 整体导出 |
 | `nx-sk export list` | 历次导出与目录内文件 |
 | `nx-sk backup export [--password 口令] [--out DIR] [--dry-run]` | 口令对称加密整库，导出单个 `.nxskbak`（口令不落盘） |
@@ -156,6 +162,34 @@ nx-sk key remove OPENAI_KEY               # 删除，写前自动留快照
 状态与栏目一样：`key *` 只是 `entry *` 的语法糖（同模块、同一批 service 函数），
 作用在 `settings.kvSection` 指向的单字段栏目上（默认 `secret`）。
 
+统一附件管理（简历、头像、成绩单等原件都收进 `~/nx-sk/files/`）：
+
+```bash
+nx-sk file add --path "D:\简历\张三-简历.pdf"   # 默认移动原件进库
+nx-sk file list                                  # 台账：按栏目汇总 + 被引用情况
+nx-sk file list --section none                   # 只看还没有条目引用的
+nx-sk file restore f_xxxx                        # 可逆：移回原始位置、撤销台账
+nx-sk file restore f_xxxx --to "D:\资料" --copy  # 或导出副本到指定目录
+```
+
+**附件怎么被条目引用**：条目的 `file` 字段存的就是**附件的 id**。id 全局唯一，
+所以每条条目各有各的附件、互不串台；同一份原件也能被多条条目引用（sha256 去重后是同一条）。
+**上传 / 选择发生在栏目条目的字段里**（求职 → 张三 → 「简历附件」直接上传或从库里选），
+不在附件中心做指派：
+
+```bash
+FID=$(nx-sk file add --path "D:\简历\张三-简历.pdf" --json | 取 id)
+nx-sk entry update 张三 --set resumeFile=$FID   # 字段值就是附件 id
+nx-sk entry get 张三 --section job              # 该字段随即显示附件名与物理路径
+nx-sk file get $FID                             # 反查「被引用：求职 / 张三 / 简历附件」
+```
+
+**「附件」中心由栏目驱动、不预定义任何分类或槽位**：它只展示当前库里存在的原件，
+筛选片按「哪些栏目在引用附件」生成（外加「未引用」），每张卡片显示被哪个栏目/条目/字段引用。
+工作台支持拖拽 / 点按钮上传、本机路径导入、搜索、图片缩略图、内联预览、下载、复制物理路径 / 链接、
+编辑名称与备注、还原。求职条目表单的「附件资料」组里，
+**简历附件 / 头像图片 / 成绩单 / 证书扫描件** 直接就地「上传文件」或从库里选。
+
 整体导出（凭据默认**含明文**——本机自己用；要分享给别人时加 `--no-secrets` 打码）：
 
 ```bash
@@ -184,6 +218,7 @@ Web 面板的「加密备份」页同样支持：导出在浏览器下载 `.nxsk
 | 密文密钥 | 环境变量 `NX_SK_PASSPHRASE`（scrypt 派生 + 盐）优先，否则 `~/nx-sk/.vaultkey`（32 字节随机，0600） |
 | 快照 | 每次破坏性写入前整库备份到 `~/nx-sk/backup/`（最多 20 份），拷回即回滚 |
 | 导出 | `~/nx-sk/export/`，默认不含凭据明文 |
+| 附件 | `~/nx-sk/files/` 存二进制原件，元数据在 `store.json` 的 `files`（sha256 去重；条目 `file` 字段存附件 id 即建立链接；`file restore` 可逆） |
 | 加密备份 | `.nxskbak`：整库经 scrypt(口令)+AES-256-GCM 加密，口令不落盘；恢复前自动留安全快照 |
 | 服务绑定 | 默认 `127.0.0.1`，不暴露到局域网；写操作校验 `Origin` |
 | 数据损坏 | `store.json` 解析失败会先被改名为 `.corrupt-<时间戳>.json`，不会静默覆盖 |

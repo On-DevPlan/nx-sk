@@ -300,3 +300,79 @@ pre.block {
 .col { flex: 1; min-width: 0; }
 .desc { color: var(--mid); }
 .cols > .col > .card { border: var(--border); border-radius: 4px; }
+
+/* ── 附件工作台 ─────────────────────────────────────── */
+.files-page { min-height: 100%; position: relative; }
+.files-page.drag-over { outline: 2px dashed var(--ink); outline-offset: -8px; background: var(--soft); }
+.tab.small { height: 22px; padding: 0 8px; font-size: 11px; border-radius: 6px; }
+.file-filters { padding-top: 4px; padding-bottom: 4px; }
+.drop-hint {
+  margin: 0 14px; padding: 18px; text-align: center;
+  border: 1px dashed var(--ink); border-radius: 8px;
+  background: var(--paper); font-weight: 600;
+}
+
+.file-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 10px;
+}
+.file-card {
+  display: flex;
+  flex-direction: column;
+  border: var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--paper);
+}
+.file-thumb {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 120px;
+  background: var(--soft);
+  border-bottom: var(--border);
+}
+.file-thumb img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.ext-badge {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: var(--mid);
+  font-family: ui-monospace, Consolas, monospace;
+}
+.file-meta { padding: 8px 10px 4px; display: flex; flex-direction: column; gap: 4px; }
+a.file-name {
+  color: var(--ink);
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+a.file-name:hover { text-decoration: underline; }
+.file-acts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px 8px;
+  margin-top: auto;
+}
+.btn.ghost.danger-ghost { color: var(--danger); }
+
+/* ── 字段里的附件选择器 ─────────────────────────────── */
+.file-picker { display: flex; flex-direction: column; gap: 4px; }
+.file-picker .file-pick-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.file-picker select { flex: 1; min-width: 120px; }
+.file-preview {
+  display: flex; align-items: center; gap: 8px;
+  border: var(--border); border-radius: 6px; padding: 4px 8px;
+  background: var(--soft);
+}
+.file-preview img { width: 40px; height: 40px; object-fit: cover; border-radius: 4px; border: var(--border); background: #fff; }
+.file-preview .file-preview-name {
+  color: var(--ink); text-decoration: none; font-weight: 600;
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.file-preview .file-preview-name:hover { text-decoration: underline; }
