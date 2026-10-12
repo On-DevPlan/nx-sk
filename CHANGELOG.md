@@ -2,6 +2,21 @@
 
 本文件格式参考 [Keep a Changelog](https://keepachangelog.com/)，中文正文。
 
+## [0.6.0] - 2026-10-12
+
+### Added
+
+- **agent 手册补齐附件域**：随包分发的 `assets/nx-sk/` 新增 `references/40-files.md`（附件库：导入默认移动、`file` 字段值 = 附件 id 的链接、可逆还原、附件中心为什么由栏目驱动、看不到上传字段怎么办），并在 `SKILL.md` 与 `README.md` 的 ref 路由表登记；同步修订 `10-sections-entries`（求职模板 79 字段 / 10 分组、字段类型表补 `file`、栏目命令补 `sync`）与 `00-design`（core 清单补 `attachments`、错误案例补附件组织方式的取舍）。
+
+### Changed
+
+- **顶栏层级重排**：品牌升为标题（15px / 700），副标题与版本号降为从属元信息并整体右移，超长存储路径自动省略（完整值在 `title`）；身份栏与导航栏拉开 padding 差异，并在「内容栏目」与「系统工具」之间加一条分组细线；计数降为等宽小字。
+
+### Fixed
+
+- **默认视图被顶成「栏目」**：`/api/bootstrap` 返回前用静态视图兜底并写回 ui 状态，导致默认视图与头部高亮错位（首屏还会覆盖 `#/job` 这类深链）；改用 `booted` 门控——未拿到 bootstrap 就显示「正在装载…」，不兜底、不写入。顺带清理已无定义的 `header.top .meta` 样式，残留处改用已有的 `.muted`。
+- **CI 跨平台单测**：附件单测里 `join('\\')` 拼路径只在 Windows 成立，ubuntu 上 ENOENT——0.5.0 / 0.5.1 因此都没发出去；改为跨平台 `join(...rel.split('/'))`。
+
 ## [0.5.1] - 2026-10-12
 
 ### Fixed

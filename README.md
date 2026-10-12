@@ -258,7 +258,7 @@ nx-sk skill get nx-sk 10-sections-entries   # 裸名 → references/10-sections-
 ## 开发
 
 ```bash
-pnpm test        # = lint + build + 冒烟（91 项断言） + 单测（116 项）
+pnpm test        # = lint + build + 冒烟（98 项断言） + 单测（116 项）
 ```
 
 | 目录 | 职责 |
