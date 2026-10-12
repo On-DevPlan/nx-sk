@@ -2,6 +2,12 @@
 
 本文件格式参考 [Keep a Changelog](https://keepachangelog.com/)，中文正文。
 
+## [0.6.2] - 2026-10-12
+
+### Fixed
+
+- **加密备份：跨机器恢复后 store.json 里 secret 字段仍是密文**。0.6.1 把 secret 字段解开成明文后直接落回 store.json——丢了本机「落盘密文」防护。回归到 0.5.1 的设计：导出时用本机 vaultKey **解开** secret 字段、整包口令加密入 `.nxskbak`；导入时解开整包后**用本机 vaultKey 重新加密** secret 字段再写回 store.json。两条安全边界各自独立：本地靠 vaultKey、传递靠口令。
+
 ## [0.6.1] - 2026-10-12
 
 ### Changed
