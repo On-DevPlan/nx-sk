@@ -2,6 +2,12 @@
 
 本文件格式参考 [Keep a Changelog](https://keepachangelog.com/)，中文正文。
 
+## [0.5.1] - 2026-10-12
+
+### Fixed
+
+- **加密备份跨机器恢复后密钥栏目无法解开**（原始事故：用户将 A 机 `backup export --password` 出的 `.nxskbak` 文件拷贝到 B 机再 `backup import` 后，B 机 `key get` 报「密钥或密文与写入时不一致」）。原因：原备份包只对整包加密，**包内密文字段仍用 A 机的 `~/.vaultkey` / `NX_SK_PASSPHRASE` 派生 kid**——B 机的本地密钥与其不一致，GCM 校验失败。修法：导出时给每条密文追加一个口令派生的 `reWrapped` 副本；导入时解开 `reWrapped` 拿明文、用 B 机本机 vaultKey 重新加密后写回主字段、`reWrapped` 丢弃——B 机后续 `key get` 走的就是 B 机的本机密钥。备份包不再依赖导出机的本地密钥状态；同时给 smoke 加了「换 vaultkey 后口令导入仍能解出明文」的端到端断言。
+
 ## [0.5.0] - 2026-10-12
 
 ### Added

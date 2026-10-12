@@ -5,15 +5,26 @@
 //
 // 复用 core/crypto.js 的原语（deriveKey / encryptValue / decryptValue），
 // 与字段级密钥库（core/vault.js）相互独立：备份口令是一次性的，不写进 vault。
+//
+// 跨机器恢复：store.json 里凭据原本是「本机 vault key（AES-256-GCM + kid）」加密的，
+// 备份打包会把这份密文**再裹一层**——用备份口令派生 key 重加密一份副本，写进
+// `reWrapped`。导入时先解开 reWrapped 拿明文，再用**目标机器**的 vault key 重新加密，
+// 写回主字段、丢掉 reWrapped。这样：
+//   - 备份包在 A 机器上能独立解开（不依赖 A 的 ~/.vaultkey / NX_SK_PASSPHRASE）
+//   - 导入 B 机器后，凭据绑的是 B 的本地密钥，跟其他密文一样走 decryptValue
+//   - 没有「reWrapped 的密文只能输口令解」的尾巴——一次导入就兑回本机
+// 没有 reWrapped 的密文（早期版本/未带口令的导出）依然走 kid 校验；换机会得到明确 BLOCKED。
 import fsp from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import { resolve } from 'node:path';
 import { displayPath, snapshotDir } from '../../core/paths.js';
 import { ensureDir, fileSize, pathExists, writeAtomic } from '../../core/fsx.js';
 import { loadStore, saveStore, snapshotStore } from '../../core/store.js';
-import { deriveKey, encryptValue, decryptValue } from '../../core/crypto.js';
+import { decryptValue, deriveKey, encryptValue, isCipherBlob } from '../../core/crypto.js';
 import { badInput, blocked } from '../../core/errors.js';
 import { nowIso, stamp } from '../../core/ids.js';
+import { isSensitiveField } from '../../core/fields.js';
+import { resolveVaultKey } from '../../core/vault.js';
 
 export const BACKUP_KIND = 'encrypted-backup';
 export const BACKUP_VERSION = 1;
@@ -32,11 +43,80 @@ function passwordFrom(ctx) {
   return s;
 }
 
+/**
+ * 给 payload 里的每条密文字段加一层「口令派生的重加密」。
+ *
+ * 输入是 buildBackup 准备好的 store payload；输出是**新对象**，原对象不变。
+ * 已带 reWrapped 的不再二次包——避免循环。
+ */
+async function reWrapSecretsInPlace(payload, password, salt) {
+  const sections = payload.sections || [];
+  const entries = payload.entries || [];
+  const transportKey = deriveKey(password, salt);
+  const { key: vaultKey } = await resolveVaultKey();
+
+  const newEntries = [];
+  let reWrapped = 0;
+  for (const e of entries) {
+    const sec = sections.find((s) => s.id === e.section);
+    if (!sec || !e.values) { newEntries.push(e); continue; }
+    const nextValues = { ...e.values };
+    let touched = false;
+    for (const def of sec.fields || []) {
+      if (!isSensitiveField(sec, def.key)) continue;
+      const v = nextValues[def.key];
+      if (!isCipherBlob(v) || v.reWrapped) continue;
+      // 用本机 vault key 解开 → 用口令派生 key 重加密 → 挂到 reWrapped 上。
+      // 原来的密文保留——A 机用原 vaultKey 仍能解（不动既有逻辑）。
+      const plain = decryptValue(vaultKey, v);
+      nextValues[def.key] = { ...v, reWrapped: encryptValue(transportKey, plain) };
+      touched = true; reWrapped++;
+    }
+    newEntries.push(touched ? { ...e, values: nextValues } : e);
+  }
+  return { ...payload, entries: newEntries, _reWrapped: reWrapped };
+}
+
+/**
+ * 反向：把 reWrapped 副本兑回本机 vault key。
+ * 拿不到口令（密码错）会抛 BLOCKED；拿到口令则静默完成，用户不感知。
+ */
+async function unwrapSecretsToLocal(payload, password, salt) {
+  const sections = payload.sections || [];
+  const entries = payload.entries || [];
+  const transportKey = deriveKey(password, salt);
+  const { key: vaultKey } = await resolveVaultKey();
+
+  const newEntries = [];
+  let unwrapped = 0;
+  for (const e of entries) {
+    const sec = sections.find((s) => s.id === e.section);
+    if (!sec || !e.values) { newEntries.push(e); continue; }
+    const nextValues = { ...e.values };
+    let touched = false;
+    for (const def of sec.fields || []) {
+      if (!isSensitiveField(sec, def.key)) continue;
+      const v = nextValues[def.key];
+      if (!isCipherBlob(v) || !v.reWrapped) continue;
+      const plain = decryptValue(transportKey, v.reWrapped);
+      // tenant 用来保留 A 机原 blob 的非密文字段（如 v/alg）但**不能**包含 iv/ct/tag/kid——
+      // 这些必须来自新的 encryptValue（用本机 vaultKey 生成的）。否则 spread 后会把
+      // 新的 iv/ct/tag 覆盖回 A 机的旧值，写进 store.json 的密文就解不开了。
+      const { reWrapped: _rw, iv: _oldIv, ct: _oldCt, tag: _oldTag, kid: _oldKid, ...tenant } = v;
+      void _rw; void _oldIv; void _oldCt; void _oldTag; void _oldKid;
+      nextValues[def.key] = { ...encryptValue(vaultKey, plain), ...tenant };
+      touched = true; unwrapped++;
+    }
+    newEntries.push(touched ? { ...e, values: nextValues } : e);
+  }
+  return { ...payload, entries: newEntries, _reWrapped: unwrapped };
+}
+
 /** 生成加密备份：返回归档对象（HTTP 端据此让浏览器下载）与条目计数。 */
 export async function buildBackup(ctx) {
   const password = passwordFrom(ctx);
   const store = await loadStore();
-  const payload = {
+  const raw = {
     version: store.version,
     settings: store.settings,
     sections: store.sections,
@@ -45,8 +125,9 @@ export async function buildBackup(ctx) {
   };
 
   const salt = randomBytes(16);
-  const key = deriveKey(password, salt);
-  const data = encryptValue(key, JSON.stringify(payload));
+  const wrapKey = deriveKey(password, salt);
+  const payload = await reWrapSecretsInPlace(raw, password, salt);
+  const data = encryptValue(wrapKey, JSON.stringify(payload));
   const archive = {
     app: 'nx-sk',
     kind: BACKUP_KIND,
@@ -56,7 +137,11 @@ export async function buildBackup(ctx) {
     salt: salt.toString('base64'),
     data,
   };
-  const counts = { sections: store.sections.length, entries: store.entries.length };
+  const counts = {
+    sections: store.sections.length,
+    entries: store.entries.length,
+    reWrapped: payload._reWrapped || 0,
+  };
   if (ctx['dry-run']) return { dryRun: true, counts };
   return { archive, counts };
 }
@@ -97,7 +182,7 @@ function parseArchive(text) {
   return archive;
 }
 
-/** 用口令解密归档文本 → 备份时的 store 负载。口令错误在此抛 BLOCKED。 */
+/** 用口令解密归档文本 → 备份时的 store 负载 + archive（带 salt）。口令错误在此抛 BLOCKED。 */
 export function decryptBackup(text, password) {
   const archive = parseArchive(text);
   if (!String(password ?? '')) throw badInput('请输入备份时设置的口令。');
@@ -114,12 +199,12 @@ export function decryptBackup(text, password) {
   if (!payload || !Array.isArray(payload.sections) || !Array.isArray(payload.entries)) {
     throw badInput('备份内容缺少 sections / entries，无法恢复。');
   }
-  return { payload, createdAt: archive.createdAt };
+  return { payload, createdAt: archive.createdAt, salt: archive.salt };
 }
 
-/** 恢复：解密 → 先给当前数据留安全快照 → 整份替换（写入会过 normalize 迁移到当前版本）。 */
+/** 恢复：解密 → 把 reWrapped 兑回本机 vault key → 留安全快照 → 整份替换。 */
 export async function restoreBackup({ content, password, 'dry-run': dryRun }) {
-  const { payload, createdAt } = decryptBackup(String(content ?? ''), password);
+  const { payload, createdAt, salt } = decryptBackup(String(content ?? ''), password);
 
   if (dryRun) {
     return {
@@ -127,25 +212,31 @@ export async function restoreBackup({ content, password, 'dry-run': dryRun }) {
       backupCreatedAt: createdAt || '',
       sections: payload.sections.length,
       entries: payload.entries.length,
+      reWrapped: payload._reWrapped || 0,
     };
   }
+
+  // 把 reWrapped 兑回本机 vault key：解口令派生密文 → 用本机 vaultKey 重加密。
+  // 失败（口令对但 reWrapped 损坏）会被 unwrapSecretsToLocal 抛 BLOCKED。
+  const unwrapped = await unwrapSecretsToLocal(payload, password, salt);
 
   // 覆盖前留一份可回滚快照（落到 backup/ 目录），避免误操作丢数据
   const safety = await snapshotStore('before-restore');
 
   await saveStore({
-    version: payload.version,
-    settings: payload.settings,
-    sections: payload.sections,
-    entries: payload.entries,
-    exports: Array.isArray(payload.exports) ? payload.exports : [],
+    version: unwrapped.version,
+    settings: unwrapped.settings,
+    sections: unwrapped.sections,
+    entries: unwrapped.entries,
+    exports: Array.isArray(unwrapped.exports) ? unwrapped.exports : [],
   });
 
   return {
     status: 'restored',
     backupCreatedAt: createdAt || '',
-    sections: payload.sections.length,
-    entries: payload.entries.length,
+    sections: unwrapped.sections.length,
+    entries: unwrapped.entries.length,
+    reWrapped: unwrapped._reWrapped || 0,
     safetySnapshot: displayPath(safety),
   };
 }
@@ -166,22 +257,26 @@ export async function importBackup(ctx) {
 
 export function renderBackup(d) {
   if (d.status === 'skipped') {
-    return `试运行（未写盘、未下载）\n将加密备份: ${d.sections} 个栏目 / ${d.entries} 条条目（AES-256-GCM）`;
+    return `试运行（未写盘、未下载）\n将加密备份: ${d.sections} 个栏目 / ${d.entries} 条条目（AES-256-GCM）`
+      + (d.reWrapped ? `\n携带口令派生重加密的密文字段: ${d.reWrapped} 个（其他机器用本次口令可解开）` : '');
   }
   return [
     `已生成加密备份（AES-256-GCM，口令派生密钥、口令不落盘）`,
     `文件: ${d.file}　${d.bytes} 字节`,
     `内容: ${d.sections} 个栏目 / ${d.entries} 条条目`,
+    `携带口令派生重加密的密文字段: ${d.reWrapped || 0} 个（其他机器用本次口令可解开）`,
     `恢复时需要输入本次设置的口令。`,
   ].join('\n');
 }
 
 export function renderRestore(d) {
   if (d.status === 'dry-run') {
-    return `试运行（未改动当前数据）\n备份可正常解密: ${d.sections} 个栏目 / ${d.entries} 条条目，生成于 ${d.backupCreatedAt || '未知'}`;
+    return `试运行（未改动当前数据）\n备份可正常解密: ${d.sections} 个栏目 / ${d.entries} 条条目`
+      + `，含口令派生重加密的密文字段 ${d.reWrapped || 0} 个，生成于 ${d.backupCreatedAt || '未知'}`;
   }
   return [
     `已从加密备份恢复：${d.sections} 个栏目 / ${d.entries} 条条目`,
+    `兑回本机密钥库的密文字段: ${d.reWrapped || 0} 个`,
     `备份生成于: ${d.backupCreatedAt || '未知'}`,
     `恢复前的当前数据已留安全快照: ${d.safetySnapshot}`,
   ].join('\n');
