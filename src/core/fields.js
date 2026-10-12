@@ -1,9 +1,9 @@
 // 字段字典：栏目的字段模板是**数据**，不是代码分支。
 // agent 与面板都从同一份声明渲染，所以「CLI 能填的字段」与「面板能填的字段」不可能分叉。
 //
-// type 取值：text | textarea | number | date | month | bool | select | tags | secret
+// type 取值：text | textarea | number | date | month | bool | select | tags | secret | file
 
-export const FIELD_TYPES = ['text', 'textarea', 'number', 'date', 'month', 'bool', 'select', 'tags', 'secret'];
+export const FIELD_TYPES = ['text', 'textarea', 'number', 'date', 'month', 'bool', 'select', 'tags', 'secret', 'file'];
 
 /**
  * 字段的**填写策略**——回答「这个字段值不值得填」，与 type 正交。
@@ -128,6 +128,12 @@ const JOB_FIELDS = [
   f('acceptAdjustment', '是否接受调剂', 'bool', 'job', { hint: '是否接受岗位或城市调剂' }),
   f('jobNote', '求职备注', 'textarea', 'job', { hint: '补充说明' }),
 
+  // —— 附件资料（统一附件库；值 = 附件 id，直接在字段里上传或从附件库选一个） ——
+  f('resumeFile', '简历附件', 'file', 'files', { kind: 'doc', hint: '简历 PDF/Word 原件；在本字段直接上传，或从附件库选一个' }),
+  f('avatar', '头像图片', 'file', 'files', { kind: 'image', hint: '证件照/头像图片原件' }),
+  f('transcript', '成绩单', 'file', 'files', { kind: 'doc', hint: '在校成绩单原件' }),
+  f('certificateScan', '证书扫描件', 'file', 'files', { kind: 'doc', fill: 'optional', hint: '获奖/资格证书扫描件（不必填）' }),
+
   // —— 其他 ——
   f('religion', '宗教信仰', 'text', 'extra', { hint: '没有就写「无」' }),
   f('unionVolunteer', '是否自愿加入公司工会', 'bool', 'extra'),
@@ -186,6 +192,7 @@ const TEMPLATES = {
       { id: 'emergency', title: '紧急联系' },
       { id: 'about', title: '自我描述' },
       { id: 'job', title: '求职意向' },
+      { id: 'files', title: '附件资料' },
       { id: 'extra', title: '其他' },
     ],
     fields: JOB_FIELDS,

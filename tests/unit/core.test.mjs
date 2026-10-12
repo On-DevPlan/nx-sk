@@ -91,7 +91,8 @@ test('completeness：给出已填数与未填字段清单', () => {
   const entry = { values: { name: '张三', phone: '13800000000', gender: '' } };
   const c = completeness(JOB, entry);
   assert.equal(c.filled, 2);
-  assert.equal(c.total, JOB.fields.length);
+  // optional/avoid 字段不计入分母：计入数 + 排除数 = 模板字段总数
+  assert.equal(c.total + c.excluded.length, JOB.fields.length);
   assert.ok(c.missing.some((m) => m.key === 'gender'));
   assert.deepEqual(c.missing.map((m) => m.key).includes('name'), false);
 });

@@ -13,6 +13,8 @@ import { completeness, displaySensitive, serializeEntry } from '../../core/rende
 import { newId, nowIso } from '../../core/ids.js';
 import { decryptValue, encryptValue, isCipherBlob, maskValue } from '../../core/crypto.js';
 import { resolveVaultKey, sensitiveViewer } from '../../core/vault.js';
+import * as att from '../../core/attachments.js';
+import { displayPath } from '../../core/paths.js';
 
 export function mustFindSection(store, ref) {
   const s = findSection(store, ref);
@@ -100,6 +102,13 @@ function normalizeValue(def, raw) {
     }
     return list;
   }
+  if (type === 'file') {
+    // 值 = 附件 id（或唯一文件名）。id 全局唯一，天然做到「各条目附件互不串台」；
+    // 同一份原件被多条条目引用也没问题（sha256 去重后是同一个 id）。
+    // 不校验存在性——附件可能被还原/删掉，前端按「引用的附件不存在」展示。
+    const s = String(raw).trim();
+    return s === '' ? null : s;
+  }
   const s = String(raw);
   return s.trim() === '' ? null : s;
 }
@@ -174,7 +183,12 @@ export async function listEntries({ section, q } = {}) {
     if (!viewers.has(sec.id)) viewers.set(sec.id, await sensitiveViewer(sec, list.filter((x) => x.section === sec.id)));
     const item = serializeEntry(sec, e, { decrypt: viewers.get(sec.id) });
     if (q) {
-      const hay = [item.title, sec.title, ...Object.values(item.values).map((v) => (v === null ? '' : Array.isArray(v) ? v.join(',') : String(v)))]
+      // file 字段值是附件 id，把解析出的附件名也加进搜索文本，才能按「简历/成绩单」搜到条目
+      const fileNames = sec.fields
+        .filter((f) => f.type === 'file')
+        .map((f) => att.findFileRecord(store, e.values?.[f.key])?.name || '');
+      const hay = [item.title, sec.title, ...fileNames,
+        ...Object.values(item.values).map((v) => (v === null ? '' : Array.isArray(v) ? v.join(',') : String(v)))]
         .join('\n').toLowerCase();
       if (!hay.includes(String(q).toLowerCase())) continue;
     }
@@ -189,7 +203,21 @@ export async function getEntry(ref, { mask, section } = {}) {
   const sec = store.sections.find((s) => s.id === entry.section);
   if (!sec) throw notFound(`条目 ${entry.id} 指向的栏目已不存在: ${entry.section}`);
   const decrypt = await sensitiveViewer(sec, [entry]);
-  return { ...serializeEntry(sec, entry, { mask: !!mask, decrypt }), sectionTitle: sec.title, mask: !!mask };
+  const serialized = serializeEntry(sec, entry, { mask: !!mask, decrypt });
+  // 附带 file 字段引用的附件信息：键 = 字段值（即附件 id / 文件名），值为名称 / 路径 / 链接
+  const files = {};
+  for (const f of sec.fields.filter((x) => x.type === 'file')) {
+    const ref = serialized.values[f.key];
+    if (!ref) continue;
+    const rec = att.findFileRecord(store, ref);
+    if (!rec) continue;
+    const links = att.fileLinks(rec);
+    files[ref] = {
+      id: rec.id, name: rec.name, ext: rec.ext, isImage: att.isImageExt(rec.ext),
+      path: displayPath(att.fileRecordAbs(rec)), url: links.url, downloadUrl: links.downloadUrl,
+    };
+  }
+  return { ...serialized, sectionTitle: sec.title, mask: !!mask, files };
 }
 
 export async function addEntry({ section, title, set, data, tags, 'dry-run': dryRun } = {}) {
@@ -312,6 +340,7 @@ export async function fieldDictionary({ section } = {}) {
     groups: sec.groups,
     fields: sec.fields.map((x) => ({
       key: x.key, label: x.label, type: x.type, group: x.group,
+      kind: x.kind || '',
       hint: x.hint || '', options: x.options || null, sensitive: isSensitiveField(sec, x.key),
     })),
   });
@@ -498,6 +527,10 @@ export function renderEntryGet(d) {
   ];
   for (const [k, v] of Object.entries(d.values)) {
     if (v === null) continue;
+    if (d.files && d.files[v]) {
+      lines.push(`  ${k.padEnd(24)} ${d.files[v].name}　${d.files[v].path}`);
+      continue;
+    }
     lines.push(`  ${k.padEnd(24)} ${Array.isArray(v) ? v.join('、') : (typeof v === 'boolean' ? (v ? '是' : '否') : String(v))}`);
   }
   if (d.missing.length) {

@@ -5,7 +5,8 @@ import { AppError, CODES, httpStatusOf, toErrorShape } from '../core/errors.js';
 import { ACTIONS } from './registry.js';
 import { applySpec, compareRoutes, compileRoute, usageOf } from './spec.js';
 
-const MAX_BODY = 4 * 1024 * 1024;
+// 附件可能是扫描件/照片，base64 再膨胀约 1/3；32MB 上限覆盖绝大多数简历、成绩单与头像
+const MAX_BODY = 32 * 1024 * 1024;
 
 export const ROUTES = ACTIONS
   .filter((a) => Array.isArray(a.http))
@@ -88,6 +89,14 @@ export async function handleApi(req, res, url) {
 
   try {
     const ctx = applySpec(route.action, raw);
+    // raw action：直接把文件本体流式写回，不走 JSON 包装（预览/下载附件用）
+    if (route.action.raw === true) {
+      if (typeof route.action.serveRaw !== 'function') {
+        throw new AppError(CODES.INTERNAL, `raw action 缺少 serveRaw: ${route.action.id}`);
+      }
+      await route.action.serveRaw(ctx, { req, res, url, transport: 'http' });
+      return;
+    }
     const data = await route.action.run(ctx, { transport: 'http' });
     return send(res, 200, { ok: true, data: data === undefined ? null : data });
   } catch (err) {

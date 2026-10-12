@@ -133,6 +133,7 @@ export function dumpSection(section, entries, { mask = false, decrypt } = {}) {
       group: x.group,
       hint: x.hint || '',
       options: x.options || null,
+      kind: x.kind || '',
       sensitive: isSensitiveField(section, x.key),
       // 填写策略要跟着字段字典出去，否则面板与 agent 不知道哪个格子「不用填」
       fill: fillPolicy(x),
