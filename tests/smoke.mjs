@@ -279,8 +279,9 @@ const restoredB = await cliJsonB(['backup', 'import', '--password', 'smoke-pw-12
     const xs = await (await import('node:fs/promises')).readdir(join(home, 'backup'));
     return join(home, 'backup', xs.find((n) => n.endsWith('.nxskbak')));
   })())]);
-step('B 机用口令恢复：状态=restored，resealed=1（用 B 机 vaultKey 重新加密）',
-  restoredB.status === 'restored' && restoredB.resealed === 1);
+step('B 机缺省导入是「合并」：status=ok / mode=merge，resealed=1（用 B 机 vaultKey 重新加密）',
+  restoredB.status === 'ok' && restoredB.mode === 'merge' && restoredB.resealed === 1
+  && restoredB.addedEntriesTotal >= 1);
 
 const gotB = await cliJsonB(['key', 'get', 'SMOKE_KEY']);
 step('B 机恢复后 key get 默认能解出明文（原 vaultkey 完全无关）',
@@ -292,6 +293,13 @@ const entryB = storeB.entries.find((e) => e.section === 'secret');
 function isCipher(v) { return !!v && typeof v === 'object' && typeof v.ct === 'string' && typeof v.iv === 'string'; }
 step('导入后 secret 落盘仍是密文（已用 B 机 vaultKey 重新加密）',
   !!entryB && isCipher(entryB.values.value));
+
+// --replace 保留旧的「整份替换」语义
+const replacedB = await cliJsonB(['backup', 'import', '--password', 'smoke-pw-123', '--replace', '--file',
+  join(home, 'backup', (await (await import('node:fs/promises')).readdir(join(home, 'backup'))).find((n) => n.endsWith('.nxskbak')))]);
+step('--replace 才整份替换：status=restored', replacedB.status === 'restored' && replacedB.mode === 'replace');
+const gotB2 = await cliJsonB(['key', 'get', 'SMOKE_KEY']);
+step('整份替换后 key get 仍能解出明文', gotB2.value === 'sk-smoke-NEW-0987654321fedcba');
 
 // 错误口令在 B 机也明确报错
 const wrongPw = await cliB(['backup', 'import', '--password', 'wrong-pw-12345', '--file',
