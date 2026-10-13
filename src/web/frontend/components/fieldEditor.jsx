@@ -1,10 +1,39 @@
 // 字段编辑器：按字段字典的 type 决定控件。
 // 字典来自后端（section.fields），所以**面板能填的字段与 CLI 能填的字段天然一致**。
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { api } from '../api/client.js';
 import { fileToDataUrl, listAttachments, refreshAttachments } from '../api/files.js';
 import { Copyable } from './ui.jsx';
 import { useStore } from '../store.jsx';
+
+/**
+ * 自适应高度 textarea：所见即所得，填多少显示多少。
+ * - 初始 `minRows` 行（避免空字段塌成一坨）；输入后按 scrollHeight 撑开
+ * - `resize: none` + `overflow: hidden` 关掉浏览器默认的拖拽手柄与滚动条（自适应时两者会打架）
+ * - reset 'auto' → 测 scrollHeight → 设回：删字时能正确回缩，而不是黏在上一次的高
+ * - 用 useLayoutEffect 而非 useEffect，避免一帧的「旧高度 + 新内容」闪一下
+ */
+function AutoTextarea({ value, onChange, minRows = 2, placeholder, disabled, maxLength }) {
+  const ref = useRef(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight}px`;
+  }, [value]);
+  return (
+    <textarea
+      ref={ref}
+      value={String(value ?? '')}
+      onChange={(e) => onChange(e.target.value)}
+      rows={minRows}
+      placeholder={placeholder}
+      disabled={disabled}
+      maxLength={maxLength}
+      style={{ resize: 'none', overflow: 'hidden', width: '100%' }}
+    />
+  );
+}
 
 /**
  * file 字段控件：值 = 附件 id。
@@ -98,7 +127,7 @@ export function FieldControl({ def, value, onChange, disabled }) {
   }
 
   if (type === 'textarea') {
-    return <textarea value={String(v)} onChange={(e) => onChange(e.target.value)} rows={3} />;
+    return <AutoTextarea value={v} onChange={onChange} />;
   }
 
   if (type === 'tags') {
