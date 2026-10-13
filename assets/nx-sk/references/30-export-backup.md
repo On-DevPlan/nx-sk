@@ -82,15 +82,23 @@ cp ~/nx-sk/backup/20260924-144238-entry-remove-e_xxx.json ~/nx-sk/store.json
 ## 五、口令加密备份 / 恢复（导入导出）
 
 整份数据用**口令派生密钥 + AES-256-GCM** 对称加密为单个 `.nxskbak` 文件；口令不落盘。
+附件**台账**始终随包；`--with-files` 再把原件本体也嵌进包里（v3 格式）。
 
 ```bash
 nx-sk backup export --password '备份口令'                 # → ~/nx-sk/backup/nx-sk-backup-<时间>.nxskbak
+nx-sk backup export --password '备份口令' --with-files    # 连附件原件一起打包（体积显著变大）
 nx-sk backup export --password '备份口令' --out D:/备份    # 指定输出目录
-nx-sk backup import --file <备份>.nxskbak --password '备份口令' --dry-run  # 只解密校验，不改动
-nx-sk backup import --file <备份>.nxskbak --password '备份口令'            # 整份恢复
+
+nx-sk backup import --file <备份>.nxskbak --password '口令' --dry-run  # 只解密 + 出合并计划，不改动
+nx-sk backup import --file <备份>.nxskbak --password '口令'            # 缺省「合并」导入
+nx-sk backup import --file <备份>.nxskbak --password '口令' --replace  # 整份替换（旧行为）
 ```
 
 - 导出时文件内写入**随机盐**，密钥由 `scrypt(口令, 盐)` 派生；恢复时用同一口令派生同一把密钥。
 - **口令错误 / 文件被篡改**：GCM 认证失败、明确报 BLOCKED，且不改动当前数据。
-- 恢复（整份替换）前会**自动给当前数据另留一份安全快照**（`…-before-restore.json`），可回滚。
-- 口令也可用环境变量 `NX_SK_BACKUP_PASSWORD` 提供；Web「加密备份」页提供同样能力（浏览器下载 / 选择文件导入）。
+- **导入（缺省 = 合并）只增不减**：补缺失的栏目/条目/附件台账、补空字段、把备份多出的分组与字段补进已有栏目；**两边都有值且不同 → 保留本地**、列入冲突清单由你处理；本地已有数据与结构**永不删改**。报告会列出新增/补空/冲突/结构差异的完整明细。
+- **`--replace` 才是整份替换**（灾难恢复 / 跨机器迁移用）：当前数据被备份整体覆盖。
+- 两种方式都会**先自动留安全快照**（`…-before-import.json` / `…-before-restore.json`），可回滚。
+- 敏感字段在包内是明文（靠口令保护），导入时自动用**本机 vaultKey** 重新加密落盘——报告里的值一律打码，密钥明文不进报告。
+- 带 `--with-files` 的包导入时自动还原附件原件（sha256 校验；磁盘已有且内容不同则以磁盘为准）；v2 旧包可导入，但不含原件，报告会如实列出缺哪些文件。
+- 口令也可用环境变量 `NX_SK_BACKUP_PASSWORD` 提供；Web「加密备份」页提供同样能力（浏览器下载 / 选择文件导入；超大包建议走 CLI）。
