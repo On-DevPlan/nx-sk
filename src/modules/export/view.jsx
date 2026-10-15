@@ -2,7 +2,11 @@ import { useCallback, useEffect, useState } from 'react';
 import { api } from '../../web/frontend/api/client.js';
 import { useStore } from '../../web/frontend/store.jsx';
 import { CliHints, Copyable, Empty, Modal, Tag } from '../../web/frontend/components/ui.jsx';
+import BackupPanel from '../backup/view.jsx';
 
+// 「导出与备份」合并页：明文导出（带走可读文件）与口令加密备份（整份可还原）
+// 对用户来说是同一件事——把数据倒出去、再倒回来，所以并成一个 tab。
+// 后端仍是 export / backup 两个模块、两组 CLI 命令；页脚的 CliHints 把两组合成一条提示。
 export default function ExportView() {
   const { boot, toast, guard } = useStore();
   const [sections, setSections] = useState([]);
@@ -61,12 +65,12 @@ export default function ExportView() {
   return (
     <>
       <div className="toolbar rowgap pad">
-        <strong>导出</strong>
-        <span className="muted">把栏目数据导成可带走、可备份的文件</span>
+        <strong>导出与备份</strong>
+        <span className="muted">明文导出走可读文件（JSON / Markdown），加密备份走口令保护的 .nxskbak（整份可还原）；都只在本机落盘</span>
       </div>
 
       <div className="card">
-        <div className="colhead">导出选项</div>
+        <div className="colhead">导出为 JSON / Markdown</div>
         <div className="pad">
           <div className="grid">
             <div className="field">
@@ -111,6 +115,8 @@ export default function ExportView() {
         </div>
       </div>
 
+      <BackupPanel />
+
       <div className="card">
         <div className="colhead">历次导出<span className="right muted">{history?.count ?? 0}</span></div>
         <div className="colbody">
@@ -147,7 +153,7 @@ export default function ExportView() {
         </div>
       </div>
 
-      <CliHints module="export" />
+      <CliHints module={['export', 'backup']} />
 
       {modal ? <Modal title={modal.title} onClose={() => setModal(null)}>{modal.body}</Modal> : null}
     </>

@@ -130,8 +130,9 @@ export function normalizeFileRecord(raw) {
 /**
  * 一个 `file` 字段的值 → 附件 id 数组（**全仓库唯一的归一化入口**）。
  *
- * 字段可以挂**多个**附件：新写入统一存数组（哪怕只有一个）；历史数据里的单值是
- * 字符串，读的时候按「单元素列表」看待——所以这里两种情况都要吃。
+ * 字段可以挂**多个**附件：新写入统一存数组（哪怕只有一个）。要吃下三种历史形态：
+ * 单值字符串、id 数组、以及旧版把多个 id **连写成一个字符串**（`"f_a,f_b"`——
+ * 0.8.0 之前 `--set` 不拆逗号），所以字符串统一按分隔符拆开。
  * 去空、去重、保序：同一个附件在一个字段里出现两次没有意义。
  */
 export function fileIdsOf(value) {
@@ -140,9 +141,11 @@ export function fileIdsOf(value) {
     : (Array.isArray(value) ? value : [value]);
   const out = [];
   for (const x of raw) {
-    const s = String(x ?? '').trim();
-    if (!s || out.includes(s)) continue;
-    out.push(s);
+    for (const piece of String(x ?? '').split(/[,，、;；]+/)) {
+      const id = piece.trim();
+      if (!id || out.includes(id)) continue;
+      out.push(id);
+    }
   }
   return out;
 }
@@ -326,7 +329,13 @@ export async function importContent(store, opts = {}) {
  */
 export async function relocateFile(store, rec, { category, name }) {
   const cat = category || rec.category;
-  const fileName = safeFileName(name || rec.name);
+  // 改名时**不带扩展名**就把原扩展名接回去——否则物理文件丢掉 .jpg/.pdf，
+  // 一切按扩展名认类型的地方（内联预览 / Content-Type / 系统默认程序打开 /
+  // backup --with-files 还原后的文件）都会哑掉，而台账里的 ext 字段还骗人说没丢。
+  let wanted = name || rec.name;
+  const originalExt = rec.ext || extname(rec.name).toLowerCase();
+  if (name && originalExt && !extname(wanted)) wanted += originalExt;
+  const fileName = safeFileName(wanted);
   const same = cat === rec.category && fileName === rec.name;
   const rel = same ? rec.rel : uniqueRel(store, cat, fileName, rec.id);
   if (!same) {

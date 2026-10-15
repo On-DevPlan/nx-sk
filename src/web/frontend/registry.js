@@ -11,8 +11,10 @@ export const VIEWS = [
   { id: 'sections', title: '栏目', order: 500, component: lazy(() => import('../../modules/sections/view.jsx')) },
   { id: 'entries', title: '条目', order: 600, tab: false, component: lazy(() => import('../../modules/entries/view.jsx')) },
   { id: 'files', title: '附件', order: 650, component: lazy(() => import('../../modules/files/view.jsx')) },
-  { id: 'export', title: '导出', order: 700, component: lazy(() => import('../../modules/export/view.jsx')) },
-  { id: 'backup', title: '加密备份', order: 750, component: lazy(() => import('../../modules/backup/view.jsx')) },
+  { id: 'export', title: '导出与备份', order: 700, component: lazy(() => import('../../modules/export/view.jsx')) },
+  // 加密备份已并入「导出与备份」合并页（export 的 view 组合渲染本视图），
+  // 所以 tab: false——与 entries 同款：不出导航，但登记与懒加载必须保留。
+  { id: 'backup', title: '加密备份', order: 750, tab: false, component: lazy(() => import('../../modules/backup/view.jsx')) },
   { id: 'settings', title: '设置', order: 900, component: lazy(() => import('../../modules/settings/view.jsx')) },
 ];
 

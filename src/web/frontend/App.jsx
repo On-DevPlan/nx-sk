@@ -5,11 +5,17 @@ import { useStore } from './store.jsx';
 
 function viewFromHash() {
   const m = /^#\/?([^?/]*)/.exec(window.location.hash || '');
-  return m ? decodeURIComponent(m[1]) : '';
+  const id = m ? decodeURIComponent(m[1]) : '';
+  return LEGACY_VIEW[id] || id;
 }
+
+// 加密备份并入「导出与备份」合并页后，旧书签（#/backup）与 localStorage 里
+// 残留的 ui.view 都要落到合并页——否则会被「找不到 tab」的兜底甩到第一个栏目。
+const LEGACY_VIEW = { backup: 'export' };
 
 export default function App() {
   const { boot, bootError, ui, patchUi, reload } = useStore();
+  const view = LEGACY_VIEW[ui.view] || ui.view;
 
   // 栏目 tab 是**数据驱动**的（来自 bootstrap.sections），静态 tab 来自前端注册表。
   // 两者的 id 可能撞车时静态 tab 不参与第一优先级的排序——栏目 order 是 10/20，静态是 500+。
@@ -30,13 +36,13 @@ export default function App() {
   // 兜底会选中第一个静态视图并由下面的 effect 写进 ui —— 于是「默认视图 = 求职」被顶掉、
   // 头部高亮也错位成「栏目」，连 `#/job` 这类深链都会被首屏覆盖。
   const booted = !!boot;
-  const current = tabs.find((t) => t.id === ui.view) || (booted ? tabs[0] : null) || null;
+  const current = tabs.find((t) => t.id === view) || (booted ? tabs[0] : null) || null;
 
   // hash 与 localStorage 双写对齐：只在挂载时对齐一次，之后交给 hashchange
   useEffect(() => {
     const fromHash = viewFromHash();
-    if (fromHash && fromHash !== ui.view) patchUi({ view: fromHash });
-    else if (!window.location.hash) window.location.hash = `#/${ui.view}`;
+    if (fromHash && fromHash !== view) patchUi({ view: fromHash });
+    else if (!window.location.hash) window.location.hash = `#/${view}`;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -47,8 +53,8 @@ export default function App() {
   }, [patchUi]);
 
   useEffect(() => {
-    if (booted && current && current.id !== ui.view) patchUi({ view: current.id });
-  }, [booted, current, ui.view, patchUi]);
+    if (booted && current && current.id !== view) patchUi({ view: current.id });
+  }, [booted, current, view, patchUi]);
 
   const go = (id) => {
     patchUi({ view: id });
