@@ -14,6 +14,11 @@ export default function NavManager({ sections, value, onChange }) {
   const [drag, setDrag] = useState(null); // { kind:'section', sid } | { kind:'group', gi }
   const [over, setOver] = useState(null); // { key, index }：当前拖到哪个容器的第几位
 
+  // 注意顺序：preview 的依赖里用到 allIds / preview 的计算也用到预览配置，
+  // const 声明晚于使用就是 TDZ 崩（"Cannot access … before initialization"）
+  const allIds = sections.map((s) => s.id);
+  const sectionOf = (id) => sections.find((s) => s.id === id) || null;
+
   const keyToTarget = (key) => {
     if (key === 'pool') return { kind: 'pool' };
     if (key === 'hidden') return { kind: 'hidden' };
@@ -29,14 +34,13 @@ export default function NavManager({ sections, value, onChange }) {
     if (drag?.kind !== 'section' || !over) return value;
     const target = keyToTarget(over.key);
     if (!target) return value;
-    const index = nav.insertionIndex(value, drag.sid, target, over.index);
-    return nav.moveToContainer(value, drag.sid, target, index);
-  }, [value, drag, over]);
+    const index = nav.insertionIndex(value, drag.sid, target, over.index, allIds);
+    return nav.moveToContainer(value, drag.sid, target, index, allIds);
+  }, [value, drag, over, allIds]);
 
-  const allIds = sections.map((s) => s.id);
-  const sectionOf = (id) => sections.find((s) => s.id === id) || null;
   const draggingSid = drag?.kind === 'section' ? drag.sid : null;
-  const pool = allIds.filter((id) => nav.containerOf(preview, id).kind === 'pool');
+  // 平铺容器的内容与顺序都来自模型：显式排过的（order）优先，其余按栏目自身顺序
+  const pool = nav.ungroupedIds(preview, allIds);
 
   const endDrag = () => { setDrag(null); setOver(null); };
 
@@ -71,7 +75,7 @@ export default function NavManager({ sections, value, onChange }) {
       if (draggingSid === sid) return; // 悬停在自己身上：保持当前落点，不重算
       const rect = e.currentTarget.getBoundingClientRect();
       const below = e.clientY > rect.top + rect.height / 2;
-      const at = nav.containerOf(value, sid);
+      const at = nav.containerOf(value, sid, allIds);
       const index = (typeof at.index === 'number' ? at.index : 0) + (below ? 1 : 0);
       setOverIfChanged({ key, index });
     },

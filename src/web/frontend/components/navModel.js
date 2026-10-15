@@ -4,23 +4,29 @@
 // 混在 JSX 里既说不清也测不了。表现层只管画，动手改数据一律走这里——
 // 于是「管理逻辑」只有一份，前端拦一道、后端（settings service）再拦一道，两边同口径。
 //
-// 配置形状（与 settings.navGroups / navHidden 一一对应）：
-//   { groups: [{ title, sections: [栏目id…] }], hidden: [栏目id…] }
-// 组顺序 = 头部显示顺序；组内顺序 = 展开列表顺序；hidden = 入口不显示（直达仍可用）。
+// 配置形状（与 settings.navGroups / navHidden / navOrder 一一对应）：
+//   { groups: [{ title, sections: [栏目id…] }], hidden: [栏目id…], order: [栏目id…] }
+// 组顺序 = 头部显示顺序；组内顺序 = 展开列表顺序；hidden = 入口不显示（直达仍可用）；
+// order = **平铺区的显示顺序**（没列进去的栏目按栏目自己的 order 跟在后面）。
 
-export const emptyConfig = () => ({ groups: [], hidden: [] });
+export const emptyConfig = () => ({ groups: [], hidden: [], order: [] });
 
 /** 从后端 settings 取一份**工作副本**（深拷贝，编辑不污染原数据）。 */
 export function configFromSettings(settings) {
   return {
     groups: (settings?.navGroups || []).map((g) => ({ title: String(g.title || ''), sections: [...(g.sections || [])] })),
     hidden: [...(settings?.navHidden || [])],
+    order: [...(settings?.navOrder || [])],
   };
 }
 
 /** 保存时发出去的形状（只带这两个键，其他设置项各自负责）。 */
 export function configToPayload(cfg) {
-  return { navGroups: cfg.groups.map((g) => ({ title: g.title.trim(), sections: [...g.sections] })), navHidden: [...cfg.hidden] };
+  return {
+    navGroups: cfg.groups.map((g) => ({ title: g.title.trim(), sections: [...g.sections] })),
+    navHidden: [...cfg.hidden],
+    navOrder: [...(cfg.order || [])],
+  };
 }
 
 export const isDirty = (a, b) => JSON.stringify(a) !== JSON.stringify(b);
@@ -85,13 +91,24 @@ export function moveSectionTo(cfg, sid, gi, index = null) {
  */
 /**
  * 栏目现在在哪个容器里，以及在该容器里的位置（拖拽预览要用它做索引换算）。
- * 平铺区的顺序由栏目自己的 order 决定，没有「位置」可言，index 记为 null。
+ * 三种容器都有位置：平铺区的位置来自 order（没排过的按栏目 order 排），分组与隐藏各自是数组。
  */
-export function containerOf(cfg, sid) {
+export function containerOf(cfg, sid, allIds = []) {
   if (cfg.hidden.includes(sid)) return { kind: 'hidden', index: cfg.hidden.indexOf(sid) };
   const gi = cfg.groups.findIndex((g) => g.sections.includes(sid));
   if (gi >= 0) return { kind: 'group', gi, index: cfg.groups[gi].sections.indexOf(sid) };
-  return { kind: 'pool', index: null };
+  return { kind: 'pool', index: poolOrder(cfg, allIds).indexOf(sid) };
+}
+
+/**
+ * 平铺区的显示顺序：`order` 里显式排过的优先（按它的次序），
+ * 没排过的新栏目按传入的栏目顺序（= 栏目自己的 order）跟在后面。
+ * 于是「从没拖过」= 纯栏目 order（老行为不变），拖过之后以拖的为准。
+ */
+export function poolOrder(cfg, allIds) {
+  const ranked = (cfg.order || []).filter((id) => allIds.includes(id));
+  const rest = allIds.filter((id) => !ranked.includes(id));
+  return [...ranked, ...rest];
 }
 
 /**
@@ -100,29 +117,37 @@ export function containerOf(cfg, sid) {
  * 同容器内往下拖时悬停行索引要减 1，否则实时预览会比实际落点差一格。
  * `hoveredIndex === null` 表示拖在容器空白处 = 追加到末尾，原样返回。
  */
-export function insertionIndex(cfg, sid, target, hoveredIndex) {
+export function insertionIndex(cfg, sid, target, hoveredIndex, allIds = []) {
   if (hoveredIndex === null || hoveredIndex === undefined) return null;
-  const from = containerOf(cfg, sid);
+  const from = containerOf(cfg, sid, allIds);
   const sameContainer = target.kind === from.kind && (target.kind !== 'group' || target.gi === from.gi);
   if (sameContainer && typeof from.index === 'number' && from.index < hoveredIndex) return hoveredIndex - 1;
   return hoveredIndex;
 }
 
 /** 把栏目挪进目标容器（index = 在该容器里的插入位，null = 末尾）。 */
-export function moveToContainer(cfg, sid, target, index = null) {
-  // 先从所有容器里摘掉（分组 + 隐藏），再放进目标——所以「移动」永远只落一处
+export function moveToContainer(cfg, sid, target, index = null, allIds = []) {
+  // 先从所有容器里摘掉（分组 + 隐藏 + 平铺顺序），再放进目标——「移动」永远只落一处
   const groups = cfg.groups.map((g) => ({ ...g, sections: g.sections.filter((x) => x !== sid) }));
   const hidden = cfg.hidden.filter((x) => x !== sid);
+  const base = { ...cfg, groups, hidden, order: (cfg.order || []).filter((x) => x !== sid) };
 
-  if (target.kind === 'hidden') return { groups, hidden: [...hidden, sid] };
-  if (target.kind === 'pool') return { groups, hidden };
+  if (target.kind === 'hidden') return { ...base, hidden: [...hidden, sid] };
+
+  if (target.kind === 'pool') {
+    // 平铺区的顺序就是 order：先算出「去掉自己之后」的序列，再插到目标位
+    const isPool = (id) => !groups.some((g) => g.sections.includes(id)) && !hidden.includes(id);
+    const seq = poolOrder(base, allIds).filter((id) => id !== sid && isPool(id));
+    const at = index === null ? seq.length : Math.max(0, Math.min(index, seq.length));
+    return { ...base, order: [...seq.slice(0, at), sid, ...seq.slice(at)] };
+  }
 
   const gi = target.gi;
   const cur = groups[gi];
   if (!cur) return cfg;
   const at = index === null ? cur.sections.length : Math.max(0, Math.min(index, cur.sections.length));
   const sections = [...cur.sections.slice(0, at), sid, ...cur.sections.slice(at)];
-  return { groups: groups.map((g, i) => (i === gi ? { ...cur, sections } : g)), hidden };
+  return { ...base, groups: groups.map((g, i) => (i === gi ? { ...cur, sections } : g)) };
 }
 
 /** 把栏目移出分组（回到头部的平铺区）。 */
@@ -150,10 +175,10 @@ export const isHidden = (cfg, sid) => cfg.hidden.includes(sid);
 
 export const groupedIds = (cfg) => cfg.groups.flatMap((g) => g.sections);
 
-/** 没进任何分组的栏目（头部平铺的那些）。 */
+/** 「平铺」容器里的栏目（既不在分组里、也没被隐藏），按平铺顺序。 */
 export const ungroupedIds = (cfg, allIds) => {
-  const grouped = new Set(groupedIds(cfg));
-  return allIds.filter((id) => !grouped.has(id));
+  const skip = new Set([...groupedIds(cfg), ...cfg.hidden]);
+  return poolOrder(cfg, allIds).filter((id) => !skip.has(id));
 };
 
 /** 某个分组**还能**加入哪些栏目：不在本组、也不在别的组。 */
@@ -193,6 +218,9 @@ export function validate(cfg, allIds) {
 
   for (const sid of cfg.hidden) {
     if (!known.has(sid)) problems.push({ field: `hidden.${sid}`, message: `要隐藏的栏目 ${sid} 已不存在` });
+  }
+  for (const sid of cfg.order || []) {
+    if (!known.has(sid)) problems.push({ field: `order.${sid}`, message: `平铺顺序里的栏目 ${sid} 已不存在` });
   }
   return problems;
 }

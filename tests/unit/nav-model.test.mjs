@@ -10,7 +10,7 @@ const ALL = ['job', 'projects', 'campus', 'servers', 'secret'];
 test('configFromSettings / configToPayload：深拷贝往返，不共享引用', () => {
   const settings = { navGroups: [{ title: '求职', sections: ['projects'] }], navHidden: ['servers'] };
   const cfg = m.configFromSettings(settings);
-  assert.deepEqual(cfg, { groups: [{ title: '求职', sections: ['projects'] }], hidden: ['servers'] });
+  assert.deepEqual(cfg, { groups: [{ title: '求职', sections: ['projects'] }], hidden: ['servers'], order: [] });
 
   // 改副本不影响原数据（设置页「放弃改动」的前提）
   cfg.groups[0].sections.push('campus');
@@ -19,12 +19,13 @@ test('configFromSettings / configToPayload：深拷贝往返，不共享引用',
   assert.deepEqual(m.configToPayload(cfg), {
     navGroups: [{ title: '求职', sections: ['projects', 'campus'] }],
     navHidden: ['servers'],
+    navOrder: [],
   });
 });
 
 test('configFromSettings：后端缺字段时给出空配置（老 store 直接可用）', () => {
-  assert.deepEqual(m.configFromSettings(undefined), { groups: [], hidden: [] });
-  assert.deepEqual(m.configFromSettings({}), { groups: [], hidden: [] });
+  assert.deepEqual(m.configFromSettings(undefined), { groups: [], hidden: [], order: [] });
+  assert.deepEqual(m.configFromSettings({}), { groups: [], hidden: [], order: [] });
 });
 
 test('isDirty：形状等价即视为未改动', () => {
@@ -82,7 +83,8 @@ test('隐藏开关与派生：groupedIds / ungroupedIds', () => {
 
   cfg = m.toggleHidden(cfg, 'servers');
   assert.equal(m.isHidden(cfg, 'servers'), true);
-  assert.deepEqual(m.ungroupedIds(cfg, ALL), ['projects', 'campus', 'servers', 'secret'], '隐藏不影响「属于哪个组」');
+  assert.deepEqual(m.groupedIds(cfg), ['job'], '隐藏不影响「属于哪个分组」');
+  assert.deepEqual(m.ungroupedIds(cfg, ALL), ['projects', 'campus', 'secret'], '平铺容器不含被隐藏的栏目');
 
   cfg = m.toggleHidden(cfg, 'servers');
   assert.equal(m.isHidden(cfg, 'servers'), false);
@@ -111,7 +113,7 @@ test('容器模型：containerOf 判定「平铺 / 分组 / 隐藏」，三者�
   let cfg = m.addGroup(m.emptyConfig(), 'A');
   cfg = m.addSection(cfg, 0, 'job');
   assert.deepEqual(m.containerOf(cfg, 'job'), { kind: 'group', gi: 0, index: 0 });
-  assert.deepEqual(m.containerOf(cfg, 'servers'), { kind: 'pool', index: null });
+  assert.deepEqual(m.containerOf(cfg, 'servers', ALL), { kind: 'pool', index: 3 });
 
   cfg = m.moveToContainer(cfg, 'job', { kind: 'hidden' });
   assert.deepEqual(m.containerOf(cfg, 'job'), { kind: 'hidden', index: 0 });
@@ -120,7 +122,7 @@ test('容器模型：containerOf 判定「平铺 / 分组 / 隐藏」，三者�
 
   // 从隐藏拖回平铺 → 不再是隐藏容器成员
   cfg = m.moveToContainer(cfg, 'job', { kind: 'pool' });
-  assert.deepEqual(m.containerOf(cfg, 'job'), { kind: 'pool', index: null });
+  assert.deepEqual(m.containerOf(cfg, 'job', ALL), { kind: 'pool', index: 0 });
   assert.deepEqual(cfg.hidden, []);
 
   // 平铺 → 分组（指定位置）
@@ -162,4 +164,41 @@ test('insertionIndex：同容器内往下拖要减 1，跨容器与末尾不减�
   assert.equal(m.insertionIndex(cfg, 'job', { kind: 'hidden' }, 1), 1);
   // 末尾（null）保持 null
   assert.equal(m.insertionIndex(cfg, 'job', { kind: 'group', gi: 0 }, null), null);
+});
+
+
+test('平铺顺序：拖过之后按 order 排；没排过的按栏目自身顺序跟在后面', () => {
+  let cfg = m.emptyConfig();
+  // 初始：纯栏目顺序（ALL = job, projects, campus, servers, secret）
+  assert.deepEqual(m.poolOrder(cfg, ALL), ALL);
+
+  // 把 secret 拖到第 0 位
+  cfg = m.moveToContainer(cfg, 'secret', { kind: 'pool' }, 0, ALL);
+  assert.deepEqual(m.poolOrder(cfg, ALL), ['secret', 'job', 'projects', 'campus', 'servers']);
+
+  // 再把 job 拖到 projects 之前（悬停索引由调用方换算，这里直接给插入位 2）
+  cfg = m.moveToContainer(cfg, 'job', { kind: 'pool' }, 2, ALL);
+  assert.deepEqual(m.poolOrder(cfg, ALL), ['secret', 'projects', 'job', 'campus', 'servers']);
+
+  // 没排过的新栏目（allIds 里新加的一个）跟在已排的后面
+  const withNew = [...ALL, 'brand_new'];
+  assert.deepEqual(m.poolOrder(cfg, withNew), ['secret', 'projects', 'job', 'campus', 'servers', 'brand_new']);
+});
+
+test('平铺顺序：进分组 / 隐藏后再拖回，位置按当前顺序重新落位', () => {
+  let cfg = m.emptyConfig();
+  cfg = m.moveToContainer(cfg, 'servers', { kind: 'pool' }, 0, ALL);
+  assert.deepEqual(m.ungroupedIds(cfg, ALL), ['servers', 'job', 'projects', 'campus', 'secret']);
+
+  // 拖进隐藏 → 不在平铺里；再拖回末尾 → 回到队尾
+  cfg = m.moveToContainer(cfg, 'servers', { kind: 'hidden' }, null, ALL);
+  assert.deepEqual(m.ungroupedIds(cfg, ALL), ['job', 'projects', 'campus', 'secret']);
+  cfg = m.moveToContainer(cfg, 'servers', { kind: 'pool' }, null, ALL);
+  assert.deepEqual(m.ungroupedIds(cfg, ALL), ['job', 'projects', 'campus', 'secret', 'servers']);
+});
+
+test('validate：平铺顺序里出现不存在的栏目要判红', () => {
+  const cfg = { groups: [], hidden: [], order: ['job', 'ghost'] };
+  const problems = m.validate(cfg, ALL);
+  assert.match(problems.map((p) => p.message).join(' | '), /平铺顺序里的栏目 ghost 已不存在/);
 });
