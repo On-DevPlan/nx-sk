@@ -465,6 +465,8 @@ a.file-name:hover { text-decoration: underline; }
 /* 拖拽落点：一眼看出「松手会放到这儿」 */
 .nav-pool.drop-target, .nav-group.drop-target { outline: 2px dashed var(--ink); outline-offset: -2px; background: var(--soft); }
 .nav-row.dragging { opacity: .45; }
+/* 落点行：实时预览已经把顺序摆好了，这一条只是把「松手就落这儿」点明 */
+.nav-row.over { background: var(--soft); box-shadow: inset 2px 0 0 var(--ink); }
 .nav-row.is-hidden .name { color: var(--mid); }
 
 /* 容器内的行列表：行本身已有 1px 底线，这里只做包裹 */

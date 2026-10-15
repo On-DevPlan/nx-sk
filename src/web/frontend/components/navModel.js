@@ -83,10 +83,29 @@ export function moveSectionTo(cfg, sid, gi, index = null) {
  * **容器**是这块的统一心智模型：一个栏目要么在「平铺」里、要么在某个分组里、要么在「隐藏」里。
  * `{kind:'pool'} | {kind:'group', gi} | {kind:'hidden'}` —— 拖拽就是把栏目从一个容器挪到另一个。
  */
+/**
+ * 栏目现在在哪个容器里，以及在该容器里的位置（拖拽预览要用它做索引换算）。
+ * 平铺区的顺序由栏目自己的 order 决定，没有「位置」可言，index 记为 null。
+ */
 export function containerOf(cfg, sid) {
-  if (cfg.hidden.includes(sid)) return { kind: 'hidden' };
+  if (cfg.hidden.includes(sid)) return { kind: 'hidden', index: cfg.hidden.indexOf(sid) };
   const gi = cfg.groups.findIndex((g) => g.sections.includes(sid));
-  return gi >= 0 ? { kind: 'group', gi } : { kind: 'pool' };
+  if (gi >= 0) return { kind: 'group', gi, index: cfg.groups[gi].sections.indexOf(sid) };
+  return { kind: 'pool', index: null };
+}
+
+/**
+ * 悬停行索引 → 真正的插入位。
+ * 落点语义是「插到悬停行**之前**」，但被拖走的自身会让位：
+ * 同容器内往下拖时悬停行索引要减 1，否则实时预览会比实际落点差一格。
+ * `hoveredIndex === null` 表示拖在容器空白处 = 追加到末尾，原样返回。
+ */
+export function insertionIndex(cfg, sid, target, hoveredIndex) {
+  if (hoveredIndex === null || hoveredIndex === undefined) return null;
+  const from = containerOf(cfg, sid);
+  const sameContainer = target.kind === from.kind && (target.kind !== 'group' || target.gi === from.gi);
+  if (sameContainer && typeof from.index === 'number' && from.index < hoveredIndex) return hoveredIndex - 1;
+  return hoveredIndex;
 }
 
 /** 把栏目挪进目标容器（index = 在该容器里的插入位，null = 末尾）。 */
