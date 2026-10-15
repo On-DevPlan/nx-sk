@@ -4,7 +4,7 @@ import { loadStore, mutateStore, snapshotStore } from '../../core/store.js';
 import { findSection } from '../../core/fields.js';
 import { badInput, notFound } from '../../core/errors.js';
 
-export const SETTING_KEYS = ['exportDir', 'exportFormat', 'includeSecretsInExport', 'defaultSection', 'navGroups', 'navHidden'];
+export const SETTING_KEYS = ['exportDir', 'exportFormat', 'includeSecretsInExport', 'defaultSection', 'navGroups', 'navHidden', 'navOrder'];
 
 const SCHEMA = {
   exportDir: { type: 'string', hint: '导出目录，留空 = ~/nx-sk/export' },
@@ -13,6 +13,7 @@ const SCHEMA = {
   defaultSection: { type: 'string', hint: '默认栏目 id' },
   navGroups: { type: 'json', hint: '头部导航分组：[{title, sections:[栏目id…]}]，数组顺序 = 显示顺序', coerce: coerceNavGroups },
   navHidden: { type: 'json', hint: '头部隐藏的栏目 id（入口不显示，`#/栏目` 直达仍可用）', coerce: coerceNavHidden },
+  navOrder: { type: 'json', hint: '平铺区的显示顺序（栏目 id 数组；没列进去的按栏目自身顺序跟在后面）', coerce: coerceNavOrder },
 };
 
 export function settingsSchema() {
@@ -77,18 +78,30 @@ function coerceNavGroups(value, store) {
   });
 }
 
-/** 隐藏清单校验：栏目必须真实存在；去重保序（归一成真实 id）。 */
-function coerceNavHidden(value, store) {
+/**
+ * 「栏目 id 清单」校验（隐藏清单 / 平铺顺序共用）：每一项都必须是真实存在的栏目；
+ * 去重保序，并归一成真实 id（写标题也认）。label 只影响报错措辞。
+ */
+function coerceSectionIdList(value, store, label) {
   const list = Array.isArray(value) ? value : String(value ?? '').split(',');
   const out = [];
   for (const item of list) {
     const ref = String(item ?? '').trim();
     if (!ref) continue;
     const sec = findSection(store, ref);
-    if (!sec) throw badInput(`要隐藏的栏目不存在: ${ref}`);
+    if (!sec) throw badInput(`${label}里的栏目不存在: ${ref}`);
     if (!out.includes(sec.id)) out.push(sec.id);
   }
   return out;
+}
+
+// 用**函数声明**（会提升）：SCHEMA 在模块顶层就引用了它们，const 箭头函数会踩 TDZ
+function coerceNavHidden(value, store) {
+  return coerceSectionIdList(value, store, '隐藏清单');
+}
+
+function coerceNavOrder(value, store) {
+  return coerceSectionIdList(value, store, '平铺顺序');
 }
 
 function coerceSetting(key, value, store) {
@@ -150,6 +163,12 @@ export function renderSettings(data) {
     for (const s of data.sections) {
       lines.push(`  ${String(s.id).padEnd(18)} ${String(s.title).padEnd(14)} ${hidden.has(s.id) ? '隐藏' : '显示'}`);
     }
+  }
+
+  const order = settings.navOrder || [];
+  if (data.sections?.length) {
+    const ranked = order.filter((id) => data.sections.some((s) => s.id === id));
+    if (ranked.length) lines.push(`平铺顺序（前 ${ranked.length} 个已显式排序）: ${ranked.join(' → ')}`);
   }
 
   const groups = settings.navGroups || [];

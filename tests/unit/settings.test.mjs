@@ -105,3 +105,20 @@ test('getSettings 带上栏目清单（面板的「栏目管理」按它渲染�
   const text = settings.renderSettings(d);
   assert.ok(text.includes('隐藏 0 个'), '人类可读模式要能看出隐藏状态');
 });
+
+test('navOrder：平铺顺序校验 + 归一（栏目必须存在、去重保序、标题也认）', async () => {
+  const r = await settings.updateSettings({ set: { navOrder: ['campus', '求职'] } });
+  assert.deepEqual(r.set.navOrder, ['campus', 'job'], '写标题也认，统一归一成 id');
+  assert.deepEqual((await loadStore()).settings.navOrder, ['campus', 'job']);
+
+  await assert.rejects(
+    settings.updateSettings({ set: { navOrder: ['ghost'] } }),
+    (e) => e.code === 'INVALID_INPUT' && /平铺顺序里的栏目不存在: ghost/.test(e.message),
+  );
+
+  // 与 navHidden 同构：都是「栏目 id 清单」，互不影响
+  const r2 = await settings.updateSettings({ set: { navHidden: ['campus'], navOrder: ['job', 'campus'] } });
+  assert.deepEqual(r2.set.navHidden, ['campus']);
+  assert.deepEqual(r2.set.navOrder, ['job', 'campus']);
+  await settings.updateSettings({ set: { navHidden: [], navOrder: [] } });
+});

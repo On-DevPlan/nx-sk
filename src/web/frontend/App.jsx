@@ -38,7 +38,11 @@ export default function App() {
       }))
       .filter((g) => g.sections.length);
     const grouped = new Set(groups.flatMap((g) => g.sections.map((s) => s.id)));
-    const flat = visible.filter((s) => !grouped.has(s.id)).sort((a, b) => (a.order ?? 50) - (b.order ?? 50));
+    // 平铺顺序：settings.navOrder 里显式排过的优先（按它的次序），其余按栏目自己的 order 跟在后面
+    const rank = new Map((boot?.settings?.navOrder || []).map((id, i) => [id, i]));
+    const rankOf = (s) => (rank.has(s.id) ? rank.get(s.id) : Number.MAX_SAFE_INTEGER);
+    const flat = visible.filter((s) => !grouped.has(s.id))
+      .sort((a, b) => rankOf(a) - rankOf(b) || (a.order ?? 50) - (b.order ?? 50));
     const stat = VIEWS.filter((v) => v.tab !== false)
       .map((v) => ({ id: v.id, title: v.title, order: v.order, kind: 'view', component: v.component }))
       .filter((v) => !all.some((s) => s.id === v.id))
