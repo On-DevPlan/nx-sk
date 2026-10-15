@@ -43,13 +43,24 @@ export default function SettingsView() {
     await reload();
   });
 
-  // 头部导航分组：组顺序 = 头部显示顺序；一个栏目只能属于一个组（别组已勾的置灰）
+  // 头部导航分组：组顺序 = 头部显示顺序；组内栏目顺序 = 展开列表里的顺序（可上下移）
   const patchGroup = (gi, patch) => setGroups((gs) => gs.map((g, i) => (i === gi ? { ...g, ...patch } : g)));
 
-  const toggleMember = (gi, sid) => setGroups((gs) => gs.map((g, i) => {
+  const addMember = (gi, sid) => setGroups((gs) => gs.map((g, i) => (
+    i === gi && !g.sections.includes(sid) ? { ...g, sections: [...g.sections, sid] } : g
+  )));
+
+  const removeMember = (gi, sid) => setGroups((gs) => gs.map((g, i) => (
+    i === gi ? { ...g, sections: g.sections.filter((x) => x !== sid) } : g
+  )));
+
+  const moveMember = (gi, si, delta) => setGroups((gs) => gs.map((g, i) => {
     if (i !== gi) return g;
-    const has = g.sections.includes(sid);
-    return { ...g, sections: has ? g.sections.filter((x) => x !== sid) : [...g.sections, sid] };
+    const to = si + delta;
+    if (to < 0 || to >= g.sections.length) return g;
+    const next = [...g.sections];
+    [next[si], next[to]] = [next[to], next[si]];
+    return { ...g, sections: next };
   }));
 
   const moveGroup = (gi, delta) => setGroups((gs) => {
@@ -135,37 +146,55 @@ export default function SettingsView() {
         </div>
         <div className="pad stack">
           <div className="hint">
-            把同域栏目收拢成一个头部入口：头部只显示组名，悬浮展开上下列表选具体栏目。
-            不勾进任何分组的栏目保持平铺；组顺序 = 头部显示顺序；一个栏目只能属于一个分组。
+            把同域栏目收拢成一个头部入口：头部只显示组名，悬浮展开上下列表选具体栏目，
+            <b>列表顺序就是这里的顺序</b>（用上移 / 下移调）。不归组的栏目保持平铺；
+            组顺序 = 头部显示顺序；一个栏目只能属于一个分组。
           </div>
-          {groups.map((g, gi) => (
-            <div className="stack" key={gi} style={{ borderTop: gi ? 'var(--border)' : 0, paddingTop: gi ? 8 : 0 }}>
-              <div className="rowgap">
-                <input
-                  value={g.title}
-                  placeholder="组名，如「求职」"
-                  onChange={(e) => patchGroup(gi, { title: e.target.value })}
-                  style={{ minWidth: 160 }}
-                />
-                <button className="btn small ghost" disabled={gi === 0} onClick={() => moveGroup(gi, -1)}>上移</button>
-                <button className="btn small ghost" disabled={gi === groups.length - 1} onClick={() => moveGroup(gi, 1)}>下移</button>
-                <button className="btn small ghost" onClick={() => setGroups((gs) => gs.filter((_, i) => i !== gi))}>删除组</button>
-                <span className="muted">已选 {g.sections.length} 个栏目</span>
+          {groups.map((g, gi) => {
+            const taken = new Set(groups.flatMap((o, oi) => (oi === gi ? [] : o.sections)));
+            const available = (boot?.sections || []).filter((s) => !g.sections.includes(s.id) && !taken.has(s.id));
+            const byId = (sid) => (boot?.sections || []).find((s) => s.id === sid) || null;
+            return (
+              <div className="stack" key={gi} style={{ borderTop: gi ? 'var(--border)' : 0, paddingTop: gi ? 8 : 0 }}>
+                <div className="rowgap">
+                  <input
+                    value={g.title}
+                    placeholder="组名，如「求职」"
+                    onChange={(e) => patchGroup(gi, { title: e.target.value })}
+                    style={{ minWidth: 160 }}
+                  />
+                  <button className="btn small ghost" disabled={gi === 0} onClick={() => moveGroup(gi, -1)}>上移</button>
+                  <button className="btn small ghost" disabled={gi === groups.length - 1} onClick={() => moveGroup(gi, 1)}>下移</button>
+                  <button className="btn small ghost" onClick={() => setGroups((gs) => gs.filter((_, i) => i !== gi))}>删除组</button>
+                  <span className="muted">已选 {g.sections.length} 个栏目</span>
+                </div>
+                <div className="colbody">
+                  {g.sections.length ? g.sections.map((sid, si) => {
+                    const s = byId(sid);
+                    return (
+                      <div className="row" key={sid}>
+                        <span className="mono muted">{si + 1}</span>
+                        <span className={`name ${s ? '' : 'bad'}`}>{s ? s.title : `栏目已删除（${sid}）`}</span>
+                        <span className="desc">{s ? `${s.entries} 条` : '保存前请移除'}</span>
+                        <span className="acts">
+                          <button className="btn small ghost" disabled={si === 0} onClick={() => moveMember(gi, si, -1)}>上移</button>
+                          <button className="btn small ghost" disabled={si === g.sections.length - 1} onClick={() => moveMember(gi, si, 1)}>下移</button>
+                          <button className="btn small ghost" onClick={() => removeMember(gi, sid)}>移除</button>
+                        </span>
+                      </div>
+                    );
+                  }) : <div className="muted">这个分组还没有栏目——从下面点一个加进来。</div>}
+                </div>
+                <div className="rowgap">
+                  {available.length ? available.map((s) => (
+                    <button className="btn small ghost" key={s.id} onClick={() => addMember(gi, s.id)}>
+                      + {s.title}<span className="count"> {s.entries}</span>
+                    </button>
+                  )) : <span className="muted">所有栏目都已归组</span>}
+                </div>
               </div>
-              <div className="rowgap">
-                {(boot?.sections || []).map((s) => {
-                  const checked = g.sections.includes(s.id);
-                  const elsewhere = groups.some((o, oi) => oi !== gi && o.sections.includes(s.id));
-                  return (
-                    <label className="inline" key={s.id} title={elsewhere ? '已归入其它分组' : ''}>
-                      <input type="checkbox" checked={checked} disabled={elsewhere} onChange={() => toggleMember(gi, s.id)} />
-                      <span className={elsewhere ? 'muted' : ''}>{s.title}<span className="count"> {s.entries}</span></span>
-                    </label>
-                  );
-                })}
-              </div>
-            </div>
-          ))}
+            );
+          })}
           {!groups.length ? <div className="muted">还没有分组——所有栏目都平铺在头部。</div> : null}
           <div className="rowgap">
             <button className="btn" onClick={saveGroups}>保存分组</button>

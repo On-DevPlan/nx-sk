@@ -202,7 +202,7 @@ nx-sk file get $FID                             # 反查「被引用：求职 / 
 头部只显示组名，**悬浮展开上下列表**选具体栏目；不归组的栏目保持平铺。
 
 ```bash
-# 面板：设置 → 头部导航分组（勾选栏目 / 改名 / 排序 / 增删组），保存后头部立即生效
+# 面板：设置 → 头部导航分组（勾选栏目 / 组内排序 / 改名 / 增删组），保存后头部立即生效
 nx-sk setting set --set 'navGroups=[{"title":"求职","sections":["projects","internships","campus"]}]'
 nx-sk setting set --set 'navGroups=[]'   # 清空 = 全部栏目恢复平铺
 ```
