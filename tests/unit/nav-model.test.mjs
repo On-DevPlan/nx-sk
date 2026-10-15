@@ -110,17 +110,17 @@ test('validate：组名空 / 空组 / 栏目不存在 / 跨组重复 / 隐藏项
 test('容器模型：containerOf 判定「平铺 / 分组 / 隐藏」，三者互斥', () => {
   let cfg = m.addGroup(m.emptyConfig(), 'A');
   cfg = m.addSection(cfg, 0, 'job');
-  assert.deepEqual(m.containerOf(cfg, 'job'), { kind: 'group', gi: 0 });
-  assert.deepEqual(m.containerOf(cfg, 'servers'), { kind: 'pool' });
+  assert.deepEqual(m.containerOf(cfg, 'job'), { kind: 'group', gi: 0, index: 0 });
+  assert.deepEqual(m.containerOf(cfg, 'servers'), { kind: 'pool', index: null });
 
   cfg = m.moveToContainer(cfg, 'job', { kind: 'hidden' });
-  assert.deepEqual(m.containerOf(cfg, 'job'), { kind: 'hidden' });
+  assert.deepEqual(m.containerOf(cfg, 'job'), { kind: 'hidden', index: 0 });
   assert.deepEqual(cfg.groups[0].sections, [], '进隐藏容器时要先从分组里摘掉');
   assert.deepEqual(cfg.hidden, ['job']);
 
   // 从隐藏拖回平铺 → 不再是隐藏容器成员
   cfg = m.moveToContainer(cfg, 'job', { kind: 'pool' });
-  assert.deepEqual(m.containerOf(cfg, 'job'), { kind: 'pool' });
+  assert.deepEqual(m.containerOf(cfg, 'job'), { kind: 'pool', index: null });
   assert.deepEqual(cfg.hidden, []);
 
   // 平铺 → 分组（指定位置）
@@ -142,4 +142,24 @@ test('容器模型：任何一次移动都只落一处（不会同时存在于�
 
   const inContainers = (c, sid) => c.groups.filter((g) => g.sections.includes(sid)).length + (c.hidden.includes(sid) ? 1 : 0);
   assert.equal(inContainers(cfg, 'job'), 1);
+});
+
+test('insertionIndex：同容器内往下拖要减 1，跨容器与末尾不减（预览与实际落点对齐）', () => {
+  let cfg = m.addGroup(m.emptyConfig(), 'A');
+  for (const sid of ['job', 'projects', 'campus']) cfg = m.addSection(cfg, 0, sid);
+  assert.deepEqual(cfg.groups[0].sections, ['job', 'projects', 'campus']);
+
+  // 把 job（位置 0）拖到「projects 行之前」（悬停索引 1）→ 插入位 0 = 原地不动
+  assert.equal(m.insertionIndex(cfg, 'job', { kind: 'group', gi: 0 }, 1), 0);
+  // 拖到「campus 行之前」（悬停 2）→ 插入位 1 → 落到 projects 后面
+  assert.equal(m.insertionIndex(cfg, 'job', { kind: 'group', gi: 0 }, 2), 1);
+  const moved = m.moveToContainer(cfg, 'job', { kind: 'group', gi: 0 }, m.insertionIndex(cfg, 'job', { kind: 'group', gi: 0 }, 2));
+  assert.deepEqual(moved.groups[0].sections, ['projects', 'job', 'campus'], '预览到的顺序就是松手后的顺序');
+
+  // 往**上**拖不减（自身在下方，不影响上方索引）
+  assert.equal(m.insertionIndex(cfg, 'campus', { kind: 'group', gi: 0 }, 0), 0);
+  // 跨容器不减
+  assert.equal(m.insertionIndex(cfg, 'job', { kind: 'hidden' }, 1), 1);
+  // 末尾（null）保持 null
+  assert.equal(m.insertionIndex(cfg, 'job', { kind: 'group', gi: 0 }, null), null);
 });

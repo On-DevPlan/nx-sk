@@ -7,53 +7,73 @@
 //
 // **受控组件**：数据（cfg）与保存都在设置页；这里只管画与调 onChange。
 // 所有数据操作走 navModel 的纯函数（可单测），组件里不做状态体操。
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import * as nav from '../../web/frontend/components/navModel.js';
 
 export default function NavManager({ sections, value, onChange }) {
   const [drag, setDrag] = useState(null); // { kind:'section', sid } | { kind:'group', gi }
   const [over, setOver] = useState(null); // { key, index }：当前拖到哪个容器的第几位
 
+  const keyToTarget = (key) => {
+    if (key === 'pool') return { kind: 'pool' };
+    if (key === 'hidden') return { kind: 'hidden' };
+    const gi = Number(String(key).slice(1));
+    return Number.isFinite(gi) ? { kind: 'group', gi } : null;
+  };
+
+  /**
+   * **实时预览**：拖动过程中就把落点算出来渲染，松手前就看到最终顺序（所见即所得）。
+   * 插入位由 nav.insertionIndex 换算（同容器内往下拖要让位）——那条逻辑在模型里，有单测。
+   */
+  const preview = useMemo(() => {
+    if (drag?.kind !== 'section' || !over) return value;
+    const target = keyToTarget(over.key);
+    if (!target) return value;
+    const index = nav.insertionIndex(value, drag.sid, target, over.index);
+    return nav.moveToContainer(value, drag.sid, target, index);
+  }, [value, drag, over]);
+
   const allIds = sections.map((s) => s.id);
   const sectionOf = (id) => sections.find((s) => s.id === id) || null;
   const draggingSid = drag?.kind === 'section' ? drag.sid : null;
-  const pool = allIds.filter((id) => nav.containerOf(value, id).kind === 'pool');
+  const pool = allIds.filter((id) => nav.containerOf(preview, id).kind === 'pool');
 
   const endDrag = () => { setDrag(null); setOver(null); };
 
-  const dropInto = (key, target, index = null) => {
-    if (!draggingSid) return;
-    onChange(nav.moveToContainer(value, draggingSid, target, index));
-    endDrag();
-  };
+  /** 松手即提交预览里的顺序（预览就是结果，不再重新算一遍）。 */
+  const commit = () => { if (preview !== value) onChange(preview); endDrag(); };
 
   // 容器外壳：接住「拖到空白处 = 追加到末尾」，并显示落点高亮
-  const zone = (key, target, base = '') => ({
-    className: `${base} ${over?.key === key && over.index === null ? 'drop-target' : ''}${over?.key === key && over.group ? ' drop-target' : ''}`,
-    onDragOver: (e) => {
-      if (draggingSid) { e.preventDefault(); setOver({ key, index: null }); }
-    },
-    onDragLeave: () => setOver((o) => (o?.key === key ? null : o)),
-    onDrop: (e) => { e.preventDefault(); dropInto(key, target, null); },
+  const zone = (key, base = '') => ({
+    className: `${base} ${over?.key === key ? 'drop-target' : ''}`,
+    onDragOver: (e) => { if (draggingSid) { e.preventDefault(); setOver({ key, index: null }); } },
+    onDragLeave: () => setOver((o) => (o?.key === key && o.index === null ? null : o)),
+    onDrop: (e) => { e.preventDefault(); commit(); },
   });
 
-  const rowProps = (key, sid, si, target) => ({
-    onDragOver: (e) => { if (draggingSid && draggingSid !== sid) { e.preventDefault(); e.stopPropagation(); setOver({ key, index: si }); } },
-    onDrop: (e) => { e.preventDefault(); e.stopPropagation(); dropInto(key, target, si); },
+  const rowProps = (key, sid, si) => ({
+    onDragOver: (e) => {
+      if (!draggingSid || draggingSid === sid) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setOver({ key, index: si });
+    },
+    onDrop: (e) => { e.preventDefault(); e.stopPropagation(); commit(); },
     onDragStart: () => setDrag({ kind: 'section', sid }),
   });
 
   return (
     <div className="stack">
       {/* ① 平铺：不进任何容器的栏目（= 头部平铺显示） */}
-      <section {...zone('pool', { kind: 'pool' }, 'nav-pool')}>
+      <section {...zone('pool', 'nav-pool')}>
         <div className="hint">平铺：不进分组也不隐藏的栏目，直接显示在头部（拖到这里 = 移出分组 / 取消隐藏）</div>
         {pool.length ? (
           <div className="nav-list">
             {pool.map((sid, si) => (
-              <SectionRow key={sid} section={sectionOf(sid)} sid={sid} si={si}
+              <SectionRow key={sid} section={sectionOf(sid)} sid={sid}
                 dragging={draggingSid === sid}
-                {...rowProps('pool', sid, si, { kind: 'pool' })}
+                over={over?.key === 'pool' && over.index === si}
+                {...rowProps('pool', sid, si)}
                 onDragEnd={endDrag}
                 actions={null} />
             ))}
@@ -62,12 +82,16 @@ export default function NavManager({ sections, value, onChange }) {
       </section>
 
       {/* ② 分组：组名可改、组间可拖把手换位 */}
-      {value.groups.map((g, gi) => (
-        <section key={gi} {...zone(`g${gi}`, { kind: 'group', gi }, 'card nav-group')}>
+      {preview.groups.map((g, gi) => (
+        <section key={gi} {...zone(`g${gi}`, 'card nav-group')}>
           <div
             className={`colhead ${over?.key === `g${gi}` && over.group ? 'drop-target' : ''}`}
             onDragOver={(e) => { if (drag?.kind === 'group') { e.preventDefault(); setOver({ key: `g${gi}`, group: true }); } }}
-            onDrop={(e) => { e.preventDefault(); if (drag?.kind === 'group' && drag.gi !== gi) onChange(nav.moveGroup(value, drag.gi, gi - drag.gi)); endDrag(); }}
+            onDrop={(e) => {
+              e.preventDefault();
+              if (drag?.kind === 'group' && drag.gi !== gi) onChange(nav.moveGroup(value, drag.gi, gi - drag.gi));
+              endDrag();
+            }}
           >
             <span className="grip" title="拖动调整分组顺序" draggable
               onDragStart={() => setDrag({ kind: 'group', gi })} onDragEnd={endDrag} />
@@ -81,9 +105,10 @@ export default function NavManager({ sections, value, onChange }) {
           {g.sections.length ? (
             <div className="nav-list">
               {g.sections.map((sid, si) => (
-                <SectionRow key={sid} section={sectionOf(sid)} sid={sid} si={si}
+                <SectionRow key={sid} section={sectionOf(sid)} sid={sid}
                   dragging={draggingSid === sid}
-                  {...rowProps(`g${gi}`, sid, si, { kind: 'group', gi })}
+                  over={over?.key === `g${gi}` && over.index === si}
+                  {...rowProps(`g${gi}`, sid, si)}
                   onDragEnd={endDrag}
                   actions={<button className="btn small ghost" onClick={() => onChange(nav.ungroupSection(value, sid))}>移出</button>} />
               ))}
@@ -93,18 +118,19 @@ export default function NavManager({ sections, value, onChange }) {
       ))}
 
       {/* ③ 隐藏：与分组同构的容器——拖进去即「不进头部」 */}
-      <section {...zone('hidden', { kind: 'hidden' }, 'card nav-group nav-hidden')}>
+      <section {...zone('hidden', 'card nav-group nav-hidden')}>
         <div className="colhead">
           隐藏
-          <span className="muted">{value.hidden.length} 个栏目</span>
+          <span className="muted">{preview.hidden.length} 个栏目</span>
           <span className="right muted">不进头部 · #/栏目id 直达仍可用</span>
         </div>
-        {value.hidden.length ? (
+        {preview.hidden.length ? (
           <div className="nav-list">
-            {value.hidden.map((sid, si) => (
-              <SectionRow key={sid} section={sectionOf(sid)} sid={sid} si={si}
+            {preview.hidden.map((sid, si) => (
+              <SectionRow key={sid} section={sectionOf(sid)} sid={sid}
                 dragging={draggingSid === sid}
-                {...rowProps('hidden', sid, si, { kind: 'hidden' })}
+                over={over?.key === 'hidden' && over.index === si}
+                {...rowProps('hidden', sid, si)}
                 onDragEnd={endDrag}
                 actions={<button className="btn small ghost" onClick={() => onChange(nav.ungroupSection(value, sid))}>移出</button>} />
             ))}
@@ -121,9 +147,9 @@ export default function NavManager({ sections, value, onChange }) {
 }
 
 /** 一行栏目：把手（拖）+ 名称 + 计数 + 容器自己的动作（移出 / 无）。 */
-function SectionRow({ section, sid, dragging, actions, onDragStart, onDragEnd, onDragOver, onDrop }) {
+function SectionRow({ section, sid, dragging, over, actions, onDragStart, onDragEnd, onDragOver, onDrop }) {
   return (
-    <div className={`row nav-row ${dragging ? 'dragging' : ''}`} onDragOver={onDragOver} onDrop={onDrop}>
+    <div className={`row nav-row ${dragging ? 'dragging' : ''} ${over ? 'over' : ''}`} onDragOver={onDragOver} onDrop={onDrop}>
       <span className="grip" title="拖动：换位 / 换容器" draggable onDragStart={onDragStart} onDragEnd={onDragEnd} />
       <span className="name">{section ? section.title : `栏目已删除（${sid}）`}</span>
       <span className="desc">{section ? `${section.entries} 条` : '保存前请移出'}</span>
@@ -131,3 +157,4 @@ function SectionRow({ section, sid, dragging, actions, onDragStart, onDragEnd, o
     </div>
   );
 }
+
