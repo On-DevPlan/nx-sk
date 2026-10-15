@@ -78,3 +78,30 @@ test('navGroups 保留组内栏目顺序（头部展开列表按它渲染，别�
   );
   await settings.updateSettings({ set: { navGroups: [] } });
 });
+
+test('navHidden：隐藏清单校验 + 归一（栏目必须存在、去重保序、接受单个字符串）', async () => {
+  const r = await settings.updateSettings({ set: { navHidden: 'campus' } });
+  assert.deepEqual(r.set.navHidden, ['campus']);
+  assert.deepEqual((await loadStore()).settings.navHidden, ['campus']);
+
+  // 数组 + 重复 + 不存在的栏目
+  const r2 = await settings.updateSettings({ key: 'navHidden', value: ['campus', 'campus', 'job'] });
+  assert.deepEqual(r2.set.navHidden, ['campus', 'job']);
+  await assert.rejects(
+    settings.updateSettings({ set: { navHidden: ['no_such_section'] } }),
+    (e) => e.code === 'INVALID_INPUT' && /不存在/.test(e.message),
+  );
+
+  // 只改导航配置不影响标量设置（PATCH 语义）
+  assert.deepEqual((await loadStore()).settings.navHidden, ['campus', 'job']);
+  await settings.updateSettings({ set: { navHidden: [] } });
+  assert.deepEqual((await loadStore()).settings.navHidden, []);
+});
+
+test('getSettings 带上栏目清单（面板的「栏目管理」按它渲染）', async () => {
+  const d = await settings.getSettings();
+  assert.ok(Array.isArray(d.sections) && d.sections.length >= 5, '要列出全部栏目');
+  assert.ok(d.sections.every((s) => s.id && s.title && typeof s.entries === 'number'));
+  const text = settings.renderSettings(d);
+  assert.ok(text.includes('隐藏 0 个'), '人类可读模式要能看出隐藏状态');
+});

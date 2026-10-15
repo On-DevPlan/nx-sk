@@ -17,28 +17,34 @@ export default function App() {
   const { boot, bootError, ui, patchUi, reload } = useStore();
   const view = LEGACY_VIEW[ui.view] || ui.view;
 
-  // 栏目 tab 是**数据驱动**的（bootstrap.sections）；分组来自 settings.navGroups（设置页可配）；
+  // 栏目 tab 是**数据驱动**的（bootstrap.sections）；分组与隐藏来自 settings（设置页可配）；
   // 静态 tab 来自前端注册表。渲染顺序：未分组栏目（按 order）→ 分组（按配置顺序）→ 工具（按 order）。
   const nav = useMemo(() => {
-    const sections = (boot?.sections || []).map((s) => ({
+    const all = (boot?.sections || []).map((s) => ({
       id: s.id, title: s.title, order: s.order, kind: 'section', count: s.entries,
     }));
-    // 分组是**显示配置**：成员栏目被删掉时优雅降级（过滤掉、配置保留），成员全没了就不显示这个组
+    // 隐藏**只隐藏入口**：`#/栏目id` 直达仍然渲染，所以 all 里保留全部栏目
+    const hidden = new Set(boot?.settings?.navHidden || []);
+    const visible = all.filter((s) => !hidden.has(s.id));
+
+    // 分组是**显示配置**：成员栏目被删掉时优雅降级（过滤掉、配置保留），成员全没了就不显示这个组；
+    // 被隐藏的成员在入口里同样不出现
     const groups = (boot?.settings?.navGroups || [])
       .map((g) => ({
         title: g.title,
         sections: (g.sections || [])
-          .map((sid) => sections.find((s) => s.id === sid))
+          .map((sid) => visible.find((s) => s.id === sid))
           .filter(Boolean),
       }))
       .filter((g) => g.sections.length);
     const grouped = new Set(groups.flatMap((g) => g.sections.map((s) => s.id)));
-    const flat = sections.filter((s) => !grouped.has(s.id)).sort((a, b) => (a.order ?? 50) - (b.order ?? 50));
+    const flat = visible.filter((s) => !grouped.has(s.id)).sort((a, b) => (a.order ?? 50) - (b.order ?? 50));
     const stat = VIEWS.filter((v) => v.tab !== false)
       .map((v) => ({ id: v.id, title: v.title, order: v.order, kind: 'view', component: v.component }))
-      .filter((v) => !sections.some((s) => s.id === v.id))
+      .filter((v) => !all.some((s) => s.id === v.id))
       .sort((a, b) => (a.order ?? 50) - (b.order ?? 50));
-    return { flat, groups, tools: stat, all: [...flat, ...groups.flatMap((g) => g.sections), ...stat] };
+    const hiddenItems = all.filter((s) => hidden.has(s.id));
+    return { flat, groups, tools: stat, all: [...flat, ...groups.flatMap((g) => g.sections), ...stat, ...hiddenItems] };
   }, [boot]);
 
   // 没 boot 之前**不要**拿第一个 tab 兜底：那时动态栏目还没到，nav 里只有静态视图，

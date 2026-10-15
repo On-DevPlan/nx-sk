@@ -4,14 +4,15 @@ import { loadStore, mutateStore, snapshotStore } from '../../core/store.js';
 import { findSection } from '../../core/fields.js';
 import { badInput, notFound } from '../../core/errors.js';
 
-export const SETTING_KEYS = ['exportDir', 'exportFormat', 'includeSecretsInExport', 'defaultSection', 'navGroups'];
+export const SETTING_KEYS = ['exportDir', 'exportFormat', 'includeSecretsInExport', 'defaultSection', 'navGroups', 'navHidden'];
 
 const SCHEMA = {
   exportDir: { type: 'string', hint: '导出目录，留空 = ~/nx-sk/export' },
   exportFormat: { type: 'string', enum: ['json', 'md', 'both'], hint: '整体导出默认格式' },
   includeSecretsInExport: { type: 'boolean', hint: '整体导出是否默认带密钥明文（默认否）' },
   defaultSection: { type: 'string', hint: '默认栏目 id' },
-  navGroups: { type: 'json', hint: '头部导航分组：[{title, sections:[栏目id…]}]，数组顺序 = 显示顺序' },
+  navGroups: { type: 'json', hint: '头部导航分组：[{title, sections:[栏目id…]}]，数组顺序 = 显示顺序', coerce: coerceNavGroups },
+  navHidden: { type: 'json', hint: '头部隐藏的栏目 id（入口不显示，`#/栏目` 直达仍可用）', coerce: coerceNavHidden },
 };
 
 export function settingsSchema() {
@@ -20,7 +21,16 @@ export function settingsSchema() {
 
 export async function getSettings() {
   const store = await loadStore();
-  return { settings: store.settings, schema: settingsSchema() };
+  return {
+    settings: store.settings,
+    // 栏目清单随设置一起给：面板的「栏目管理」按它渲染，CLI 也能一次看全
+    sections: store.sections.map((s) => ({
+      id: s.id,
+      title: s.title,
+      entries: store.entries.filter((e) => e.section === s.id).length,
+    })),
+    schema: settingsSchema(),
+  };
 }
 
 /**
@@ -67,10 +77,25 @@ function coerceNavGroups(value, store) {
   });
 }
 
+/** 隐藏清单校验：栏目必须真实存在；去重保序（归一成真实 id）。 */
+function coerceNavHidden(value, store) {
+  const list = Array.isArray(value) ? value : String(value ?? '').split(',');
+  const out = [];
+  for (const item of list) {
+    const ref = String(item ?? '').trim();
+    if (!ref) continue;
+    const sec = findSection(store, ref);
+    if (!sec) throw badInput(`要隐藏的栏目不存在: ${ref}`);
+    if (!out.includes(sec.id)) out.push(sec.id);
+  }
+  return out;
+}
+
 function coerceSetting(key, value, store) {
   const s = SCHEMA[key];
   if (!s) throw notFound(`未知设置项: ${key}（可用: ${SETTING_KEYS.join(', ')}）`);
-  if (s.type === 'json') return coerceNavGroups(value, store);
+  // 结构化设置项（导航分组 / 隐藏）自带校验器；标量项走下面这套
+  if (s.coerce) return s.coerce(value, store);
   if (s.type === 'boolean') {
     if (typeof value === 'boolean') return value;
     const v = String(value).trim().toLowerCase();
@@ -109,16 +134,30 @@ export async function updateSettings({ set, key, value, 'dry-run': dryRun } = {}
 }
 
 export function renderSettings(data) {
-  const lines = ['当前设置（改：nx-sk setting set --key <名> --value <值>）'];
+  const lines = ['当前设置（改：nx-sk setting set --set k=v）'];
   for (const s of data.schema) {
+    if (s.coerce) continue; // 结构化项（导航分组 / 隐藏）单独可读地列在下面
     const v = data.settings[s.key];
     const shown = s.type === 'boolean' ? (v ? '是' : '否')
-      : (v === '' || v === undefined ? '（空）'
-        : (v && typeof v === 'object'
-          ? (() => { const j = JSON.stringify(v); return j.length > 56 ? `${j.slice(0, 56)}…` : j; })()
-          : String(v)));
+      : (v === '' || v === undefined ? '（空）' : String(v));
     lines.push(`  ${s.key.padEnd(22)} ${shown.padEnd(10)} ${s.hint}`);
   }
+
+  const settings = data.settings || {};
+  const hidden = new Set(settings.navHidden || []);
+  if (data.sections?.length) {
+    lines.push('', `栏目（${data.sections.length}）· 隐藏 ${hidden.size} 个`);
+    for (const s of data.sections) {
+      lines.push(`  ${String(s.id).padEnd(18)} ${String(s.title).padEnd(14)} ${hidden.has(s.id) ? '隐藏' : '显示'}`);
+    }
+  }
+
+  const groups = settings.navGroups || [];
+  lines.push('', groups.length
+    ? `分组（${groups.length}）· 组顺序 = 头部顺序，组内顺序 = 展开列表顺序`
+    : '分组：无（全部栏目平铺在头部）');
+  for (const g of groups) lines.push(`  ${g.title}: ${g.sections.join(' → ')}`);
+  lines.push('', '例：nx-sk setting set --set \'navGroups=[{"title":"求职","sections":["projects"]}]\' --dry-run');
   return lines.join('\n');
 }
 

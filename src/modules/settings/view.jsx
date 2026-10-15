@@ -1,23 +1,33 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../../web/frontend/api/client.js';
 import { useStore } from '../../web/frontend/store.jsx';
 import { CliHints, Copyable, Empty, Tag } from '../../web/frontend/components/ui.jsx';
+import * as nav from '../../web/frontend/components/navModel.js';
+import NavManager from './navManager.jsx';
 
 export default function SettingsView() {
   const { boot, reload, toast, guard } = useStore();
   const [data, setData] = useState(null);
   const [form, setForm] = useState(null);
-  const [groups, setGroups] = useState([]);
+  const [navCfg, setNavCfg] = useState(nav.emptyConfig());
+  // 保存后的基准：脏值判断与「放弃改动」都以它为准，不靠逐项对比
+  const [baseline, setBaseline] = useState(null);
   // 面板地址不写死：直接取用户此刻访问的这个 origin，换端口/换 host 都自动跟上
   const panelUrl = typeof window === 'undefined' ? '' : window.location.origin;
   const panelPort = typeof window === 'undefined' ? '' : (window.location.port || '80');
 
+  const sections = useMemo(() => data?.sections || [], [data]);
+  const sectionIds = useMemo(() => sections.map((s) => s.id), [sections]);
+
   const load = useCallback(async () => {
     try {
       const d = await api('/api/settings');
+      const nextForm = { ...d.settings };
+      const nextNav = nav.configFromSettings(d.settings);
       setData(d);
-      setForm({ ...d.settings });
-      setGroups((d.settings.navGroups || []).map((g) => ({ title: g.title, sections: [...g.sections] })));
+      setForm(nextForm);
+      setNavCfg(nextNav);
+      setBaseline({ form: nextForm, navCfg: nextNav });
     } catch (e) {
       toast(e.message, 'bad');
     }
@@ -25,63 +35,40 @@ export default function SettingsView() {
 
   useEffect(() => { load(); }, [load]);
 
+  const problems = useMemo(() => (form ? nav.validate(navCfg, sectionIds) : []), [navCfg, sectionIds, form]);
+  const dirty = !!baseline && (nav.isDirty(navCfg, baseline.navCfg) || nav.isDirty(form, baseline.form));
+
+  // 一次保存全部设置：标量项 + 导航（分组 / 隐藏）。分成两块各存各的，
+  // 用户就得记住「刚才那块存了没」——统一保存 + 统一的脏值提示才是清晰的。
   const save = guard(async () => {
-    // 必须包在 `set` 里发：HTTP 的 body 会经 applySpec **只保留声明过的键**，
-    // 平铺的 `{exportDir: …}` 会被静默丢掉 → service 收到空 patch 报「至少要给一项」。
-    // `set` 是 setting.set 声明过的 kv flag，HTTP 形态就是 `{set: {k: v}}`。
-    const body = {
-      set: {
-        exportDir: form.exportDir,
-        exportFormat: form.exportFormat,
-        includeSecretsInExport: !!form.includeSecretsInExport,
-        defaultSection: form.defaultSection,
+    if (problems.length) { toast(`保存失败：${problems[0].message}`, 'bad'); return; }
+    const r = await api('/api/settings', {
+      method: 'PATCH',
+      body: {
+        set: {
+          exportDir: form.exportDir,
+          exportFormat: form.exportFormat,
+          includeSecretsInExport: !!form.includeSecretsInExport,
+          defaultSection: form.defaultSection,
+          ...nav.configToPayload(navCfg),
+        },
       },
-    };
-    const r = await api('/api/settings', { method: 'PATCH', body });
+    });
+    const nextForm = { ...r.set };
+    const nextNav = nav.configFromSettings(r.set);
+    setData({ ...data, settings: r.set });
+    setForm(nextForm);
+    setNavCfg(nextNav);
+    setBaseline({ form: nextForm, navCfg: nextNav });
     toast('设置已保存');
-    setData({ ...data, settings: r.set });
     await reload();
   });
 
-  // 头部导航分组：组顺序 = 头部显示顺序；组内栏目顺序 = 展开列表里的顺序（可上下移）
-  const patchGroup = (gi, patch) => setGroups((gs) => gs.map((g, i) => (i === gi ? { ...g, ...patch } : g)));
-
-  const addMember = (gi, sid) => setGroups((gs) => gs.map((g, i) => (
-    i === gi && !g.sections.includes(sid) ? { ...g, sections: [...g.sections, sid] } : g
-  )));
-
-  const removeMember = (gi, sid) => setGroups((gs) => gs.map((g, i) => (
-    i === gi ? { ...g, sections: g.sections.filter((x) => x !== sid) } : g
-  )));
-
-  const moveMember = (gi, si, delta) => setGroups((gs) => gs.map((g, i) => {
-    if (i !== gi) return g;
-    const to = si + delta;
-    if (to < 0 || to >= g.sections.length) return g;
-    const next = [...g.sections];
-    [next[si], next[to]] = [next[to], next[si]];
-    return { ...g, sections: next };
-  }));
-
-  const moveGroup = (gi, delta) => setGroups((gs) => {
-    const to = gi + delta;
-    if (to < 0 || to >= gs.length) return gs;
-    const next = [...gs];
-    [next[gi], next[to]] = [next[to], next[gi]];
-    return next;
-  });
-
-  const saveGroups = guard(async () => {
-    const naked = groups.find((g) => !String(g.title).trim());
-    if (naked) { toast('每个分组都要有组名', 'bad'); return; }
-    const empty = groups.find((g) => !g.sections.length);
-    if (empty) { toast(`分组「${empty.title}」还没有勾选栏目——要么勾一个，要么删掉这个分组`, 'bad'); return; }
-    const r = await api('/api/settings', { method: 'PATCH', body: { set: { navGroups: groups } } });
-    toast(groups.length ? `已保存 ${groups.length} 个导航分组` : '已取消分组，栏目恢复平铺');
-    setData({ ...data, settings: r.set });
-    setGroups((r.set.navGroups || []).map((g) => ({ title: g.title, sections: [...g.sections] })));
-    await reload();
-  });
+  const discard = () => {
+    if (!baseline) return;
+    setForm({ ...baseline.form });
+    setNavCfg(structuredClone(baseline.navCfg));
+  };
 
   if (!data || !form) return <div className="pad muted">加载中…</div>;
 
@@ -91,7 +78,71 @@ export default function SettingsView() {
         <strong>设置</strong>
         <span className="muted">本机配置与运行状态</span>
         <span className="grow" />
+        {dirty ? (
+          <span className="rowgap">
+            <span className="tag">有未保存的改动</span>
+            <button className="btn small" onClick={() => { void save(); }}>保存</button>
+            <button className="btn small ghost" onClick={discard}>放弃改动</button>
+          </span>
+        ) : <span className="muted">已保存</span>}
         <button className="btn small ghost" onClick={load}>重新读取</button>
+      </div>
+
+      <div className="card">
+        <div className="colhead">
+          栏目管理
+          <span className="right muted">
+            头部显示 {sectionIds.length - navCfg.hidden.length} 个 · 隐藏 {navCfg.hidden.length} 个
+            {navCfg.groups.length ? ` · ${navCfg.groups.length} 个分组` : ''}
+          </span>
+        </div>
+        <div className="pad stack">
+          <div className="hint">
+            拖动就是把结构摆成你要的样子：栏目可以拖进分组、组内换位、拖回平铺区即移出；拖分组把手换分组顺序。
+            被隐藏的栏目只是头部不显示入口，用 <code>#/栏目id</code> 直达仍可用。
+          </div>
+          <NavManager sections={sections} value={navCfg} onChange={setNavCfg} />
+          {problems.length ? (
+            <div className="stack">
+              {problems.map((p) => <div key={p.field} className="hint bad">· {p.message}</div>)}
+            </div>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="colhead">默认行为</div>
+        <div className="pad">
+          <div className="grid">
+            <div className="field">
+              <div className="flabel"><span>默认导出格式</span></div>
+              <div className="fctrl">
+                <select value={form.exportFormat} onChange={(e) => setForm({ ...form, exportFormat: e.target.value })}>
+                  <option value="both">JSON + Markdown</option>
+                  <option value="json">仅 JSON</option>
+                  <option value="md">仅 Markdown</option>
+                </select>
+              </div>
+            </div>
+            <div className="field">
+              <div className="flabel"><span>默认导出目录</span><span className="fkey">留空 = ~/nx-sk/export</span></div>
+              <div className="fctrl"><input value={form.exportDir} onChange={(e) => setForm({ ...form, exportDir: e.target.value })} /></div>
+            </div>
+            <div className="field">
+              <div className="flabel"><span>默认栏目</span><span className="fkey">CLI 未指定 --section 时的首选</span></div>
+              <div className="fctrl"><input value={form.defaultSection} onChange={(e) => setForm({ ...form, defaultSection: e.target.value })} /></div>
+            </div>
+            <div className="field">
+              <div className="flabel"><span>导出默认带明文密钥</span><span className="fkey">默认开；要分享出去时关掉</span></div>
+              <div className="fctrl">
+                <label className="inline">
+                  <input type="checkbox" checked={!!form.includeSecretsInExport} onChange={(e) => setForm({ ...form, includeSecretsInExport: e.target.checked })} />
+                  <span className={form.includeSecretsInExport ? 'muted' : 'bad'}>{form.includeSecretsInExport ? '开（导出文件含真实凭据，注意别外发）' : '关（凭据打码后再导出）'}</span>
+                </label>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div className="card">
@@ -135,109 +186,6 @@ export default function SettingsView() {
             <span className="name">重启面板</span>
             <span className="desc">面板本身就是 serve 提供的；改代码后重启它即可</span>
             <span className="acts"><Copyable className="mono" text={`nx-sk serve --port ${panelPort}`}>{`nx-sk serve --port ${panelPort}`}</Copyable></span>
-          </div>
-        </div>
-      </div>
-
-      <div className="card">
-        <div className="colhead">
-          头部导航分组
-          <span className="right muted">{groups.length ? `${groups.length} 个分组` : '未分组（全部平铺）'}</span>
-        </div>
-        <div className="pad stack">
-          <div className="hint">
-            把同域栏目收拢成一个头部入口：头部只显示组名，悬浮展开上下列表选具体栏目，
-            <b>列表顺序就是这里的顺序</b>（用上移 / 下移调）。不归组的栏目保持平铺；
-            组顺序 = 头部显示顺序；一个栏目只能属于一个分组。
-          </div>
-          {groups.map((g, gi) => {
-            const taken = new Set(groups.flatMap((o, oi) => (oi === gi ? [] : o.sections)));
-            const available = (boot?.sections || []).filter((s) => !g.sections.includes(s.id) && !taken.has(s.id));
-            const byId = (sid) => (boot?.sections || []).find((s) => s.id === sid) || null;
-            return (
-              <div className="stack" key={gi} style={{ borderTop: gi ? 'var(--border)' : 0, paddingTop: gi ? 8 : 0 }}>
-                <div className="rowgap">
-                  <input
-                    value={g.title}
-                    placeholder="组名，如「求职」"
-                    onChange={(e) => patchGroup(gi, { title: e.target.value })}
-                    style={{ minWidth: 160 }}
-                  />
-                  <button className="btn small ghost" disabled={gi === 0} onClick={() => moveGroup(gi, -1)}>上移</button>
-                  <button className="btn small ghost" disabled={gi === groups.length - 1} onClick={() => moveGroup(gi, 1)}>下移</button>
-                  <button className="btn small ghost" onClick={() => setGroups((gs) => gs.filter((_, i) => i !== gi))}>删除组</button>
-                  <span className="muted">已选 {g.sections.length} 个栏目</span>
-                </div>
-                <div className="colbody">
-                  {g.sections.length ? g.sections.map((sid, si) => {
-                    const s = byId(sid);
-                    return (
-                      <div className="row" key={sid}>
-                        <span className="mono muted">{si + 1}</span>
-                        <span className={`name ${s ? '' : 'bad'}`}>{s ? s.title : `栏目已删除（${sid}）`}</span>
-                        <span className="desc">{s ? `${s.entries} 条` : '保存前请移除'}</span>
-                        <span className="acts">
-                          <button className="btn small ghost" disabled={si === 0} onClick={() => moveMember(gi, si, -1)}>上移</button>
-                          <button className="btn small ghost" disabled={si === g.sections.length - 1} onClick={() => moveMember(gi, si, 1)}>下移</button>
-                          <button className="btn small ghost" onClick={() => removeMember(gi, sid)}>移除</button>
-                        </span>
-                      </div>
-                    );
-                  }) : <div className="muted">这个分组还没有栏目——从下面点一个加进来。</div>}
-                </div>
-                <div className="rowgap">
-                  {available.length ? available.map((s) => (
-                    <button className="btn small ghost" key={s.id} onClick={() => addMember(gi, s.id)}>
-                      + {s.title}<span className="count"> {s.entries}</span>
-                    </button>
-                  )) : <span className="muted">所有栏目都已归组</span>}
-                </div>
-              </div>
-            );
-          })}
-          {!groups.length ? <div className="muted">还没有分组——所有栏目都平铺在头部。</div> : null}
-          <div className="rowgap">
-            <button className="btn" onClick={saveGroups}>保存分组</button>
-            <button className="btn small ghost" onClick={() => setGroups((gs) => [...gs, { title: '', sections: [] }])}>新增分组</button>
-            {groups.length ? <button className="btn small ghost" onClick={() => setGroups([])}>清空（恢复平铺）</button> : null}
-          </div>
-        </div>
-      </div>
-
-      <div className="card">
-        <div className="colhead">默认行为</div>
-        <div className="pad">
-          <div className="grid">
-            <div className="field">
-              <div className="flabel"><span>默认导出格式</span></div>
-              <div className="fctrl">
-                <select value={form.exportFormat} onChange={(e) => setForm({ ...form, exportFormat: e.target.value })}>
-                  <option value="both">JSON + Markdown</option>
-                  <option value="json">仅 JSON</option>
-                  <option value="md">仅 Markdown</option>
-                </select>
-              </div>
-            </div>
-            <div className="field">
-              <div className="flabel"><span>默认导出目录</span><span className="fkey">留空 = ~/nx-sk/export</span></div>
-              <div className="fctrl"><input value={form.exportDir} onChange={(e) => setForm({ ...form, exportDir: e.target.value })} /></div>
-            </div>
-            <div className="field">
-              <div className="flabel"><span>默认栏目</span><span className="fkey">CLI 未指定 --section 时的首选</span></div>
-              <div className="fctrl"><input value={form.defaultSection} onChange={(e) => setForm({ ...form, defaultSection: e.target.value })} /></div>
-            </div>
-            <div className="field">
-              <div className="flabel"><span>导出默认带明文密钥</span><span className="fkey">默认开；要分享出去时关掉</span></div>
-              <div className="fctrl">
-                <label className="inline">
-                  <input type="checkbox" checked={!!form.includeSecretsInExport} onChange={(e) => setForm({ ...form, includeSecretsInExport: e.target.checked })} />
-                  <span className={form.includeSecretsInExport ? 'muted' : 'bad'}>{form.includeSecretsInExport ? '开（导出文件含真实凭据，注意别外发）' : '关（凭据打码后再导出）'}</span>
-                </label>
-              </div>
-            </div>
-          </div>
-          <div className="rowgap" style={{ marginTop: 8 }}>
-            <button className="btn" onClick={save}>保存设置</button>
           </div>
         </div>
       </div>
