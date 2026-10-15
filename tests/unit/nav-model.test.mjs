@@ -1,0 +1,145 @@
+// 头部导航配置的纯模型单测：增删改、排序、派生、校验。
+// 这一层是「管理逻辑」的唯一实现处（表现层只画），所以它必须自己就被钉死。
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+
+const m = await import('../../src/web/frontend/components/navModel.js');
+
+const ALL = ['job', 'projects', 'campus', 'servers', 'secret'];
+
+test('configFromSettings / configToPayload：深拷贝往返，不共享引用', () => {
+  const settings = { navGroups: [{ title: '求职', sections: ['projects'] }], navHidden: ['servers'] };
+  const cfg = m.configFromSettings(settings);
+  assert.deepEqual(cfg, { groups: [{ title: '求职', sections: ['projects'] }], hidden: ['servers'] });
+
+  // 改副本不影响原数据（设置页「放弃改动」的前提）
+  cfg.groups[0].sections.push('campus');
+  assert.deepEqual(settings.navGroups[0].sections, ['projects']);
+
+  assert.deepEqual(m.configToPayload(cfg), {
+    navGroups: [{ title: '求职', sections: ['projects', 'campus'] }],
+    navHidden: ['servers'],
+  });
+});
+
+test('configFromSettings：后端缺字段时给出空配置（老 store 直接可用）', () => {
+  assert.deepEqual(m.configFromSettings(undefined), { groups: [], hidden: [] });
+  assert.deepEqual(m.configFromSettings({}), { groups: [], hidden: [] });
+});
+
+test('isDirty：形状等价即视为未改动', () => {
+  const a = m.configFromSettings({ navGroups: [{ title: 'A', sections: ['job'] }] });
+  const b = structuredClone(a);
+  assert.equal(m.isDirty(a, b), false);
+  b.hidden.push('job');
+  assert.equal(m.isDirty(a, b), true);
+});
+
+test('分组：新增 / 改名 / 删除 / 上下移动（越界不动）', () => {
+  let cfg = m.emptyConfig();
+  cfg = m.addGroup(cfg, '求职');
+  cfg = m.addGroup(cfg, '工具');
+  assert.deepEqual(cfg.groups.map((g) => g.title), ['求职', '工具']);
+
+  cfg = m.renameGroup(cfg, 0, '求职资料');
+  assert.equal(cfg.groups[0].title, '求职资料');
+
+  cfg = m.moveGroup(cfg, 0, 1);
+  assert.deepEqual(cfg.groups.map((g) => g.title), ['工具', '求职资料']);
+  assert.deepEqual(m.moveGroup(cfg, 0, -1).groups.map((g) => g.title), ['工具', '求职资料'], '越界保持原样');
+
+  cfg = m.removeGroup(cfg, 0);
+  assert.deepEqual(cfg.groups.map((g) => g.title), ['求职资料']);
+});
+
+test('组成员：加入 / 一个栏目只能属于一个分组 / 移除 / 组内排序', () => {
+  let cfg = m.addGroup(m.emptyConfig(), 'A');
+  cfg = m.addGroup(cfg, 'B');
+  cfg = m.addSection(cfg, 0, 'job');
+  cfg = m.addSection(cfg, 0, 'projects');
+  cfg = m.addSection(cfg, 0, 'campus');
+  assert.deepEqual(cfg.groups[0].sections, ['job', 'projects', 'campus']);
+
+  // 已在别的组 → 拒绝（不静默搬走，界面上那一条也不该出现）
+  const same = m.addSection(cfg, 1, 'job');
+  assert.equal(same, cfg, '跨组加入应原样返回');
+  assert.deepEqual(m.availableFor(cfg, 1, ALL), ['servers', 'secret'], 'B 组可加入的只剩未归组的');
+
+  cfg = m.moveSection(cfg, 0, 0, 1);
+  assert.deepEqual(cfg.groups[0].sections, ['projects', 'job', 'campus']);
+  assert.deepEqual(m.moveSection(cfg, 0, 0, -1).groups[0].sections, ['projects', 'job', 'campus'], '越界保持原样');
+
+  cfg = m.removeSection(cfg, 0, 'job');
+  assert.deepEqual(cfg.groups[0].sections, ['projects', 'campus']);
+});
+
+test('隐藏开关与派生：groupedIds / ungroupedIds', () => {
+  let cfg = m.addGroup(m.emptyConfig(), 'A');
+  cfg = m.addSection(cfg, 0, 'job');
+
+  assert.deepEqual(m.groupedIds(cfg), ['job']);
+  assert.deepEqual(m.ungroupedIds(cfg, ALL), ['projects', 'campus', 'servers', 'secret']);
+
+  cfg = m.toggleHidden(cfg, 'servers');
+  assert.equal(m.isHidden(cfg, 'servers'), true);
+  assert.deepEqual(m.ungroupedIds(cfg, ALL), ['projects', 'campus', 'servers', 'secret'], '隐藏不影响「属于哪个组」');
+
+  cfg = m.toggleHidden(cfg, 'servers');
+  assert.equal(m.isHidden(cfg, 'servers'), false);
+  assert.deepEqual(cfg.hidden, []);
+});
+
+test('validate：组名空 / 空组 / 栏目不存在 / 跨组重复 / 隐藏项不存在 —— 都能判红', () => {
+  const ok = m.validate(m.addSection(m.addGroup(m.emptyConfig(), 'A'), 0, 'job'), ALL);
+  assert.deepEqual(ok, []);
+
+  const cases = [
+    [{ groups: [{ title: '  ', sections: ['job'] }], hidden: [] }, /组名/],
+    [{ groups: [{ title: 'A', sections: [] }], hidden: [] }, /还没有栏目/],
+    [{ groups: [{ title: 'A', sections: ['nope'] }], hidden: [] }, /已不存在，请移除/],
+    [{ groups: [{ title: 'A', sections: ['job'] }, { title: 'B', sections: ['job'] }], hidden: [] }, /只能属于一个分组/],
+    [{ groups: [], hidden: ['nope'] }, /已不存在/],
+  ];
+  for (const [cfg, re] of cases) {
+    const problems = m.validate(cfg, ALL);
+    assert.equal(problems.length >= 1, true, `应报错: ${JSON.stringify(cfg)}`);
+    assert.match(problems.map((p) => p.message).join(' | '), re);
+  }
+});
+
+test('容器模型：containerOf 判定「平铺 / 分组 / 隐藏」，三者互斥', () => {
+  let cfg = m.addGroup(m.emptyConfig(), 'A');
+  cfg = m.addSection(cfg, 0, 'job');
+  assert.deepEqual(m.containerOf(cfg, 'job'), { kind: 'group', gi: 0 });
+  assert.deepEqual(m.containerOf(cfg, 'servers'), { kind: 'pool' });
+
+  cfg = m.moveToContainer(cfg, 'job', { kind: 'hidden' });
+  assert.deepEqual(m.containerOf(cfg, 'job'), { kind: 'hidden' });
+  assert.deepEqual(cfg.groups[0].sections, [], '进隐藏容器时要先从分组里摘掉');
+  assert.deepEqual(cfg.hidden, ['job']);
+
+  // 从隐藏拖回平铺 → 不再是隐藏容器成员
+  cfg = m.moveToContainer(cfg, 'job', { kind: 'pool' });
+  assert.deepEqual(m.containerOf(cfg, 'job'), { kind: 'pool' });
+  assert.deepEqual(cfg.hidden, []);
+
+  // 平铺 → 分组（指定位置）
+  cfg = m.moveToContainer(cfg, 'job', { kind: 'group', gi: 0 }, 0);
+  assert.deepEqual(cfg.groups[0].sections, ['job']);
+});
+
+test('容器模型：任何一次移动都只落一处（不会同时存在于两个容器）', () => {
+  let cfg = m.addGroup(m.emptyConfig(), 'A');
+  cfg = m.addGroup(cfg, 'B');
+  cfg = m.addSection(cfg, 0, 'job');
+  cfg = m.moveToContainer(cfg, 'job', { kind: 'group', gi: 1 });
+  assert.deepEqual(cfg.groups[0].sections, []);
+  assert.deepEqual(cfg.groups[1].sections, ['job']);
+
+  cfg = m.moveToContainer(cfg, 'job', { kind: 'hidden' });
+  assert.deepEqual(cfg.groups.flatMap((g) => g.sections), []);
+  assert.deepEqual(cfg.hidden, ['job']);
+
+  const inContainers = (c, sid) => c.groups.filter((g) => g.sections.includes(sid)).length + (c.hidden.includes(sid) ? 1 : 0);
+  assert.equal(inContainers(cfg, 'job'), 1);
+});

@@ -435,3 +435,42 @@ a.file-name:hover { text-decoration: underline; }
   min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .file-preview .file-preview-name:hover { text-decoration: underline; }
+
+/* ── 栏目管理（设置页）：拖拽编排 + 显隐 ─────────────────────
+   结构用版面表达、改结构用拖拽表达——所以这里只有把手、输入框与两个动作，
+   没有一排 上移/下移/移除 按钮（按钮越多越看不出「现在是什么结构」）。 */
+.grip {
+  width: 10px;
+  height: 14px;
+  flex: 0 0 auto;
+  cursor: grab;
+  background-image: radial-gradient(circle, var(--mid) 1px, transparent 1px);
+  background-size: 4px 4px;
+  opacity: .5;
+}
+.grip:active { cursor: grabbing; }
+.nav-title {
+  font: inherit;
+  font-size: var(--fs-core);
+  font-weight: 600;
+  min-width: 12ch;
+  padding: 2px 0;
+  background: none;
+  border: 0;
+  border-bottom: 1px dashed var(--soft-2);
+}
+.nav-title:focus { outline: none; border-bottom-color: var(--ink); }
+.nav-group .colhead { display: flex; align-items: center; gap: 8px; }
+.nav-pool { padding: 8px 10px; background: var(--paper); border: var(--border); border-radius: 8px; }
+/* 拖拽落点：一眼看出「松手会放到这儿」 */
+.nav-pool.drop-target, .nav-group.drop-target { outline: 2px dashed var(--ink); outline-offset: -2px; background: var(--soft); }
+.nav-row.dragging { opacity: .45; }
+.nav-row.is-hidden .name { color: var(--mid); }
+
+/* 容器内的行列表：行本身已有 1px 底线，这里只做包裹 */
+.nav-list { display: flex; flex-direction: column; }
+/* 拖动分组时的落点提示（分组头也可以是落点：换顺序） */
+.nav-group .colhead.drop-target { background: var(--soft); }
+/* 「隐藏」与分组同构，只是语气更弱：它是"不显示"的容器 */
+.nav-hidden .colhead { color: var(--mid); }
+.nav-hidden .row .name { color: var(--mid); }
