@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import { api } from '../../web/frontend/api/client.js';
 import { useStore } from '../../web/frontend/store.jsx';
-import { CliHints, Empty, Modal } from '../../web/frontend/components/ui.jsx';
+import { Empty, Modal } from '../../web/frontend/components/ui.jsx';
 
 // Web 上传走 JSON 文本体，接口上限 32MB——留出余量在前端先拦，
 // 超限建议走 CLI（命令行没有请求体上限）。
@@ -93,7 +93,9 @@ function ReplaceReport({ r }) {
   );
 }
 
-export default function BackupView() {
+// 备份半页：由「导出与备份」合并页（export 模块的 view.jsx）组合渲染，
+// 所以不带页面头与 CLI 提示（CliHints 在合并页统一出一条）。tab: false，不单独出现在导航。
+export default function BackupPanel() {
   const { toast, guard, dialog, reload } = useStore();
   const [pw, setPw] = useState('');
   const [pw2, setPw2] = useState('');
@@ -177,13 +179,8 @@ export default function BackupView() {
 
   return (
     <>
-      <div className="toolbar rowgap pad">
-        <strong>加密备份</strong>
-        <span className="muted">整份数据用口令对称加密（AES-256-GCM）；导出设口令、恢复输口令，口令不落盘</span>
-      </div>
-
       <div className="card">
-        <div className="colhead">加密导出</div>
+        <div className="colhead">加密备份（口令 .nxskbak）</div>
         <div className="pad stack">
           <div className="grid">
             <div className="field">
@@ -211,7 +208,7 @@ export default function BackupView() {
       </div>
 
       <div className="card">
-        <div className="colhead">解密导入</div>
+        <div className="colhead">解密导入（.nxskbak）</div>
         <div className="pad stack">
           <div className="grid">
             <div className="field">
@@ -240,8 +237,6 @@ export default function BackupView() {
           </div>
         </div>
       </div>
-
-      <CliHints module="backup" />
 
       {result ? (
         <Modal

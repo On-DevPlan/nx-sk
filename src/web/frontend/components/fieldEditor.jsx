@@ -37,15 +37,18 @@ function AutoTextarea({ value, onChange, minRows = 2, placeholder, disabled, max
 
 /**
  * 字段值 → 附件 id 数组。
- * 一个 `file` 字段可挂**多个**附件：新写入统一存数组，历史数据里的单值是字符串
- * （读时按单元素处理）。前端不能 import core，所以这里自带一份同口径的归一化。
+ * 一个 `file` 字段可挂**多个**附件：新写入统一存数组；历史形态有单值字符串、
+ * 甚至旧版连写的 `"f_a,f_b"`（0.8.0 前 `--set` 不拆逗号）——统一拆分隔符归一。
+ * 前端不能 import core，所以这里自带一份同口径的归一化。
  */
 function toIds(value) {
   const raw = value === null || value === undefined ? [] : (Array.isArray(value) ? value : [value]);
   const out = [];
   for (const x of raw) {
-    const s = String(x ?? '').trim();
-    if (s && !out.includes(s)) out.push(s);
+    for (const piece of String(x ?? '').split(/[,，、;；]+/)) {
+      const id = piece.trim();
+      if (id && !out.includes(id)) out.push(id);
+    }
   }
   return out;
 }

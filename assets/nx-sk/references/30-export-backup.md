@@ -101,4 +101,4 @@ nx-sk backup import --file <备份>.nxskbak --password '口令' --replace  # 整
 - 两种方式都会**先自动留安全快照**（`…-before-import.json` / `…-before-restore.json`），可回滚。
 - 敏感字段在包内是明文（靠口令保护），导入时自动用**本机 vaultKey** 重新加密落盘——报告里的值一律打码，密钥明文不进报告。
 - 带 `--with-files` 的包导入时自动还原附件原件（sha256 校验；磁盘已有且内容不同则以磁盘为准）；v2 旧包可导入，但不含原件，报告会如实列出缺哪些文件。
-- 口令也可用环境变量 `NX_SK_BACKUP_PASSWORD` 提供；Web「加密备份」页提供同样能力（浏览器下载 / 选择文件导入；超大包建议走 CLI）。
+- 口令也可用环境变量 `NX_SK_BACKUP_PASSWORD` 提供；Web 面板「导出与备份」页提供同样能力（浏览器下载 / 选择文件导入；超大包建议走 CLI）。

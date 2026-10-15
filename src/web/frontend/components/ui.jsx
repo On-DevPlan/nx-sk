@@ -120,9 +120,12 @@ export function DialogHost() {
 }
 
 /** 「这个页面每个按钮都有同构 CLI 命令」——提示**由数据派生**，不手写（手写必然与实际命令漂移）。 */
+// module 可以是单个 id，也可以是数组——合并页（如「导出与备份」）一个页面承载
+// 多个模块的命令，提示合成一条而不是每半页各来一句。
 export function CliHints({ module }) {
   const { boot } = useStore();
-  const cmds = (boot?.commands || []).filter((c) => c.module === module);
+  const mods = [].concat(module);
+  const cmds = (boot?.commands || []).filter((c) => mods.includes(c.module));
   if (!cmds.length) return null;
   return (
     <div className="cli-hint">

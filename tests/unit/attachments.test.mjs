@@ -315,3 +315,23 @@ async function loadStoreSafe() {
   const { loadStore } = await import('../../src/core/store.js');
   return loadStore();
 }
+
+test('fileIdsOf：历史连写串（"f_a,f_b"）也拆开归一', () => {
+  assert.deepEqual(core.fileIdsOf('f_a,f_b'), ['f_a', 'f_b']);
+  assert.deepEqual(core.fileIdsOf(['f_a,f_b', 'f_c']), ['f_a', 'f_b', 'f_c']);
+  assert.deepEqual(core.fileIdsOf('f_a，f_b、f_c；f_d'), ['f_a', 'f_b', 'f_c', 'f_d']);
+});
+
+test('file update 改名不带扩展名时，物理文件自动接回原扩展名', async () => {
+  const src = await makeSource('rename-ext', 'rename-me.png', 'png-bytes');
+  const added = await svc.addFile({ path: src, category: 'avatar' });
+  const r = await svc.updateFile(added.id, { name: '证件照-干净版' });
+  assert.equal(r.ext, '.png', '台账 ext 不变');
+  assert.equal(r.rel, 'avatar/证件照-干净版.png', 'rel 带回原扩展名');
+  const abs = join(filesDir(), ...r.rel.split('/'));
+  assert.equal(await fsp.readFile(abs, 'utf8'), 'png-bytes', '内容跟着走');
+  // 名字自带扩展名时不会被重复追加
+  const r2 = await svc.updateFile(added.id, { name: '证件照-最终版.png' });
+  assert.equal(r2.rel, 'avatar/证件照-最终版.png');
+  await fsp.access(join(filesDir(), ...r2.rel.split('/')));
+});
