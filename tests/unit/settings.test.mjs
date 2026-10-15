@@ -122,3 +122,15 @@ test('navOrder：平铺顺序校验 + 归一（栏目必须存在、去重保序
   assert.deepEqual(r2.set.navOrder, ['job', 'campus']);
   await settings.updateSettings({ set: { navHidden: [], navOrder: [] } });
 });
+
+test('navOrder / navHidden：CLI 的 JSON 串写法也认（`["a","b"]` 与 `a,b` 等价）', async () => {
+  const a = await settings.updateSettings({ set: { navOrder: '["campus","job"]' } });
+  assert.deepEqual(a.set.navOrder, ['campus', 'job']);
+  const b = await settings.updateSettings({ set: { navOrder: 'job,campus' } });
+  assert.deepEqual(b.set.navOrder, ['job', 'campus']);
+  await assert.rejects(
+    settings.updateSettings({ set: { navOrder: '[bad json' } }),
+    (e) => e.code === 'INVALID_INPUT',
+  );
+  await settings.updateSettings({ set: { navOrder: [] } });
+});
