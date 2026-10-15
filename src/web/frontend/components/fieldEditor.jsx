@@ -62,7 +62,10 @@ function toIds(value) {
 export function FileFieldControl({ def, value, onChange }) {
   const { toast, guard, patchUi } = useStore();
   const [data, setData] = useState(null);
+  const [dragOver, setDragOver] = useState(false);
   const uploadRef = useRef(null);
+  // dragenter/dragleave 在子元素间穿梭时会成对触发，用深度计数避免「还没离开就熄掉高亮」
+  const dragDepth = useRef(0);
   const ids = toIds(value);
   const max = Number(def.maxItems) || 0;
   const full = max > 0 && ids.length >= max;
@@ -99,8 +102,21 @@ export function FileFieldControl({ def, value, onChange }) {
   const add = (id) => { if (id && !ids.includes(id)) onChange([...ids, id]); };
   const removeAt = (id) => onChange(ids.filter((x) => x !== id));
 
+  // 拖拽文件进字段框 = 直接上传并追加（与「附件」中心同一套手感）
+  const onDrop = guard(async (e) => {
+    dragDepth.current = 0;
+    setDragOver(false);
+    await upload(e.dataTransfer?.files);
+  });
+
   return (
-    <div className="file-picker">
+    <div
+      className={`file-picker ${dragOver ? 'drag' : ''}`}
+      onDragEnter={(e) => { e.preventDefault(); dragDepth.current += 1; setDragOver(true); }}
+      onDragOver={(e) => e.preventDefault()}
+      onDragLeave={() => { dragDepth.current -= 1; if (dragDepth.current <= 0) { dragDepth.current = 0; setDragOver(false); } }}
+      onDrop={onDrop}
+    >
       {ids.map((id) => {
         const rec = byId(id);
         if (!rec) {
