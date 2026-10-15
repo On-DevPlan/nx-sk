@@ -1,0 +1,32 @@
+- generic [ref=f1e3]:
+  - banner [ref=f1e4]:
+    - generic [ref=f1e5]: nx-sk
+    - generic [ref=f1e6]: 本机个人资源管理器
+    - generic [ref=f1e7]: v0.9.0
+    - generic [ref=f1e8]:
+      - generic "存储目录：C:\\Users\\MINISFORUM\\nx-sk\\store.json" [ref=f1e9]:
+        - generic [ref=f1e10]: 存储
+        - button "~/nx-sk/store.json" [ref=f1e11]
+      - button "刷新数据" [ref=f1e12] [cursor=pointer]
+  - navigation [ref=f1e13]:
+    - button "求职 1" [ref=f1e14] [cursor=pointer]:
+      - text: 求职
+      - generic [ref=f1e15]: "1"
+    - button "服务器 2" [ref=f1e16] [cursor=pointer]:
+      - text: 服务器
+      - generic [ref=f1e17]: "2"
+    - button "面试英语短语 6" [ref=f1e18] [cursor=pointer]:
+      - text: 面试英语短语
+      - generic [ref=f1e19]: "6"
+    - button "密钥 21" [ref=f1e20] [cursor=pointer]:
+      - text: 密钥
+      - generic [ref=f1e21]: "21"
+    - button "求职资料 9" [ref=f1e23] [cursor=pointer]:
+      - text: 求职资料
+      - generic [ref=f1e24]: "9"
+    - button "栏目" [ref=f1e27] [cursor=pointer]
+    - button "附件" [ref=f1e28] [cursor=pointer]
+    - button "导出与备份" [ref=f1e29] [cursor=pointer]
+    - button "设置" [ref=f1e30] [cursor=pointer]
+  - main [ref=f1e31]:
+    - generic [ref=f1e32]: 加载中…

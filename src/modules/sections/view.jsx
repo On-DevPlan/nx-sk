@@ -273,7 +273,7 @@ function EditForm({ modal, onChange, onSave, onSync, onAddField, onRemoveField, 
       </div>
       {full?.template ? (
         <div className="hint">
-          本栏目由模板「{full.template}」创建。模板后来新增的字段**不会自动**出现在这里，
+          本栏目由模板「{full.template}」创建。模板后来新增的字段<b>不会自动</b>出现在这里，
           点「同步模板字段」补齐（例如求职模板新增的「附件资料」组 / 简历、头像等 file 字段）。
         </div>
       ) : null}
