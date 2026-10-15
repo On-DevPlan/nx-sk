@@ -156,8 +156,17 @@ function SectionPane({ sectionId }) {
 function GroupTab({ group, currentId, onGo }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
+  // 离开时**延迟**再关：鼠标斜着从 pill 划到菜单行会短暂出界，立刻关就「刚展开就消失」
+  const closeTimer = useRef(null);
   const active = group.sections.some((s) => s.id === currentId);
   const total = group.sections.reduce((n, s) => n + (s.count || 0), 0);
+
+  const cancelClose = () => {
+    if (closeTimer.current) { clearTimeout(closeTimer.current); closeTimer.current = null; }
+  };
+  const openNow = () => { cancelClose(); setOpen(true); };
+  const closeSoon = () => { cancelClose(); closeTimer.current = setTimeout(() => setOpen(false), 140); };
+  useEffect(() => cancelClose, []);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -175,10 +184,10 @@ function GroupTab({ group, currentId, onGo }) {
     <span
       className="tab-group"
       ref={ref}
-      onMouseEnter={() => setOpen(true)}
-      onMouseLeave={() => setOpen(false)}
+      onMouseEnter={openNow}
+      onMouseLeave={closeSoon}
     >
-      <button className={`tab ${active ? 'active' : ''}`} aria-expanded={open} onClick={() => setOpen(true)}>
+      <button className={`tab ${active ? 'active' : ''}`} aria-expanded={open} onClick={openNow}>
         {group.title}
         <span className="count">{total}</span>
         <span className="caret" aria-hidden />
@@ -190,7 +199,7 @@ function GroupTab({ group, currentId, onGo }) {
               key={s.id}
               role="menuitem"
               className={`tab-menu-row ${s.id === currentId ? 'current' : ''}`}
-              onClick={() => { setOpen(false); onGo(s.id); }}
+              onClick={() => { cancelClose(); setOpen(false); onGo(s.id); }}
             >
               <span className="grow nowrap">{s.title}</span>
               {typeof s.count === 'number' ? <span className="count">{s.count}</span> : null}
