@@ -99,6 +99,14 @@ nx-sk file get f_bbb                              # 反查「被引用：求职 
 所以模板**后来**新增的字段不会自动出现在已建好的栏目里。用 `nx-sk section sync <栏目>`（可先 `--dry-run`）
 把模板新增的分组与字段补进来（只增不改不删）；面板侧是「栏目 → 编辑 → 同步模板字段」。
 
+栏目建得多了，可以在**设置里归组**收拢头部（同域栏目一个入口，悬浮展开上下列表；
+纯**显示配置**，不动栏目与条目数据）：
+
+```bash
+nx-sk setting set --set 'navGroups=[{"title":"求职","sections":["projects","internships"]}]'
+nx-sk setting set --set 'navGroups=[]'   # 清空 = 全部栏目恢复平铺
+```
+
 ## ref 路由表（按需加载）
 
 | ref | 何时读取 |

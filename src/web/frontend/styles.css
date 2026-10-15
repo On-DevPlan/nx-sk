@@ -96,6 +96,37 @@ nav.tabs {
 /* 分组细线：内容栏目 ‖ 系统工具 */
 .tabs-sep { width: 1px; height: 18px; background: var(--soft-2); margin: 0 4px; }
 
+/* ── 分组入口：一个 pill 收拢多个栏目（同域栏目不再挤成一排） ── */
+.tab-group { position: relative; display: inline-flex; }
+/* 展开指示用 CSS 三角，不引字符/图标 */
+.tab-group .caret {
+  width: 0; height: 0; margin-left: 1px;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 4px solid var(--mid);
+}
+.tab-group .tab.active .caret { border-top-color: var(--ink); }
+/* 上下列表：与面板同一套立体语言（单层 relief，别叠成岛屿） */
+.tab-menu {
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 40;
+  min-width: 172px; padding: 4px;
+  display: flex; flex-direction: column; gap: 2px;
+  background: var(--paper);
+  border: var(--border);
+  border-radius: var(--radius-btn);
+  box-shadow: var(--shadow-relief);
+}
+.tab-menu-row {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  height: var(--row-h); padding: 0 8px;
+  border: 0; border-radius: 6px; background: none;
+  color: var(--ink); font: inherit; font-size: var(--fs-core);
+  text-align: left; cursor: pointer;
+}
+.tab-menu-row:hover { background: var(--soft); }
+.tab-menu-row.current { font-weight: 600; }
+.tab-menu-row .count { color: var(--mid); font-size: 10px; font-variant-numeric: tabular-nums; }
+
 main.body { flex: 1; min-height: 0; overflow: auto; }
 
 /* ── tab：单层立体阴影，别叠 --shadow，叠两层就变岛屿 ── */

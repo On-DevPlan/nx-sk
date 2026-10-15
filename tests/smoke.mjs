@@ -206,6 +206,21 @@ step('key remove --dry-run 不落盘', dryKeyRemove.status === 'skipped' && (awa
 const dump = await cliJson(['section', 'dump', 'job']);
 step('section dump 给全量（字段 + 条目 + 未填清单）', dump.fields.length > 50 && dump.entries.length >= 1 && dump.entries[0].missing.length > 0);
 
+// ── 头部导航分组（settings.navGroups，设置页可配）────────────
+const groupsSet = await cliJson(['setting', 'set', '--set',
+  'navGroups=[{"title":"求职域","sections":["projects","internships"]}]']);
+step('setting set navGroups 落盘并归一',
+  groupsSet.status === 'ok' && groupsSet.set.navGroups[0].sections.length === 2);
+const bootGroups = await cliJson(['bootstrap']);
+step('bootstrap 带出导航分组（前端头部据此收拢）', bootGroups.settings.navGroups[0].title === '求职域');
+const badGroup = await cliError(['setting', 'set', '--set', 'navGroups=[{"title":"X","sections":["no_such"]}]']);
+step('navGroups 里的栏目不存在会明确报错', badGroup.code === 'INVALID_INPUT');
+const dupGroup = await cliError(['setting', 'set', '--set',
+  'navGroups=[{"title":"A","sections":["projects"]},{"title":"B","sections":["projects"]}]']);
+step('一个栏目进了两个分组会明确报错', dupGroup.code === 'INVALID_INPUT');
+await cliJson(['setting', 'set', '--set', 'navGroups=[]']);
+step('清空 navGroups = 恢复平铺', (await cliJson(['setting', 'get'])).settings.navGroups.length === 0);
+
 // ── 一个 file 字段挂多个附件（值 = 附件 id 的列表）────────────
 await writeFile(join(home, 'r1.pdf'), 'resume-one');
 await writeFile(join(home, 'r2.pdf'), 'resume-two');
