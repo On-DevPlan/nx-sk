@@ -21,6 +21,9 @@ export function defaultSettings() {
     exportFormat: 'both', // json | md | both
     includeSecretsInExport: true, // 默认含明文：本机单人工具，自己看不拦自己
     defaultSection: 'job',
+    // 头部导航分组：[{ title, sections: [栏目 id…] }]，数组顺序 = 显示顺序。
+    // 缺省空数组 = 全部栏目平铺（保持老行为）；栏目建得多了再在设置页收拢。
+    navGroups: [],
   };
 }
 

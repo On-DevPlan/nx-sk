@@ -1,4 +1,4 @@
-import { Fragment, Suspense, useEffect, useMemo } from 'react';
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { SECTION_VIEW, VIEWS } from './registry.js';
 import { Copyable, DialogHost, ErrorBoundary, Toasts } from './components/ui.jsx';
 import { useStore } from './store.jsx';
@@ -17,26 +17,35 @@ export default function App() {
   const { boot, bootError, ui, patchUi, reload } = useStore();
   const view = LEGACY_VIEW[ui.view] || ui.view;
 
-  // 栏目 tab 是**数据驱动**的（来自 bootstrap.sections），静态 tab 来自前端注册表。
-  // 两者的 id 可能撞车时静态 tab 不参与第一优先级的排序——栏目 order 是 10/20，静态是 500+。
-  const tabs = useMemo(() => {
-    const dyn = (boot?.sections || []).map((s) => ({
+  // 栏目 tab 是**数据驱动**的（bootstrap.sections）；分组来自 settings.navGroups（设置页可配）；
+  // 静态 tab 来自前端注册表。渲染顺序：未分组栏目（按 order）→ 分组（按配置顺序）→ 工具（按 order）。
+  const nav = useMemo(() => {
+    const sections = (boot?.sections || []).map((s) => ({
       id: s.id, title: s.title, order: s.order, kind: 'section', count: s.entries,
     }));
-    const stat = VIEWS.filter((v) => v.tab !== false).map((v) => ({
-      id: v.id, title: v.title, order: v.order, kind: 'view', component: v.component,
-    }));
-    const seen = new Set();
-    return [...dyn, ...stat]
-      .sort((a, b) => (a.order ?? 50) - (b.order ?? 50))
-      .filter((t) => (seen.has(t.id) ? false : (seen.add(t.id), true)));
+    // 分组是**显示配置**：成员栏目被删掉时优雅降级（过滤掉、配置保留），成员全没了就不显示这个组
+    const groups = (boot?.settings?.navGroups || [])
+      .map((g) => ({
+        title: g.title,
+        sections: (g.sections || [])
+          .map((sid) => sections.find((s) => s.id === sid))
+          .filter(Boolean),
+      }))
+      .filter((g) => g.sections.length);
+    const grouped = new Set(groups.flatMap((g) => g.sections.map((s) => s.id)));
+    const flat = sections.filter((s) => !grouped.has(s.id)).sort((a, b) => (a.order ?? 50) - (b.order ?? 50));
+    const stat = VIEWS.filter((v) => v.tab !== false)
+      .map((v) => ({ id: v.id, title: v.title, order: v.order, kind: 'view', component: v.component }))
+      .filter((v) => !sections.some((s) => s.id === v.id))
+      .sort((a, b) => (a.order ?? 50) - (b.order ?? 50));
+    return { flat, groups, tools: stat, all: [...flat, ...groups.flatMap((g) => g.sections), ...stat] };
   }, [boot]);
 
-  // 没 boot 之前**不要**拿 tabs[0] 兜底：那时动态栏目还没到，tabs 里只有静态视图，
+  // 没 boot 之前**不要**拿第一个 tab 兜底：那时动态栏目还没到，nav 里只有静态视图，
   // 兜底会选中第一个静态视图并由下面的 effect 写进 ui —— 于是「默认视图 = 求职」被顶掉、
-  // 头部高亮也错位成「栏目」，连 `#/job` 这类深链都会被首屏覆盖。
+  // 头部高亮也错位，连 `#/job` 这类深链都会被首屏覆盖。
   const booted = !!boot;
-  const current = tabs.find((t) => t.id === view) || (booted ? tabs[0] : null) || null;
+  const current = nav.all.find((t) => t.id === view) || (booted ? nav.all[0] : null) || null;
 
   // hash 与 localStorage 双写对齐：只在挂载时对齐一次，之后交给 hashchange
   useEffect(() => {
@@ -84,19 +93,26 @@ export default function App() {
         </span>
       </header>
 
-      {/* 导航栏：内容（栏目）在前、工具（栏目/附件/导出/…）在后，中间加一道细线分组，
-          否则十几个同级 pill 连成一排，看不出「哪些是自己的数据、哪些是系统功能」。 */}
+      {/* 导航栏：内容（栏目）与工具（附件/导出/设置/…）之间加一道细线分组。
+          同域栏目可以在**设置页**收拢成一个分组入口（settings.navGroups）——
+          悬浮或点击展开上下列表，栏目一多也不会连成一排分不出主次。 */}
       <nav className="tabs">
-        {tabs.map((t, i) => (
-          <Fragment key={t.id}>
-            {i > 0 && tabs[i - 1].kind !== t.kind ? <span className="tabs-sep" aria-hidden /> : null}
-            <button className={`tab ${t.id === current?.id ? 'active' : ''}`} onClick={() => go(t.id)}>
-              {t.title}
-              {typeof t.count === 'number' ? <span className="count">{t.count}</span> : null}
-            </button>
-          </Fragment>
+        {nav.flat.map((t) => (
+          <button key={t.id} className={`tab ${t.id === current?.id ? 'active' : ''}`} onClick={() => go(t.id)}>
+            {t.title}
+            {typeof t.count === 'number' ? <span className="count">{t.count}</span> : null}
+          </button>
         ))}
-        {!tabs.length ? <span className="muted">正在装载…</span> : null}
+        {nav.groups.map((g) => (
+          <GroupTab key={g.title} group={g} currentId={view} onGo={go} />
+        ))}
+        {nav.tools.length ? <span className="tabs-sep" aria-hidden /> : null}
+        {nav.tools.map((t) => (
+          <button key={t.id} className={`tab ${t.id === current?.id ? 'active' : ''}`} onClick={() => go(t.id)}>
+            {t.title}
+          </button>
+        ))}
+        {!nav.all.length ? <span className="muted">正在装载…</span> : null}
       </nav>
 
       <main className="body">
@@ -129,4 +145,59 @@ export default function App() {
 function SectionPane({ sectionId }) {
   const View = SECTION_VIEW;
   return <View sectionId={sectionId} />;
+}
+
+/**
+ * 头部的一个**分组入口**：一个 pill 收拢多个栏目（同域栏目不再挤成一排）。
+ * 悬浮展开、点击也能开（触屏没有 hover）；点行切换栏目。
+ * 外点关闭用 `pointerdown`——`click` 与触发按钮自己的 onClick 同阶段冒泡，
+ * 会「点一下关了又弹开」；受控组件而非纯 CSS hover，是为了能用键盘 Esc 关。
+ */
+function GroupTab({ group, currentId, onGo }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  const active = group.sections.some((s) => s.id === currentId);
+  const total = group.sections.reduce((n, s) => n + (s.count || 0), 0);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDown = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('pointerdown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('pointerdown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  return (
+    <span
+      className="tab-group"
+      ref={ref}
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+    >
+      <button className={`tab ${active ? 'active' : ''}`} aria-expanded={open} onClick={() => setOpen(true)}>
+        {group.title}
+        <span className="count">{total}</span>
+        <span className="caret" aria-hidden />
+      </button>
+      {open ? (
+        <div className="tab-menu" role="menu">
+          {group.sections.map((s) => (
+            <button
+              key={s.id}
+              role="menuitem"
+              className={`tab-menu-row ${s.id === currentId ? 'current' : ''}`}
+              onClick={() => { setOpen(false); onGo(s.id); }}
+            >
+              <span className="grow nowrap">{s.title}</span>
+              {typeof s.count === 'number' ? <span className="count">{s.count}</span> : null}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </span>
+  );
 }

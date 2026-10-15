@@ -7,6 +7,7 @@ export default function SettingsView() {
   const { boot, reload, toast, guard } = useStore();
   const [data, setData] = useState(null);
   const [form, setForm] = useState(null);
+  const [groups, setGroups] = useState([]);
   // 面板地址不写死：直接取用户此刻访问的这个 origin，换端口/换 host 都自动跟上
   const panelUrl = typeof window === 'undefined' ? '' : window.location.origin;
   const panelPort = typeof window === 'undefined' ? '' : (window.location.port || '80');
@@ -16,6 +17,7 @@ export default function SettingsView() {
       const d = await api('/api/settings');
       setData(d);
       setForm({ ...d.settings });
+      setGroups((d.settings.navGroups || []).map((g) => ({ title: g.title, sections: [...g.sections] })));
     } catch (e) {
       toast(e.message, 'bad');
     }
@@ -33,6 +35,35 @@ export default function SettingsView() {
     const r = await api('/api/settings', { method: 'PATCH', body });
     toast('设置已保存');
     setData({ ...data, settings: r.set });
+    await reload();
+  });
+
+  // 头部导航分组：组顺序 = 头部显示顺序；一个栏目只能属于一个组（别组已勾的置灰）
+  const patchGroup = (gi, patch) => setGroups((gs) => gs.map((g, i) => (i === gi ? { ...g, ...patch } : g)));
+
+  const toggleMember = (gi, sid) => setGroups((gs) => gs.map((g, i) => {
+    if (i !== gi) return g;
+    const has = g.sections.includes(sid);
+    return { ...g, sections: has ? g.sections.filter((x) => x !== sid) : [...g.sections, sid] };
+  }));
+
+  const moveGroup = (gi, delta) => setGroups((gs) => {
+    const to = gi + delta;
+    if (to < 0 || to >= gs.length) return gs;
+    const next = [...gs];
+    [next[gi], next[to]] = [next[to], next[gi]];
+    return next;
+  });
+
+  const saveGroups = guard(async () => {
+    const naked = groups.find((g) => !String(g.title).trim());
+    if (naked) { toast('每个分组都要有组名', 'bad'); return; }
+    const empty = groups.find((g) => !g.sections.length);
+    if (empty) { toast(`分组「${empty.title}」还没有勾选栏目——要么勾一个，要么删掉这个分组`, 'bad'); return; }
+    const r = await api('/api/settings', { method: 'PATCH', body: { navGroups: groups } });
+    toast(groups.length ? `已保存 ${groups.length} 个导航分组` : '已取消分组，栏目恢复平铺');
+    setData({ ...data, settings: r.set });
+    setGroups((r.set.navGroups || []).map((g) => ({ title: g.title, sections: [...g.sections] })));
     await reload();
   });
 
@@ -88,6 +119,53 @@ export default function SettingsView() {
             <span className="name">重启面板</span>
             <span className="desc">面板本身就是 serve 提供的；改代码后重启它即可</span>
             <span className="acts"><Copyable className="mono" text={`nx-sk serve --port ${panelPort}`}>{`nx-sk serve --port ${panelPort}`}</Copyable></span>
+          </div>
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="colhead">
+          头部导航分组
+          <span className="right muted">{groups.length ? `${groups.length} 个分组` : '未分组（全部平铺）'}</span>
+        </div>
+        <div className="pad stack">
+          <div className="hint">
+            把同域栏目收拢成一个头部入口：头部只显示组名，**悬浮展开上下列表**选具体栏目。
+            不勾进任何分组的栏目保持平铺；组顺序 = 头部显示顺序；一个栏目只能属于一个分组。
+          </div>
+          {groups.map((g, gi) => (
+            <div className="stack" key={gi} style={{ borderTop: gi ? 'var(--border)' : 0, paddingTop: gi ? 8 : 0 }}>
+              <div className="rowgap">
+                <input
+                  value={g.title}
+                  placeholder="组名，如「求职」"
+                  onChange={(e) => patchGroup(gi, { title: e.target.value })}
+                  style={{ minWidth: 160 }}
+                />
+                <button className="btn small ghost" disabled={gi === 0} onClick={() => moveGroup(gi, -1)}>上移</button>
+                <button className="btn small ghost" disabled={gi === groups.length - 1} onClick={() => moveGroup(gi, 1)}>下移</button>
+                <button className="btn small ghost" onClick={() => setGroups((gs) => gs.filter((_, i) => i !== gi))}>删除组</button>
+                <span className="muted">已选 {g.sections.length} 个栏目</span>
+              </div>
+              <div className="rowgap">
+                {(boot?.sections || []).map((s) => {
+                  const checked = g.sections.includes(s.id);
+                  const elsewhere = groups.some((o, oi) => oi !== gi && o.sections.includes(s.id));
+                  return (
+                    <label className="inline" key={s.id} title={elsewhere ? '已归入其它分组' : ''}>
+                      <input type="checkbox" checked={checked} disabled={elsewhere} onChange={() => toggleMember(gi, s.id)} />
+                      <span className={elsewhere ? 'muted' : ''}>{s.title}<span className="count"> {s.entries}</span></span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+          {!groups.length ? <div className="muted">还没有分组——所有栏目都平铺在头部。</div> : null}
+          <div className="rowgap">
+            <button className="btn" onClick={saveGroups}>保存分组</button>
+            <button className="btn small ghost" onClick={() => setGroups((gs) => [...gs, { title: '', sections: [] }])}>新增分组</button>
+            {groups.length ? <button className="btn small ghost" onClick={() => setGroups([])}>清空（恢复平铺）</button> : null}
           </div>
         </div>
       </div>

@@ -198,6 +198,17 @@ nx-sk file get $FID                             # 反查「被引用：求职 / 
 > 若你的求职栏目是很早建的，跑一次 `nx-sk section sync job`（或面板「栏目 → 编辑 → 同步模板字段」）
 > 就能把模板新增的「附件资料」组与 4 个 `file` 字段补进来，且不改动你已有的字段与数据。
 
+**头部导航分组**（栏目多了以后收拢头部，一眼分得出主次）：在设置里把同域栏目归成一组，
+头部只显示组名，**悬浮展开上下列表**选具体栏目；不归组的栏目保持平铺。
+
+```bash
+# 面板：设置 → 头部导航分组（勾选栏目 / 改名 / 排序 / 增删组），保存后头部立即生效
+nx-sk setting set --set 'navGroups=[{"title":"求职","sections":["projects","internships","campus"]}]'
+nx-sk setting set --set 'navGroups=[]'   # 清空 = 全部栏目恢复平铺
+```
+
+分组只是**显示配置**（存在 `settings.navGroups`）：不动栏目与条目的数据，删掉栏目时头部自动略过。
+
 整体导出（凭据默认**含明文**——本机自己用；要分享给别人时加 `--no-secrets` 打码）：
 
 ```bash
@@ -267,7 +278,7 @@ nx-sk skill get nx-sk 10-sections-entries   # 裸名 → references/10-sections-
 ## 开发
 
 ```bash
-pnpm test        # = lint + build + 冒烟（104 项断言） + 单测（132 项）
+pnpm test        # = lint + build + 冒烟（109 项断言） + 单测（140 项）
 ```
 
 | 目录 | 职责 |

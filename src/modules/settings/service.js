@@ -1,15 +1,17 @@
 // settings 是**基础模块**：允许被其它模块单向只读依赖（见 eslint 互依禁列——它故意不在里面）。
 // 设置的唯一读写入口在这里，别绕过去直接改 store.settings。
 import { loadStore, mutateStore, snapshotStore } from '../../core/store.js';
+import { findSection } from '../../core/fields.js';
 import { badInput, notFound } from '../../core/errors.js';
 
-export const SETTING_KEYS = ['exportDir', 'exportFormat', 'includeSecretsInExport', 'defaultSection'];
+export const SETTING_KEYS = ['exportDir', 'exportFormat', 'includeSecretsInExport', 'defaultSection', 'navGroups'];
 
 const SCHEMA = {
   exportDir: { type: 'string', hint: '导出目录，留空 = ~/nx-sk/export' },
   exportFormat: { type: 'string', enum: ['json', 'md', 'both'], hint: '整体导出默认格式' },
   includeSecretsInExport: { type: 'boolean', hint: '整体导出是否默认带密钥明文（默认否）' },
   defaultSection: { type: 'string', hint: '默认栏目 id' },
+  navGroups: { type: 'json', hint: '头部导航分组：[{title, sections:[栏目id…]}]，数组顺序 = 显示顺序' },
 };
 
 export function settingsSchema() {
@@ -21,9 +23,54 @@ export async function getSettings() {
   return { settings: store.settings, schema: settingsSchema() };
 }
 
-function coerceSetting(key, value) {
+/**
+ * 头部导航分组（`settings.navGroups`）的形状校验 + 归一。
+ *
+ * 分组是**显示配置**，写坏了头部就少一块，所以这里不静默丢任何东西：
+ * 栏目不存在 / 一个栏目进了两个组 / 空组 —— 一律报错并说清是哪一组哪一项。
+ * 归一：栏目可以写 id 也可以写标题（统一存成真实 id）；组内去重保序。
+ */
+function coerceNavGroups(value, store) {
+  let arr = value;
+  if (typeof value === 'string') {
+    try {
+      arr = JSON.parse(value);
+    } catch (e) {
+      throw badInput(`navGroups 需要 JSON 数组（${e.message}）：[{"title":"求职","sections":["projects",…]}, …]`);
+    }
+  }
+  if (!Array.isArray(arr)) {
+    throw badInput('navGroups 需要是数组：[{"title":"求职","sections":["projects",…]}, …]');
+  }
+  const owner = new Map();
+  return arr.map((g, i) => {
+    if (!g || typeof g !== 'object') throw badInput(`第 ${i + 1} 个分组不是对象`);
+    const title = String(g.title ?? '').trim();
+    if (!title) throw badInput(`第 ${i + 1} 个分组缺少 title（组名）`);
+    const sections = [];
+    const inGroup = new Set();
+    for (const raw of (Array.isArray(g.sections) ? g.sections : [])) {
+      const ref = String(raw ?? '').trim();
+      if (!ref) continue;
+      const sec = findSection(store, ref);
+      if (!sec) throw badInput(`分组「${title}」里的栏目不存在: ${ref}`);
+      if (inGroup.has(sec.id)) continue; // 同组里 id / 标题混着写同一个栏目 → 去重
+      if (owner.has(sec.id)) {
+        throw badInput(`栏目 ${sec.id} 同时在分组「${owner.get(sec.id)}」与「${title}」里——一个栏目只能属于一个分组`);
+      }
+      inGroup.add(sec.id);
+      owner.set(sec.id, title);
+      sections.push(sec.id);
+    }
+    if (!sections.length) throw badInput(`分组「${title}」没有任何栏目——要么勾一个，要么删掉这个分组`);
+    return { title, sections };
+  });
+}
+
+function coerceSetting(key, value, store) {
   const s = SCHEMA[key];
   if (!s) throw notFound(`未知设置项: ${key}（可用: ${SETTING_KEYS.join(', ')}）`);
+  if (s.type === 'json') return coerceNavGroups(value, store);
   if (s.type === 'boolean') {
     if (typeof value === 'boolean') return value;
     const v = String(value).trim().toLowerCase();
@@ -45,8 +92,10 @@ export async function updateSettings({ set, key, value, 'dry-run': dryRun } = {}
   const keys = Object.keys(patch);
   if (!keys.length) throw badInput('至少要给一项：setting set --key <名> --value <值>，或 --set k=v（可重复）');
 
+  // 校验要拿 store 做参照（navGroups 里的栏目 id 必须真实存在）
+  const store = await loadStore();
   const resolved = {};
-  for (const k of keys) resolved[k] = coerceSetting(k, patch[k]);
+  for (const k of keys) resolved[k] = coerceSetting(k, patch[k], store);
 
   if (dryRun) return { status: 'skipped', dryRun: true, wouldSet: resolved };
 
@@ -63,7 +112,11 @@ export function renderSettings(data) {
   const lines = ['当前设置（改：nx-sk setting set --key <名> --value <值>）'];
   for (const s of data.schema) {
     const v = data.settings[s.key];
-    const shown = s.type === 'boolean' ? (v ? '是' : '否') : (v === '' ? '（空）' : String(v));
+    const shown = s.type === 'boolean' ? (v ? '是' : '否')
+      : (v === '' || v === undefined ? '（空）'
+        : (v && typeof v === 'object'
+          ? (() => { const j = JSON.stringify(v); return j.length > 56 ? `${j.slice(0, 56)}…` : j; })()
+          : String(v)));
     lines.push(`  ${s.key.padEnd(22)} ${shown.padEnd(10)} ${s.hint}`);
   }
   return lines.join('\n');
