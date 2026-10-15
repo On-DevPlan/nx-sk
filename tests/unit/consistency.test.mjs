@@ -403,3 +403,94 @@ test('反向：代码里的写命令都声明了 --dry-run，破坏性写命令�
     assert.match(src, /snapshotStore\(/, `${s.module} 的破坏性写操作应先留快照`);
   }
 });
+
+// —— 视图写请求的 body 键必须在 action 里声明过 ——
+// `applySpec` 只保留**声明过的** args/flags（有意严格：HTTP body 的多余字段不该流进 service）。
+// 于是「面板发了未声明的键」= 静默丢掉 → service 收到空 patch，报一个离根因很远的错。
+// 真实事故：设置页 PATCH 发平铺的 `{exportDir: …}`，点「保存」只得到「至少要给一项」。
+function sliceBalanced(src, openIdx) {
+  let depth = 0;
+  for (let i = openIdx; i < src.length; i += 1) {
+    const c = src[i];
+    if (c === '{') depth += 1;
+    else if (c === '}') { depth -= 1; if (depth === 0) return src.slice(openIdx + 1, i); }
+  }
+  return null;
+}
+
+function topLevelKeys(inner) {
+  const parts = [];
+  let d = 0;
+  let cur = '';
+  for (const c of inner) {
+    if ('{[('.includes(c)) d += 1;
+    else if ('}])'.includes(c)) d -= 1;
+    if (c === ',' && d === 0) { parts.push(cur); cur = ''; continue; }
+    cur += c;
+  }
+  parts.push(cur);
+  return parts
+    .filter((p) => !/^\s*\.\.\./.test(p)) // 展开运算（...body()）不管
+    .map((p) => {
+      const m = /^\s*'?([A-Za-z_][\w-]*)'?\s*:/.exec(p);
+      return m ? m[1] : null;
+    })
+    .filter(Boolean);
+}
+
+/** 扫一段源码里所有「写请求 + 字面量 body」，返回未声明的键。 */
+function undeclaredBodyKeys(src, label = '') {
+  const problems = [];
+  let checked = 0;
+  for (const call of src.matchAll(/\bapi\(\s*(['"`])([\s\S]*?)\1\s*,\s*\{/g)) {
+    const opts = sliceBalanced(src, call.index + call[0].length - 1);
+    if (opts === null) continue;
+    const method = /method:\s*['"`](\w+)['"`]/.exec(opts)?.[1];
+    if (!method || !['POST', 'PATCH', 'PUT', 'DELETE'].includes(method)) continue;
+    const bi = opts.indexOf('body:');
+    if (bi < 0) continue;
+    const bIdx = opts.indexOf('{', bi);
+    if (bIdx < 0) continue; // body: someVar（变量形态交给代码评审）
+    const body = sliceBalanced(opts, bIdx);
+    if (body === null) continue;
+    const keys = topLevelKeys(body);
+    if (!keys.length) continue;
+    const lits = (literalsOf(call[0])[0] || {}).lits || [];
+    // 路径 + **方法**都要对上：/api/settings 同时挂着 GET 与 PATCH 两条 action
+    const action = ACTIONS.find((a) => Array.isArray(a.http) && a.http[0] === method && covered(lits, a.http[1]));
+    if (!action) continue; // 路径对不对由上面那条断言负责
+    const declared = new Set([
+      ...(action.args || []).map((a) => (typeof a === 'string' ? a : a.name)),
+      ...Object.keys(action.flags || {}),
+    ]);
+    for (const k of keys) {
+      checked += 1;
+      if (!declared.has(k)) problems.push(`${label}${call[2].trim()} 的 body 键「${k}」未在 ${action.id} 的 flags 声明`);
+    }
+  }
+  return { problems, checked };
+}
+
+test('视图写请求的 body 键必须声明过（applySpec 会静默丢掉未声明的键）', async () => {
+  // 反证：这就是设置页曾经发出去的东西——规则必须判它红
+  const bad = undeclaredBodyKeys("await api('/api/settings', { method: 'PATCH', body: { exportDir: 'x' } });");
+  assert.equal(bad.problems.length, 1, '规则本身要能判红');
+  const good = undeclaredBodyKeys("await api('/api/settings', { method: 'PATCH', body: { set: { exportDir: 'x' } } });");
+  assert.deepEqual(good.problems, [], '包在 set 里的写法要判绿');
+
+  const files = [];
+  for (const id of await listDirs('src/modules')) {
+    const p = join(ROOT, 'src/modules', id, 'view.jsx');
+    if (await readIfExists(p)) files.push({ id, path: p });
+  }
+  const problems = [];
+  let checked = 0;
+  for (const f of files) {
+    const src = await readFile(f.path, 'utf8');
+    const r = undeclaredBodyKeys(src, `${f.id}: `);
+    problems.push(...r.problems);
+    checked += r.checked;
+  }
+  assert.ok(checked >= 8, `扫到的 body 键太少（${checked}），断言可能失效`);
+  assert.deepEqual(problems, [], `视图发了未声明的 body 键（会被 applySpec 静默丢掉）:\n${problems.join('\n')}`);
+});

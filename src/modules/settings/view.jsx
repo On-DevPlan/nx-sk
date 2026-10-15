@@ -26,11 +26,16 @@ export default function SettingsView() {
   useEffect(() => { load(); }, [load]);
 
   const save = guard(async () => {
+    // 必须包在 `set` 里发：HTTP 的 body 会经 applySpec **只保留声明过的键**，
+    // 平铺的 `{exportDir: …}` 会被静默丢掉 → service 收到空 patch 报「至少要给一项」。
+    // `set` 是 setting.set 声明过的 kv flag，HTTP 形态就是 `{set: {k: v}}`。
     const body = {
-      exportDir: form.exportDir,
-      exportFormat: form.exportFormat,
-      includeSecretsInExport: !!form.includeSecretsInExport,
-      defaultSection: form.defaultSection,
+      set: {
+        exportDir: form.exportDir,
+        exportFormat: form.exportFormat,
+        includeSecretsInExport: !!form.includeSecretsInExport,
+        defaultSection: form.defaultSection,
+      },
     };
     const r = await api('/api/settings', { method: 'PATCH', body });
     toast('设置已保存');
@@ -60,7 +65,7 @@ export default function SettingsView() {
     if (naked) { toast('每个分组都要有组名', 'bad'); return; }
     const empty = groups.find((g) => !g.sections.length);
     if (empty) { toast(`分组「${empty.title}」还没有勾选栏目——要么勾一个，要么删掉这个分组`, 'bad'); return; }
-    const r = await api('/api/settings', { method: 'PATCH', body: { navGroups: groups } });
+    const r = await api('/api/settings', { method: 'PATCH', body: { set: { navGroups: groups } } });
     toast(groups.length ? `已保存 ${groups.length} 个导航分组` : '已取消分组，栏目恢复平铺');
     setData({ ...data, settings: r.set });
     setGroups((r.set.navGroups || []).map((g) => ({ title: g.title, sections: [...g.sections] })));
@@ -130,7 +135,7 @@ export default function SettingsView() {
         </div>
         <div className="pad stack">
           <div className="hint">
-            把同域栏目收拢成一个头部入口：头部只显示组名，**悬浮展开上下列表**选具体栏目。
+            把同域栏目收拢成一个头部入口：头部只显示组名，悬浮展开上下列表选具体栏目。
             不勾进任何分组的栏目保持平铺；组顺序 = 头部显示顺序；一个栏目只能属于一个分组。
           </div>
           {groups.map((g, gi) => (
