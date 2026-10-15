@@ -83,7 +83,19 @@ function coerceNavGroups(value, store) {
  * 去重保序，并归一成真实 id（写标题也认）。label 只影响报错措辞。
  */
 function coerceSectionIdList(value, store, label) {
-  const list = Array.isArray(value) ? value : String(value ?? '').split(',');
+  // 三种写法都吃：数组（面板）、`a,b`（CLI 省事写法）、`["a","b"]`（CLI 的 JSON 写法）
+  let raw = value;
+  if (typeof raw === 'string') {
+    const s = raw.trim();
+    if (s.startsWith('[')) {
+      try {
+        raw = JSON.parse(s);
+      } catch (e) {
+        throw badInput(`${label}需要 JSON 数组或逗号分隔：${e.message}`);
+      }
+    }
+  }
+  const list = Array.isArray(raw) ? raw : String(raw ?? '').split(',');
   const out = [];
   for (const item of list) {
     const ref = String(item ?? '').trim();
