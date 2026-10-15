@@ -36,61 +36,110 @@ function AutoTextarea({ value, onChange, minRows = 2, placeholder, disabled, max
 }
 
 /**
- * file 字段控件：值 = 附件 id。
- * **上传 / 选择就发生在这里**（栏目条目的字段里）——「文件在栏目中链接」；
- * 「附件」中心只负责统一展示与库存管理，不在这里做指派，也不预定义任何槽位。
+ * 字段值 → 附件 id 数组。
+ * 一个 `file` 字段可挂**多个**附件：新写入统一存数组，历史数据里的单值是字符串
+ * （读时按单元素处理）。前端不能 import core，所以这里自带一份同口径的归一化。
+ */
+function toIds(value) {
+  const raw = value === null || value === undefined ? [] : (Array.isArray(value) ? value : [value]);
+  const out = [];
+  for (const x of raw) {
+    const s = String(x ?? '').trim();
+    if (s && !out.includes(s)) out.push(s);
+  }
+  return out;
+}
+
+/**
+ * file 字段控件（**多值**）：值 = 附件 id 的列表，一个字段能挂多个附件
+ * （简历多版本、头像多张……）。
+ *
+ * **上传 / 选择就发生在这里**（「文件在栏目中链接」）；「附件」中心只负责统一展示与
+ * 库存管理，不在这里做指派，也不预定义任何槽位。
+ * 列表逐行显示：缩略图/扩展名徽标 + 名称（内联预览）+ 下载 + 复制物理路径 + 移除；
+ * 底部是添加入口（可**多选**上传、或从库里选一个追加）。
  */
 export function FileFieldControl({ def, value, onChange }) {
   const { toast, guard, patchUi } = useStore();
   const [data, setData] = useState(null);
   const uploadRef = useRef(null);
-  const id = value || '';
+  const ids = toIds(value);
+  const max = Number(def.maxItems) || 0;
+  const full = max > 0 && ids.length >= max;
 
   const load = useCallback(async () => {
     try { setData(await listAttachments()); } catch { /* 附件库读不到时仍可上传 */ }
   }, []);
   useEffect(() => { load(); }, [load]);
 
-  const current = (data?.files || []).find((f) => f.id === id) || null;
+  const all = data?.files || [];
+  const byId = (id) => all.find((f) => f.id === id) || null;
+  const available = all.filter((f) => !ids.includes(f.id));
 
   const upload = guard(async (fileList) => {
-    const file = fileList?.[0];
-    if (!file) return;
-    const content = await fileToDataUrl(file);
-    const r = await api('/api/files', { method: 'POST', body: { content, name: file.name } });
-    onChange(r.id);
-    toast(r.duplicated ? '库中已有相同文件，已直接引用' : '已上传并关联');
+    const picked = [...(fileList || [])];
+    if (!picked.length) return;
+    if (full) { toast(`「${def.label}」最多 ${max} 个附件，先移除一个`, 'bad'); return; }
+    const next = [...ids];
+    let duplicated = 0;
+    for (const file of picked) {
+      const content = await fileToDataUrl(file);
+      const r = await api('/api/files', { method: 'POST', body: { content, name: file.name } });
+      if (next.includes(r.id)) { duplicated += 1; continue; }
+      next.push(r.id);
+    }
+    onChange(next);
+    const added = picked.length - duplicated;
+    toast(duplicated
+      ? `已上传并关联 ${added} 个；${duplicated} 个库里已有，直接引用`
+      : `已上传并关联 ${picked.length} 个`);
     setData(await refreshAttachments());
   });
 
+  const add = (id) => { if (id && !ids.includes(id)) onChange([...ids, id]); };
+  const removeAt = (id) => onChange(ids.filter((x) => x !== id));
+
   return (
     <div className="file-picker">
-      {current ? (
-        <div className="file-preview">
-          {current.isImage
-            ? <img src={current.url} alt={current.name} />
-            : <span className="ext-badge" style={{ fontSize: 13, width: 40, textAlign: 'center' }}>{current.ext ? current.ext.slice(1).toUpperCase() : 'FILE'}</span>}
-          <a className="file-preview-name grow" href={current.url} target="_blank" rel="noreferrer" title={current.displayPath}>{current.name}</a>
-          <a className="btn small ghost" href={current.downloadUrl}>下载</a>
-          <Copyable className="hint" text={current.path} title="点击复制物理路径">路径</Copyable>
-          <button type="button" className="btn small ghost" onClick={() => onChange('')}>清除</button>
-        </div>
-      ) : null}
+      {ids.map((id) => {
+        const rec = byId(id);
+        if (!rec) {
+          return (
+            <div className="file-preview" key={id}>
+              <span className="hint bad grow">引用的附件已不存在（{id}）—— 重新上传，或移除。</span>
+              <button type="button" className="btn small ghost" onClick={() => removeAt(id)}>移除</button>
+            </div>
+          );
+        }
+        return (
+          <div className="file-preview" key={id}>
+            {rec.isImage
+              ? <img src={rec.url} alt={rec.name} />
+              : <span className="ext-badge" style={{ fontSize: 13, width: 40, textAlign: 'center' }}>{rec.ext ? rec.ext.slice(1).toUpperCase() : 'FILE'}</span>}
+            <a className="file-preview-name grow" href={rec.url} target="_blank" rel="noreferrer" title={rec.displayPath}>{rec.name}</a>
+            <a className="btn small ghost" href={rec.downloadUrl}>下载</a>
+            <Copyable className="hint" text={rec.path} title="点击复制物理路径">路径</Copyable>
+            <button type="button" className="btn small ghost" onClick={() => removeAt(id)}>移除</button>
+          </div>
+        );
+      })}
+      {!ids.length ? <span className="hint">还没有附件。</span> : null}
       <div className="file-pick-row">
-        <select value={id} onChange={(e) => onChange(e.target.value)}>
-          <option value="">（未选择：从附件库选一个）</option>
-          {(data?.files || []).map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+        <select value="" disabled={full || !available.length} onChange={(e) => add(e.target.value)}>
+          <option value="">{available.length ? '（从附件库选一个，选中即追加）' : '（库里没有可再选的附件）'}</option>
+          {available.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
         </select>
-        <button type="button" className="btn small" onClick={() => uploadRef.current?.click()}>上传文件</button>
+        <button type="button" className="btn small" disabled={full} onClick={() => uploadRef.current?.click()}>上传文件</button>
         <button type="button" className="btn small ghost" onClick={() => patchUi({ view: 'files' })}>附件中心</button>
         <input
           ref={uploadRef}
           type="file"
+          multiple
           style={{ display: 'none' }}
           onChange={(e) => { upload(e.target.files); e.target.value = ''; }}
         />
       </div>
-      {id && !current ? <span className="hint bad">引用的附件已不存在（{id}）—— 重新上传，或清除。</span> : null}
+      {full ? <span className="hint">已达上限（{max} 个）：先移除一个，或把字段的 maxItems 调大。</span> : null}
       {def.hint ? <span className="hint">{def.hint}</span> : null}
     </div>
   );

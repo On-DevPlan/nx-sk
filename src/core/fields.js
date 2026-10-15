@@ -128,11 +128,11 @@ const JOB_FIELDS = [
   f('acceptAdjustment', '是否接受调剂', 'bool', 'job', { hint: '是否接受岗位或城市调剂' }),
   f('jobNote', '求职备注', 'textarea', 'job', { hint: '补充说明' }),
 
-  // —— 附件资料（统一附件库；值 = 附件 id，直接在字段里上传或从附件库选一个） ——
-  f('resumeFile', '简历附件', 'file', 'files', { kind: 'doc', hint: '简历 PDF/Word 原件；在本字段直接上传，或从附件库选一个' }),
-  f('avatar', '头像图片', 'file', 'files', { kind: 'image', hint: '证件照/头像图片原件' }),
-  f('transcript', '成绩单', 'file', 'files', { kind: 'doc', hint: '在校成绩单原件' }),
-  f('certificateScan', '证书扫描件', 'file', 'files', { kind: 'doc', fill: 'optional', hint: '获奖/资格证书扫描件（不必填）' }),
+  // —— 附件资料（统一附件库；值 = 附件 id 的**列表**，一个字段可挂多个，直接在字段里上传或从附件库选） ——
+  f('resumeFile', '简历附件', 'file', 'files', { kind: 'doc', hint: '简历 PDF/Word 原件；可传多个（不同版本/岗位），在本字段直接上传或从附件库选' }),
+  f('avatar', '头像图片', 'file', 'files', { kind: 'image', hint: '证件照/头像图片原件；可传多张' }),
+  f('transcript', '成绩单', 'file', 'files', { kind: 'doc', hint: '在校成绩单原件；可传多个学期' }),
+  f('certificateScan', '证书扫描件', 'file', 'files', { kind: 'doc', fill: 'optional', hint: '获奖/资格证书扫描件；可传多份（不必填）' }),
 
   // —— 其他 ——
   f('religion', '宗教信仰', 'text', 'extra', { hint: '没有就写「无」' }),

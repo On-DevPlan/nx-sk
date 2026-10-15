@@ -81,12 +81,14 @@ nx-sk file open f_xxxx                          # 系统默认程序打开原件
 ```
 
 求职条目里的「简历附件 / 头像图片 / 成绩单 / 证书扫描件」是 `file` 字段，
-它的值就是**附件 id**（全局唯一 → 各条目互不串台；同内容去重后是同一条，可被多条条目共享）：
+它的值是**附件 id 的列表**——一个字段可以挂**多个**附件（简历多版本、头像多张）
+（id 全局唯一 → 各条目互不串台；同内容去重后是同一条，可被多条条目共享）：
 
 ```bash
-nx-sk entry update 张三 --set resumeFile=f_xxxx   # 字段值 = 附件 id
-nx-sk entry get 张三 --section job                # 字段随即显示附件名与物理路径
-nx-sk file get f_xxxx                             # 反查「被引用：求职 / 张三 / 简历附件」
+nx-sk entry update 张三 --set resumeFile=f_aaa,f_bbb   # 逗号分隔挂多个（也接受 --data 传数组）
+nx-sk entry update 张三 --set resumeFile=f_aaa         # 只挂一个（存下来也是单元素数组）
+nx-sk entry get 张三 --section job                # 每个附件各占一行：附件名 + 物理路径
+nx-sk file get f_bbb                              # 反查「被引用：求职 / 张三 / 简历附件」
 ```
 
 **上传 / 选择发生在栏目条目里**（Web 的表单字段可直接「上传文件」或从库里选）；

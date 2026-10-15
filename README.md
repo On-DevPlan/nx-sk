@@ -173,15 +173,17 @@ nx-sk file restore f_xxxx                        # 可逆：移回原始位置�
 nx-sk file restore f_xxxx --to "D:\资料" --copy  # 或导出副本到指定目录
 ```
 
-**附件怎么被条目引用**：条目的 `file` 字段存的就是**附件的 id**。id 全局唯一，
-所以每条条目各有各的附件、互不串台；同一份原件也能被多条条目引用（sha256 去重后是同一条）。
+**附件怎么被条目引用**：条目的 `file` 字段存的是**附件 id 的列表**——一个字段可以挂**多个**
+附件（简历多版本、头像多张）。id 全局唯一，所以每条条目各有各的附件、互不串台；
+同一份原件也能被多条条目引用（sha256 去重后是同一条）。
 **上传 / 选择发生在栏目条目的字段里**（求职 → 张三 → 「简历附件」直接上传或从库里选），
 不在附件中心做指派：
 
 ```bash
 FID=$(nx-sk file add --path "D:\简历\张三-简历.pdf" --json | 取 id)
-nx-sk entry update 张三 --set resumeFile=$FID   # 字段值就是附件 id
-nx-sk entry get 张三 --section job              # 该字段随即显示附件名与物理路径
+nx-sk entry update 张三 --set resumeFile=$FID       # 挂一个（存成单元素数组）
+nx-sk entry update 张三 --set resumeFile=$FID,f_xxx # 逗号分隔挂多个
+nx-sk entry get 张三 --section job              # 每个附件各占一行：附件名 + 物理路径
 nx-sk file get $FID                             # 反查「被引用：求职 / 张三 / 简历附件」
 ```
 
@@ -265,7 +267,7 @@ nx-sk skill get nx-sk 10-sections-entries   # 裸名 → references/10-sections-
 ## 开发
 
 ```bash
-pnpm test        # = lint + build + 冒烟（99 项断言） + 单测（127 项）
+pnpm test        # = lint + build + 冒烟（104 项断言） + 单测（132 项）
 ```
 
 | 目录 | 职责 |

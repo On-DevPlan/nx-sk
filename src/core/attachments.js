@@ -127,6 +127,26 @@ export function normalizeFileRecord(raw) {
   };
 }
 
+/**
+ * 一个 `file` 字段的值 → 附件 id 数组（**全仓库唯一的归一化入口**）。
+ *
+ * 字段可以挂**多个**附件：新写入统一存数组（哪怕只有一个）；历史数据里的单值是
+ * 字符串，读的时候按「单元素列表」看待——所以这里两种情况都要吃。
+ * 去空、去重、保序：同一个附件在一个字段里出现两次没有意义。
+ */
+export function fileIdsOf(value) {
+  const raw = value === null || value === undefined
+    ? []
+    : (Array.isArray(value) ? value : [value]);
+  const out = [];
+  for (const x of raw) {
+    const s = String(x ?? '').trim();
+    if (!s || out.includes(s)) continue;
+    out.push(s);
+  }
+  return out;
+}
+
 /** 附件定位：id 优先，其次唯一文件名。 */
 export function findFileRecord(store, ref) {
   const key = String(ref ?? '').trim();
@@ -140,8 +160,9 @@ export function findFileRecord(store, ref) {
 
 /**
  * 反向链接：哪些条目的 `file` 字段引用了这个附件。
- * 条目里 `file` 字段的值 = 附件 id（或唯一文件名），所以按记录反查即可。
- * 附件中心据此显示「被哪些栏目 / 条目 / 字段用到」——**完全由栏目驱动**，不预定义结构。
+ * 条目里 `file` 字段的值 = 附件 id（或唯一文件名）；一个字段可挂多个，
+ * 所以这里按 `fileIdsOf` 逐个成员判断——列表里的**任一** id 都能反查到，
+ * 同一个（条目, 字段）只出一条。附件中心据此显示「被哪些栏目 / 条目 / 字段用到」。
  */
 export function fileReferences(store, rec) {
   if (!rec) return [];
@@ -152,9 +173,9 @@ export function fileReferences(store, rec) {
     for (const e of store.entries || []) {
       if (e.section !== sec.id) continue;
       for (const f of fileFields) {
-        const v = String(e.values?.[f.key] ?? '').trim();
-        if (!v) continue;
-        if (findFileRecord(store, v) !== rec) continue;
+        const ids = fileIdsOf(e.values?.[f.key]);
+        if (!ids.length) continue;
+        if (!ids.some((id) => findFileRecord(store, id) === rec)) continue;
         out.push({
           sectionId: sec.id, sectionTitle: sec.title,
           entryId: e.id, entryTitle: e.title,

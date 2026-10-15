@@ -103,11 +103,17 @@ function normalizeValue(def, raw) {
     return list;
   }
   if (type === 'file') {
-    // 值 = 附件 id（或唯一文件名）。id 全局唯一，天然做到「各条目附件互不串台」；
-    // 同一份原件被多条条目引用也没问题（sha256 去重后是同一个 id）。
+    // 值 = 附件 id（或唯一文件名）的**列表**：一个字段可以挂多个附件（简历传多个版本、
+    // 头像多张）。id 全局唯一，天然做到「各条目附件互不串台」；同一份原件被多条条目引用
+    // 也没问题（sha256 去重后是同一个 id）。
+    // **新写入统一存数组**（哪怕只有一个）——形状一致，下游不必到处判「是串还是表」；
+    // 历史数据里的字符串单值读时由 fileIdsOf 按单元素处理，不做迁移。
     // 不校验存在性——附件可能被还原/删掉，前端按「引用的附件不存在」展示。
-    const s = String(raw).trim();
-    return s === '' ? null : s;
+    const list = att.fileIdsOf(Array.isArray(raw) ? raw : String(raw).split(/[,，、;；]+/));
+    if (def.maxItems && list.length > def.maxItems) {
+      throw badInput(`字段「${def.label}」最多 ${def.maxItems} 项，收到 ${list.length} 项`);
+    }
+    return list.length ? list : null;
   }
   const s = String(raw);
   return s.trim() === '' ? null : s;
@@ -136,8 +142,21 @@ async function prepareValue(section, def, raw, current) {
  * 18 位的身份证号 / 长数字 ID 超过 2^53，推成数字会**静默丢精度**。
  * 值仍是字符串，所以「直接存 kv」不会因为类型推断损坏数据。
  */
+// 值像不像附件 id（`f_xxxx`）。用来推断「写了一个没登记过的键」该登记成什么类型：
+// `--set 简历附件=f_abc` / `--set 简历附件=f_a,f_b` 应当登记成**附件字段**，
+// 而不是一个普通文本字段或 tags。
+const looksLikeFileId = (x) => typeof x === 'string' && /^f_[0-9a-z]+$/i.test(x.trim());
+
 function inferFieldType(raw) {
-  if (Array.isArray(raw)) return 'tags';
+  if (Array.isArray(raw)) {
+    if (raw.length && raw.every(looksLikeFileId)) return 'file';
+    return 'tags';
+  }
+  if (looksLikeFileId(raw)) return 'file';
+  if (typeof raw === 'string') {
+    const parts = raw.split(/[,，、;；]+/).map((x) => x.trim()).filter(Boolean);
+    if (parts.length && parts.every(looksLikeFileId)) return 'file';
+  }
   if (typeof raw === 'boolean') return 'bool';
   const s = String(raw).trim().toLowerCase();
   if (BOOL_TRUE.includes(s) || BOOL_FALSE.includes(s)) return 'bool';
@@ -183,10 +202,12 @@ export async function listEntries({ section, q } = {}) {
     if (!viewers.has(sec.id)) viewers.set(sec.id, await sensitiveViewer(sec, list.filter((x) => x.section === sec.id)));
     const item = serializeEntry(sec, e, { decrypt: viewers.get(sec.id) });
     if (q) {
-      // file 字段值是附件 id，把解析出的附件名也加进搜索文本，才能按「简历/成绩单」搜到条目
+      // file 字段值是附件 id（可能挂多个），把解析出的附件名都加进搜索文本，
+      // 才能按「简历/成绩单」搜到条目
       const fileNames = sec.fields
         .filter((f) => f.type === 'file')
-        .map((f) => att.findFileRecord(store, e.values?.[f.key])?.name || '');
+        .flatMap((f) => att.fileIdsOf(e.values?.[f.key])
+          .map((id) => att.findFileRecord(store, id)?.name || ''));
       const hay = [item.title, sec.title, ...fileNames,
         ...Object.values(item.values).map((v) => (v === null ? '' : Array.isArray(v) ? v.join(',') : String(v)))]
         .join('\n').toLowerCase();
@@ -204,18 +225,19 @@ export async function getEntry(ref, { mask, section } = {}) {
   if (!sec) throw notFound(`条目 ${entry.id} 指向的栏目已不存在: ${entry.section}`);
   const decrypt = await sensitiveViewer(sec, [entry]);
   const serialized = serializeEntry(sec, entry, { mask: !!mask, decrypt });
-  // 附带 file 字段引用的附件信息：键 = 字段值（即附件 id / 文件名），值为名称 / 路径 / 链接
+  // 附带 file 字段引用的附件信息：键 = 字段值（附件 id / 文件名），值为名称 / 路径 / 链接。
+  // 一个字段可挂多个附件，所以逐个 id 建表。
   const files = {};
   for (const f of sec.fields.filter((x) => x.type === 'file')) {
-    const ref = serialized.values[f.key];
-    if (!ref) continue;
-    const rec = att.findFileRecord(store, ref);
-    if (!rec) continue;
-    const links = att.fileLinks(rec);
-    files[ref] = {
-      id: rec.id, name: rec.name, ext: rec.ext, isImage: att.isImageExt(rec.ext),
-      path: displayPath(att.fileRecordAbs(rec)), url: links.url, downloadUrl: links.downloadUrl,
-    };
+    for (const ref of att.fileIdsOf(serialized.values[f.key])) {
+      const rec = att.findFileRecord(store, ref);
+      if (!rec) continue;
+      const links = att.fileLinks(rec);
+      files[ref] = {
+        id: rec.id, name: rec.name, ext: rec.ext, isImage: att.isImageExt(rec.ext),
+        path: displayPath(att.fileRecordAbs(rec)), url: links.url, downloadUrl: links.downloadUrl,
+      };
+    }
   }
   return { ...serialized, sectionTitle: sec.title, mask: !!mask, files };
 }
@@ -518,6 +540,21 @@ export function renderEntryList(d) {
   return lines.join('\n');
 }
 
+/**
+ * 一个字段值渲染成几行文本。
+ * - 附件（`file` 字段，值可能是 id 列表）：解析成「附件名　物理路径」，**几个占几行**
+ * - 其它数组（tags 之类）：仍旧一行、顿号连接——不要顺手把它们也拆成多行
+ */
+function valueLines(d, v) {
+  const asFile = (x) => (d.files && d.files[x] ? `${d.files[x].name}　${d.files[x].path}` : null);
+  if (Array.isArray(v) && v.length && v.every((x) => asFile(x))) return v.map(asFile);
+  const one = asFile(v);
+  if (one) return [one];
+  if (Array.isArray(v)) return [v.join('、')];
+  if (typeof v === 'boolean') return [v ? '是' : '否'];
+  return [String(v)];
+}
+
 export function renderEntryGet(d) {
   const c = d.completeness || {};
   const lines = [
@@ -527,11 +564,9 @@ export function renderEntryGet(d) {
   ];
   for (const [k, v] of Object.entries(d.values)) {
     if (v === null) continue;
-    if (d.files && d.files[v]) {
-      lines.push(`  ${k.padEnd(24)} ${d.files[v].name}　${d.files[v].path}`);
-      continue;
-    }
-    lines.push(`  ${k.padEnd(24)} ${Array.isArray(v) ? v.join('、') : (typeof v === 'boolean' ? (v ? '是' : '否') : String(v))}`);
+    const rendered = valueLines(d, v);
+    lines.push(`  ${k.padEnd(24)} ${rendered[0]}`);
+    for (const extra of rendered.slice(1)) lines.push(`  ${' '.repeat(24)} ${extra}`);
   }
   if (d.missing.length) {
     lines.push('', `未填（${d.missing.length}）: ${d.missing.map((m) => `${m.label}(${m.key})`).join('、')}`);
