@@ -120,11 +120,11 @@ nx-sk section update job --fields @fields.json
 ```
 
 字段定义支持：`key`（字母开头）、`label`、`type`（`text|textarea|number|date|month|bool|select|tags|secret|file`）、
-`group`、`hint`、`options`（候选项）、`sensitive`（true 则密文落盘）、`maxItems`（tags 上限）、
+`group`、`hint`、`options`（候选项）、`sensitive`（true 则密文落盘）、`maxItems`（tags / file 上限）、
 `fill`（填写策略，见下）。
 
-> `type: 'file'` 是**附件字段**：值存的是一个**附件 id**（不是路径），导入原件、附件库台账、
-> 以及「文件统一放 `~/nx-sk/files/`」的完整口径见 `40-files`。
+> `type: 'file'` 是**附件字段**：值 = 附件 id 的**列表**（一个字段可挂多个；不是路径），
+> 导入原件、附件库台账、以及「文件统一放 `~/nx-sk/files/`」的完整口径见 `40-files`。
 
 > `select` 的 `options` 是**候选项不是白名单**：真实值（如某个少数民族）不在候选里也允许写入。
 

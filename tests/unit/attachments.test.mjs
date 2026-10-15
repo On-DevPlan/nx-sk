@@ -146,7 +146,8 @@ test('简历（job）的 file 字段：值=附件 id，在条目的字段里选/
   assert.equal(created.status, 'ok');
 
   const got = await entries.getEntry('张三', { section: 'job' });
-  assert.equal(got.values.resumeFile, added.id);
+  // 新写入统一存**数组**（哪怕只有一个附件）——形状一致，下游不必判「是串还是表」
+  assert.deepEqual(got.values.resumeFile, [added.id]);
   assert.equal(got.files[added.id].name, '求职简历.pdf');
   assert.equal(got.files[added.id].url, `/api/files/${added.id}/content`);
 
@@ -214,3 +215,103 @@ test('分类台账与标签体系完整', () => {
   assert.equal(core.categoryLabel('resume'), '简历');
   assert.equal(core.safeFileName('a/b:c?.pdf'), 'a_b_c_.pdf');
 });
+
+// ── 一个 file 字段挂多个附件 ──────────────────────────────
+
+test('fileIdsOf：字符串 / 数组 / 空 / 重复 都归一成 id 数组', () => {
+  assert.deepEqual(core.fileIdsOf('f_a'), ['f_a']);
+  assert.deepEqual(core.fileIdsOf(['f_a', 'f_b']), ['f_a', 'f_b']);
+  assert.deepEqual(core.fileIdsOf(['f_a', 'f_a', ' f_b ', '']), ['f_a', 'f_b']);
+  assert.deepEqual(core.fileIdsOf(null), []);
+  assert.deepEqual(core.fileIdsOf(undefined), []);
+  assert.deepEqual(core.fileIdsOf([]), []);
+});
+
+test('一个 file 字段挂多个附件：值 = 数组，反查/搜索/渲染都按列表走', async () => {
+  const a = await svc.addFile({ path: await makeSource('multi', '简历-前端.pdf', 'resume-fe') });
+  const b = await svc.addFile({ path: await makeSource('multi', '简历-后端.pdf', 'resume-be') });
+
+  // 逗号分隔的写法也认（CLI 手感）；存下来仍是数组
+  await entries.addEntry({
+    section: 'job', title: '多附件条目',
+    set: { name: '多附件条目', resumeFile: `${a.id},${b.id}` },
+  });
+  const got = await entries.getEntry('多附件条目', { section: 'job' });
+  assert.deepEqual(got.values.resumeFile, [a.id, b.id]);
+  assert.equal(got.files[a.id].name, '简历-前端.pdf');
+  assert.equal(got.files[b.id].name, '简历-后端.pdf');
+
+  // 反查：两个附件都指向同一条目同一字段
+  for (const f of [a, b]) {
+    const detail = await svc.getFile(f.id);
+    assert.equal(
+      detail.usedBy.filter((u) => u.entryId === got.id && u.fieldKey === 'resumeFile').length,
+      1,
+      '同一（条目,字段）只出一条引用',
+    );
+  }
+
+  // 按**第二个**附件的名字也能搜到条目
+  const searched = await entries.listEntries({ q: '简历-后端' });
+  assert.equal(searched.entries.some((e) => e.id === got.id), true);
+
+  // 数组去重：同一 id 写两遍只留一个
+  await entries.updateEntry('多附件条目', { section: 'job', set: { resumeFile: [a.id, a.id, b.id] } });
+  const after = await entries.getEntry('多附件条目', { section: 'job' });
+  assert.deepEqual(after.values.resumeFile, [a.id, b.id]);
+});
+
+test('file 字段超 maxItems 报 INVALID_INPUT（与 tags 同一口径）', async () => {
+  const sections = await import('../../src/modules/sections/service.js');
+  await sections.addSection({
+    id: 'cv_files', title: '附件测试', fields: [
+      { key: 'docs', label: '资料', type: 'file', group: 'main', maxItems: 2 },
+    ],
+  });
+  await assert.rejects(
+    entries.addEntry({ section: 'cv_files', title: '超限', set: { docs: 'f_a,f_b,f_c' } }),
+    (e) => e.code === 'INVALID_INPUT' && /最多 2 项，收到 3 项/.test(e.message),
+  );
+  // 上限之内正常写入
+  const ok = await entries.addEntry({ section: 'cv_files', title: '未超限', set: { docs: 'f_a,f_b' } });
+  assert.equal(ok.status, 'ok');
+  assert.deepEqual((await entries.getEntry('未超限', { section: 'cv_files' })).values.docs, ['f_a', 'f_b']);
+});
+
+test('兼容历史单值：字符串仍是单元素列表（读命令不炸、反查/搜索照常）', async () => {
+  const c = await svc.addFile({ path: await makeSource('legacy', '老简历.pdf', 'legacy-bytes') });
+  const { loadStore, mutateStore } = await import('../../src/core/store.js');
+  // 直接写一个「老形态」的字符串单值（模拟 0.7.x 及更早存下来的数据）
+  const created = await entries.addEntry({ section: 'job', title: '老数据', set: { name: '老数据' } });
+  await mutateStore((s) => {
+    const e = s.entries.find((x) => x.id === created.id);
+    e.values.resumeFile = c.id;
+  });
+
+  const got = await entries.getEntry('老数据', { section: 'job' });
+  assert.equal(got.values.resumeFile, c.id, '老值原样读出来，不做迁移');
+  assert.equal(got.files[c.id].name, '老简历.pdf', '单值同样能解析出附件名');
+  assert.equal((await svc.getFile(c.id)).usedBy.some((u) => u.entryId === created.id), true);
+
+  // 渲染成一行、不炸
+  const dumped = await entries.getEntry('老数据', { section: 'job' });
+  assert.ok(dumped.values.resumeFile);
+  assert.ok((await loadStore()).entries.some((x) => x.id === created.id));
+});
+
+test('未知键写 f_ 形态的值 → 登记成附件字段（不是 tags/text）', async () => {
+  const a = await svc.addFile({ path: await makeSource('infer', '推断.pdf', 'infer-bytes') });
+  const r = await entries.updateEntry('多附件条目', { section: 'job', set: { 备用附件: `${a.id}` } });
+  assert.equal(r.status, 'ok');
+  const store = await loadStoreSafe();
+  const job = store.sections.find((s) => s.id === 'job');
+  const def = job.fields.find((f) => f.key === '备用附件');
+  assert.equal(def.type, 'file', '按 f_ 前缀推断成附件字段');
+  const got = await entries.getEntry('多附件条目', { section: 'job' });
+  assert.deepEqual(got.values['备用附件'], [a.id]);
+});
+
+async function loadStoreSafe() {
+  const { loadStore } = await import('../../src/core/store.js');
+  return loadStore();
+}

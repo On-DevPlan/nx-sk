@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import http from 'node:http';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -205,6 +205,24 @@ step('key remove --dry-run 不落盘', dryKeyRemove.status === 'skipped' && (awa
 
 const dump = await cliJson(['section', 'dump', 'job']);
 step('section dump 给全量（字段 + 条目 + 未填清单）', dump.fields.length > 50 && dump.entries.length >= 1 && dump.entries[0].missing.length > 0);
+
+// ── 一个 file 字段挂多个附件（值 = 附件 id 的列表）────────────
+await writeFile(join(home, 'r1.pdf'), 'resume-one');
+await writeFile(join(home, 'r2.pdf'), 'resume-two');
+const mf1 = await cliJson(['file', 'add', '--path', join(home, 'r1.pdf')]);
+const mf2 = await cliJson(['file', 'add', '--path', join(home, 'r2.pdf')]);
+await cliJson(['entry', 'update', '冒烟测试', '--set', `resumeFile=${mf1.id},${mf2.id}`]);
+const multi = await cliJson(['entry', 'get', '冒烟测试', '--section', 'job']);
+step('一个字段挂多个附件：值是数组（哪怕单个也存数组）',
+  Array.isArray(multi.values.resumeFile) && multi.values.resumeFile.length === 2);
+step('两个附件都解析出名称与路径', multi.files[mf1.id]?.name === 'r1.pdf' && multi.files[mf2.id]?.name === 'r2.pdf');
+const multiHuman = await cli(['entry', 'get', '冒烟测试', '--section', 'job']);
+step('CLI 人类模式：多个附件各占一行',
+  multiHuman.out.includes('r1.pdf') && multiHuman.out.includes('r2.pdf'));
+const mf2Detail = await cliJson(['file', 'get', mf2.id]);
+step('第二个附件也反查到「被引用」', mf2Detail.usedBy.some((u) => u.fieldKey === 'resumeFile'));
+const bySecond = await cliJson(['entry', 'list', '--section', 'job', '--q', 'r2.pdf']);
+step('按第二个附件的名字也能搜到条目', bySecond.entries.some((e) => e.title === '冒烟测试'));
 
 const dryExport = await cliJson(['export', 'run', '--dry-run']);
 step('export --dry-run 只报计划', dryExport.status === 'skipped' && dryExport.wouldWrite.files.length === 2);
