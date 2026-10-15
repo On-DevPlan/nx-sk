@@ -116,6 +116,11 @@ nav.tabs {
   border-radius: var(--radius-btn);
   box-shadow: var(--shadow-relief);
 }
+/* 桥：盖住 pill 与菜单之间那几像素的「死区」——鼠标下滑穿过它时不能被判成离开，
+   否则菜单刚探出头就消失（hover 菜单的经典坑） */
+.tab-menu::before {
+  content: ''; position: absolute; left: 0; right: 0; top: -5px; height: 5px;
+}
 .tab-menu-row {
   display: flex; align-items: center; gap: 10px; width: 100%;
   height: var(--row-h); padding: 0 8px;
