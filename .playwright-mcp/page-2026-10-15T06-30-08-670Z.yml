@@ -1,0 +1,209 @@
+- generic [ref=f2e3]:
+  - banner [ref=f2e4]:
+    - generic [ref=f2e5]: nx-sk
+    - generic [ref=f2e6]: 本机个人资源管理器
+    - generic [ref=f2e7]: v0.9.0
+    - generic [ref=f2e8]:
+      - generic "存储目录：C:\\Users\\MINISFORUM\\nx-sk\\store.json" [ref=f2e9]:
+        - generic [ref=f2e10]: 存储
+        - button "~/nx-sk/store.json" [ref=f2e11]
+      - button "刷新数据" [ref=f2e12] [cursor=pointer]
+  - navigation [ref=f2e13]:
+    - button "服务器 2" [ref=f2e14] [cursor=pointer]:
+      - text: 服务器
+      - generic [ref=f2e15]: "2"
+    - button "面试英语短语 6" [ref=f2e16] [cursor=pointer]:
+      - text: 面试英语短语
+      - generic [ref=f2e17]: "6"
+    - button "密钥 21" [ref=f2e18] [cursor=pointer]:
+      - text: 密钥
+      - generic [ref=f2e19]: "21"
+    - button "求职资料 10" [ref=f2e21] [cursor=pointer]:
+      - text: 求职资料
+      - generic [ref=f2e22]: "10"
+    - button "栏目" [ref=f2e25] [cursor=pointer]
+    - button "附件" [ref=f2e26] [cursor=pointer]
+    - button "导出与备份" [ref=f2e27] [cursor=pointer]
+    - button "设置" [ref=f2e28] [cursor=pointer]
+  - main [ref=f2e29]:
+    - generic [ref=f2e31]:
+      - strong [ref=f2e32]: 设置
+      - generic [ref=f2e33]: 本机配置与运行状态
+      - button "重新读取" [ref=f2e34] [cursor=pointer]
+    - generic [ref=f2e35]:
+      - generic [ref=f2e36]: 存储与运行
+      - generic [ref=f2e37]:
+        - generic [ref=f2e38]:
+          - generic [ref=f2e39]: 数据目录
+          - generic [ref=f2e40]: ~/nx-sk
+          - button "复制" [ref=f2e42]
+        - generic [ref=f2e43]:
+          - generic [ref=f2e44]: store.json
+          - generic [ref=f2e45]: ~/nx-sk/store.json
+          - button "复制" [ref=f2e47]
+        - generic [ref=f2e48]:
+          - generic [ref=f2e49]: 栏目 / 条目
+          - generic [ref=f2e50]: 8 / 39
+        - generic [ref=f2e52]:
+          - generic [ref=f2e53]: 命令条数
+          - generic [ref=f2e54]: "41"
+        - generic [ref=f2e56]:
+          - generic [ref=f2e57]: app / node
+          - generic [ref=f2e58]: v0.9.0 · node v22.22.1 · win32
+        - generic [ref=f2e60]:
+          - generic [ref=f2e61]: 环境变量覆盖
+          - generic [ref=f2e62]: （无）
+    - generic [ref=f2e64]:
+      - generic [ref=f2e65]: 密钥（密文落盘）
+      - generic [ref=f2e66]:
+        - generic [ref=f2e67]:
+          - generic [ref=f2e68]: 密钥来源
+          - generic [ref=f2e69]: 本机密钥文件
+        - generic [ref=f2e71]:
+          - generic [ref=f2e72]: 密钥文件
+          - generic [ref=f2e73]: ~/nx-sk/.vaultkey
+          - button "复制" [ref=f2e75]
+        - generic [ref=f2e76]: 密钥来自本机密钥文件；删掉它会让已存密文无法解密。
+        - generic [ref=f2e78]: 删掉密钥文件或换掉口令后，已存的密文都解不开了——导出前先确认密钥可用。
+    - generic [ref=f2e80]:
+      - generic [ref=f2e81]: 面板与 CLI
+      - generic [ref=f2e82]:
+        - generic [ref=f2e83]:
+          - generic [ref=f2e84]: 面板地址
+          - generic [ref=f2e85]: http://127.0.0.1:7866
+          - button "复制" [ref=f2e87]
+        - generic [ref=f2e88]:
+          - generic [ref=f2e89]: 重启面板
+          - generic [ref=f2e90]: 面板本身就是 serve 提供的；改代码后重启它即可
+          - button "nx-sk serve --port 7866" [ref=f2e92]
+    - generic [ref=f2e93]:
+      - generic [ref=f2e94]:
+        - text: 头部导航分组
+        - generic [ref=f2e95]: 1 个分组
+      - generic [ref=f2e96]:
+        - generic [ref=f2e97]: 把同域栏目收拢成一个头部入口：头部只显示组名，悬浮展开上下列表选具体栏目，列表顺序就是这里的顺序（用上移 / 下移调）。不归组的栏目保持平铺； 组顺序 = 头部显示顺序；一个栏目只能属于一个分组。
+        - generic [ref=f2e98]:
+          - generic [ref=f2e99]:
+            - textbox "组名，如「求职」" [ref=f2e100]: 求职资料
+            - button "上移" [disabled] [ref=f2e101]
+            - button "下移" [disabled] [ref=f2e102]
+            - button "删除组" [ref=f2e103] [cursor=pointer]
+            - generic [ref=f2e104]: 已选 5 个栏目
+          - generic [ref=f2e105]:
+            - generic [ref=f2e114]:
+              - generic [ref=f2e115]: "1"
+              - generic [ref=f2e116]: 实习/工作经历
+              - generic [ref=f2e117]: 2 条
+              - generic [ref=f2e118]:
+                - button "上移" [disabled] [ref=f2e119]
+                - button "下移" [ref=f2e120] [cursor=pointer]
+                - button "移除" [ref=f2e121] [cursor=pointer]
+            - generic [ref=f2e106]:
+              - generic [ref=f2e107]: "2"
+              - generic [ref=f2e108]: 项目经历
+              - generic [ref=f2e109]: 2 条
+              - generic [ref=f2e110]:
+                - button "上移" [ref=f2e111] [cursor=pointer]
+                - button "下移" [active] [ref=f2e112] [cursor=pointer]
+                - button "移除" [ref=f2e113] [cursor=pointer]
+            - generic [ref=f2e122]:
+              - generic [ref=f2e123]: "3"
+              - generic [ref=f2e124]: 校内职务/实践
+              - generic [ref=f2e125]: 4 条
+              - generic [ref=f2e126]:
+                - button "上移" [ref=f2e127] [cursor=pointer]
+                - button "下移" [ref=f2e128] [cursor=pointer]
+                - button "移除" [ref=f2e129] [cursor=pointer]
+            - generic [ref=f2e130]:
+              - generic [ref=f2e131]: "4"
+              - generic [ref=f2e132]: 学校信息申请相关
+              - generic [ref=f2e133]: 1 条
+              - generic [ref=f2e134]:
+                - button "上移" [ref=f2e135] [cursor=pointer]
+                - button "下移" [ref=f2e136] [cursor=pointer]
+                - button "移除" [ref=f2e137] [cursor=pointer]
+            - generic [ref=f2e138]:
+              - generic [ref=f2e139]: "5"
+              - generic [ref=f2e140]: 求职
+              - generic [ref=f2e141]: 1 条
+              - generic [ref=f2e142]:
+                - button "上移" [ref=f2e143] [cursor=pointer]
+                - button "下移" [disabled] [ref=f2e144]
+                - button "移除" [ref=f2e145] [cursor=pointer]
+          - generic [ref=f2e146]:
+            - button "+ 服务器 2" [ref=f2e147] [cursor=pointer]:
+              - text: + 服务器
+              - generic [ref=f2e148]: "2"
+            - button "+ 面试英语短语 6" [ref=f2e149] [cursor=pointer]:
+              - text: + 面试英语短语
+              - generic [ref=f2e150]: "6"
+            - button "+ 密钥 21" [ref=f2e151] [cursor=pointer]:
+              - text: + 密钥
+              - generic [ref=f2e152]: "21"
+        - generic [ref=f2e153]:
+          - button "保存分组" [ref=f2e154] [cursor=pointer]
+          - button "新增分组" [ref=f2e155] [cursor=pointer]
+          - button "清空（恢复平铺）" [ref=f2e156] [cursor=pointer]
+    - generic [ref=f2e157]:
+      - generic [ref=f2e158]: 默认行为
+      - generic [ref=f2e159]:
+        - generic [ref=f2e160]:
+          - generic [ref=f2e161]:
+            - generic [ref=f2e162]: 默认导出格式
+            - combobox [ref=f2e165]:
+              - option "JSON + Markdown" [selected]
+              - option "仅 JSON"
+              - option "仅 Markdown"
+          - generic [ref=f2e166]:
+            - generic [ref=f2e167]:
+              - generic [ref=f2e168]: 默认导出目录
+              - generic [ref=f2e169]: 留空 = ~/nx-sk/export
+            - textbox [ref=f2e171]
+          - generic [ref=f2e172]:
+            - generic [ref=f2e173]:
+              - generic [ref=f2e174]: 默认栏目
+              - generic [ref=f2e175]: CLI 未指定 --section 时的首选
+            - textbox [ref=f2e177]: job
+          - generic [ref=f2e178]:
+            - generic [ref=f2e179]:
+              - generic [ref=f2e180]: 导出默认带明文密钥
+              - generic [ref=f2e181]: 默认开；要分享出去时关掉
+            - generic [ref=f2e183]:
+              - checkbox "开（导出文件含真实凭据，注意别外发）" [checked] [ref=f2e184]
+              - generic [ref=f2e185]: 开（导出文件含真实凭据，注意别外发）
+        - button "保存设置" [ref=f2e187] [cursor=pointer]
+    - generic [ref=f2e188]:
+      - generic [ref=f2e189]:
+        - text: 自动快照
+        - generic [ref=f2e190]: "5"
+      - generic [ref=f2e191]:
+        - generic [ref=f2e192]: 每次删除条目 / 栏目、修改设置前，都会在 ~/nx-sk/backup 留一份可回滚的整库快照。
+        - generic [ref=f2e194]:
+          - generic [ref=f2e195]: 20261015-142655-setting-set.json
+          - generic [ref=f2e196]: 2026-10-15T06:26:55.250Z
+          - generic [ref=f2e197]: 78 KB
+        - generic [ref=f2e199]:
+          - generic [ref=f2e200]: 20261015-140558-setting-set.json
+          - generic [ref=f2e201]: 2026-10-15T06:05:58.452Z
+          - generic [ref=f2e202]: 78 KB
+        - generic [ref=f2e204]:
+          - generic [ref=f2e205]: 20261015-140535-setting-set.json
+          - generic [ref=f2e206]: 2026-10-15T06:05:35.812Z
+          - generic [ref=f2e207]: 78 KB
+        - generic [ref=f2e209]:
+          - generic [ref=f2e210]: 20261015-140503-setting-set.json
+          - generic [ref=f2e211]: 2026-10-15T06:05:03.586Z
+          - generic [ref=f2e212]: 78 KB
+        - generic [ref=f2e214]:
+          - generic [ref=f2e215]: 20261015-134431-setting-set.json
+          - generic [ref=f2e216]: 2026-10-15T05:44:31.181Z
+          - generic [ref=f2e217]: 78 KB
+    - generic [ref=f2e219]:
+      - generic [ref=f2e220]: 这个页面上的每个操作都有一条同构的 CLI 命令：
+      - button "nx-sk setting get" [ref=f2e221]
+      - generic [ref=f2e222]: ·
+      - button "nx-sk setting set" [ref=f2e223]
+      - generic [ref=f2e224]:
+        - text: 。加
+        - code [ref=f2e225]: "--json"
+        - text: 得机器可读输出。

@@ -67,3 +67,14 @@ test('renderSettings 把数组设置渲染成 JSON（不是 [object Object]）',
   assert.ok(text.includes('"title":"求职"'), '数组要序列化出来');
   assert.ok(!text.includes('[object Object]'));
 });
+
+test('navGroups 保留组内栏目顺序（头部展开列表按它渲染，别被自动排序）', async () => {
+  const r = await settings.updateSettings({ set: { navGroups: [{ title: 'O', sections: ['secret', 'job', 'campus'] }] } });
+  assert.deepEqual(r.set.navGroups[0].sections, ['secret', 'job', 'campus']);
+  assert.deepEqual(
+    (await loadStore()).settings.navGroups[0].sections,
+    ['secret', 'job', 'campus'],
+    '顺序必须原样落盘：不能被栏目 order / 字典序重排',
+  );
+  await settings.updateSettings({ set: { navGroups: [] } });
+});
