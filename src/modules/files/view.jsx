@@ -196,7 +196,7 @@ export default function FilesView() {
       <div className="toolbar rowgap pad">
         <strong>附件</strong>
         <span className="muted">{data.total} 个 · {fmtBytes(data.totalBytes)}</span>
-        <span className="hint" title="被栏目条目的 file 字段引用的附件数">被引用 {data.total - data.unlinked}/{data.total}</span>
+        <span className="hint" title="被栏目条目的 file 字段或 md 正文图片引用的附件数">被引用 {data.total - data.unlinked}/{data.total}</span>
         <Copyable className="hint" text={data.rootRaw} title="点击复制附件库目录">{data.root}</Copyable>
         <span className="grow" />
         <input
@@ -217,7 +217,7 @@ export default function FilesView() {
         />
       </div>
 
-      {/* 筛选按**栏目**驱动：栏目有 file 字段就会出现一个筛选片，不预定义任何分类 */}
+      {/* 筛选按**栏目**驱动：栏目有 file 或 md 字段就会出现一个筛选片，不预定义任何分类 */}
       <div className="rowgap pad file-filters">
         <button className={`tab small ${!filter ? 'active' : ''}`} onClick={() => setFilter('')}>
           全部<span className="count">{data.total}</span>
@@ -255,7 +255,7 @@ export default function FilesView() {
                   {file.mode === 'move' ? <Tag>移动导入</Tag> : null}
                 </div>
                 {file.usedBy?.length
-                  ? <div className="hint" title="条目的 file 字段引用了本附件">被引用：{file.usedBy.map(refText).join('、')}</div>
+                  ? <div className="hint" title="条目的 file 字段或 md 正文图片引用了本附件">被引用：{file.usedBy.map(refText).join('、')}</div>
                   : <div className="hint">未被任何条目引用（到栏目条目里选它即可链接）</div>}
               </div>
               <div className="file-acts">
@@ -361,7 +361,7 @@ function EditForm({ form, onChange, onSubmit }) {
       </div>
       <div className="rowgap">
         <button className="btn" onClick={onSubmit}>保存</button>
-        <span className="hint">改文件名时，物理原件会随之移动。要链接到条目，请在栏目条目的 file 字段里选本附件。</span>
+        <span className="hint">改文件名时，物理原件会随之移动。要链接到条目，请在栏目条目的 file 字段里选本附件，或在 md 正文里写 <code>![说明](本附件id)</code>。</span>
       </div>
     </div>
   );

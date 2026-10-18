@@ -59,7 +59,7 @@ export async function listFiles({ category, q, section, limit = 0, offset = 0 } 
   const pageList = size > 0 ? list.slice(start, start + size) : [];
   let totalBytes = 0;
   for (const r of store.files) totalBytes += r.bytes;
-  // 分组素材：带 file 字段的栏目（栏目驱动）及其引用数
+  // 分组素材：带 file 或 md 字段的栏目（栏目驱动）及其引用数
   const sections = collectFileSections(store).map((s) => ({
     ...s, count: withRefs.filter((x) => x.usedBy.some((u) => u.sectionId === s.id)).length,
   }));
@@ -241,7 +241,7 @@ export function renderFileList(d) {
     if (r.usedBy?.length) lines.push(`      被引用: ${r.usedBy.map(refLabel).join('、')}`);
     if (r.note) lines.push(`      备注: ${r.note}`);
   }
-  lines.push('', '导入: nx-sk file add --path <文件>（默认移动）　链接: 在栏目条目的 file 字段填本附件 id');
+  lines.push('', '导入: nx-sk file add --path <文件>（默认移动）　链接: 在栏目条目的 file 字段选本附件，或在 md 正文写 ![说明](本附件id)');
   return lines.join('\n');
 }
 
@@ -252,7 +252,7 @@ export function renderFileGet(d) {
     `链接:   ${d.url}`,
   ];
   if (d.usedBy?.length) lines.push(`被引用: ${d.usedBy.map(refLabel).join('、')}`);
-  else lines.push('被引用: （没有条目引用；在栏目的 file 字段里填本附件 id 即建立链接）');
+  else lines.push('被引用: （没有条目引用；在栏目的 file 字段里选本附件，或在 md 正文里写 ![说明](本附件id) 即建立链接）');
   if (d.sourceDisplay) lines.push(`原始:   ${d.sourceDisplay}（${d.mode === 'move' ? '移动导入' : '复制导入'}）`);
   if (d.tags.length) lines.push(`标签:   ${d.tags.join('、')}`);
   if (d.note) lines.push(`备注:   ${d.note}`);
