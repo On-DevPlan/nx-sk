@@ -4,9 +4,9 @@ import { useStore } from '../../web/frontend/store.jsx';
 import { CliHints, Copyable, Empty, Modal, Tag } from '../../web/frontend/components/ui.jsx';
 import TransferPanel from '../../web/frontend/components/transferPanel.jsx';
 
-// 「导出与备份」合并页：明文导出（带走可读文件）与口令加密备份（整份可还原）
-// 对用户来说是同一件事——把数据倒出去、再倒回来，所以并成一个 tab。
-// 后端仍是 export / backup 两个模块、两组 CLI 命令；页脚的 CliHints 把两组合成一条提示。
+// 「导出与备份」页 = 取数据：选栏目（全选即整库）→ 设口令 → 下载；拖回包解密导入。
+// 整库加密备份（.nxskbak，带设置与附件台账）在「设置」页 —— 那是留后路，不是取数据。
+// 后端仍是 export / backup / transfer 三个模块；页脚 CliHints 只提示与本页相关的两组。
 export default function ExportView() {
   const { boot, toast, guard } = useStore();
   const [sections, setSections] = useState([]);
@@ -66,7 +66,7 @@ export default function ExportView() {
     <>
       <div className="toolbar rowgap pad">
         <strong>导出与备份</strong>
-        <span className="muted">按栏目 = ZIP（可勾选条目、可设口令）；整库备份 = 口令保护的 .nxskbak（含设置与附件台账）。同一个「倒出去 / 倒回来」</span>
+        <span className="muted">选栏目（全选即整库）→ 设口令 → 下载；把包拖回来解密导入。整库加密备份在「设置」里</span>
       </div>
 
       <TransferPanel />
@@ -153,7 +153,7 @@ export default function ExportView() {
         </div>
       </div>
 
-      <CliHints module={['export', 'backup']} />
+      <CliHints module={['export', 'transfer']} />
 
       {modal ? <Modal title={modal.title} onClose={() => setModal(null)}>{modal.body}</Modal> : null}
     </>

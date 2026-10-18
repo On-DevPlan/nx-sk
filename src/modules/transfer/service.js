@@ -9,8 +9,9 @@
 //   README.txt               给人看的说明
 //   attachments/<id><ext>    附件原件
 //
-// 导出的凭据默认是**明文**（与 export 模块一致，本机单人工具）；
-// `--no-secrets` 时打码，导入侧会识别 `******` 并跳过该字段（不是把打码串存进去）。
+// 包里**恒为明文**：保护靠口令（`--passphrase`），不再有「打码 / 明文」二选。
+// 打码只保留在**读取侧**——0.11.0 及更早导出、带 `******` 的包仍按旧口径跳过该字段，
+// 不会把打码串当新密码存进去。
 import fsp from 'node:fs/promises';
 import { basename, dirname, extname, join, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -19,7 +20,6 @@ import { isEncryptedPackage, openPackage, sealPackage } from '../../core/securez
 import { loadStore, mutateStore, snapshotStore } from '../../core/store.js';
 import { displayPath, exportDir, VERSION } from '../../core/paths.js';
 import { findSection, isSensitiveField, sectionNames } from '../../core/fields.js';
-import { maskValue } from '../../core/crypto.js';
 import { decryptValue, isCipherBlob } from '../../core/crypto.js';
 import { resolveVaultKey } from '../../core/vault.js';
 import { CATEGORY_IDS, fileIdsOf, fileRecordAbs, findFileRecord, importContent } from '../../core/attachments.js';
@@ -66,14 +66,6 @@ async function plainValues(section, values) {
   return out;
 }
 
-function maskedValues(section, values) {
-  const out = {};
-  for (const [k, v] of Object.entries(values || {})) {
-    out[k] = isSensitiveField(section, k) && v !== null && v !== undefined ? maskValue(String(v)) : v;
-  }
-  return out;
-}
-
 /** 一个栏目引用了哪些附件：`file` 字段的 id 列表 + `md` 正文里的图片引用。 */
 function referencedFileIds(section, entries) {
   const ids = new Set();
@@ -93,7 +85,7 @@ const extensionOf = (rec) => rec.ext || extname(rec.name || '').toLowerCase();
 /**
  * 生成栏目 ZIP（内存里）。返回 { buffer, fileName, stats }。
  */
-export async function buildSectionZip(ref, { withSecrets = true, entryIds, passphrase } = {}) {
+export async function buildSectionZip(ref, { entryIds, passphrase } = {}) {
   const store = await loadStore();
   const section = findSection(store, ref);
   if (!section) throw notFound(`找不到栏目: ${ref} —— 现有: ${sectionNames(store)}`);
@@ -117,7 +109,7 @@ export async function buildSectionZip(ref, { withSecrets = true, entryIds, passp
       tags: e.tags || [],
       createdAt: e.createdAt,
       updatedAt: e.updatedAt,
-      values: withSecrets ? plain : maskedValues(section, plain),
+      values: plain,
     });
   }
 
@@ -149,7 +141,7 @@ export async function buildSectionZip(ref, { withSecrets = true, entryIds, passp
     formatVersion: FORMAT_VERSION,
     appVersion: VERSION,
     exportedAt,
-    withSecrets,
+    withSecrets: true,
     section: {
       id: section.id, title: section.title, description: section.description || '',
       titleLabel: section.titleLabel || '名称', titleField: section.titleField || null,
@@ -167,7 +159,7 @@ export async function buildSectionZip(ref, { withSecrets = true, entryIds, passp
     `栏目：${section.title}（${section.id}）`,
     `时间：${exportedAt}`,
     `条目：${entries.length}　附件：${fileRecords.length}`,
-    `凭据：${withSecrets ? '含明文（请妥善保管）' : '已打码'}`,
+    `凭据：包内为明文，保护靠口令`,
     '',
     '导入：在面板对应栏目点「更多 → 导入 ZIP」，或',
     `  nx-sk transfer import ${section.id} --file <本文件> --dry-run   # 先预览`,
@@ -189,15 +181,15 @@ export async function buildSectionZip(ref, { withSecrets = true, entryIds, passp
     fileName: `${section.id}-${stamp()}.zip`,
     stats: {
       section: section.id, sectionTitle: section.title, entries: entries.length,
-      available: all.length, files: fileRecords.length, bytes: buffer.length, missingFiles, withSecrets,
+      available: all.length, files: fileRecords.length, bytes: buffer.length, missingFiles,
       encrypted,
     },
   };
 }
 
 /** CLI：写到磁盘（缺省 ~/nx-sk/export）。 */
-export async function exportToFile(ref, { out, withSecrets = true, entryIds, passphrase } = {}) {
-  const { buffer, fileName, stats } = await buildSectionZip(ref, { withSecrets, entryIds, passphrase });
+export async function exportToFile(ref, { out, entryIds, passphrase } = {}) {
+  const { buffer, fileName, stats } = await buildSectionZip(ref, { entryIds, passphrase });
   let target = out ? resolve(out) : join(exportDir(), fileName);
   // --out 指向已存在的目录时自动拼文件名；否则按文件路径处理
   try {
@@ -210,8 +202,8 @@ export async function exportToFile(ref, { out, withSecrets = true, entryIds, pas
 }
 
 /** HTTP raw：直接回 zip 流。 */
-export async function serveExportZip(ref, { res, withSecrets = true, entryIds, passphrase } = {}) {
-  const { buffer, fileName, stats } = await buildSectionZip(ref, { withSecrets, entryIds, passphrase });
+export async function serveExportZip(ref, { res, entryIds, passphrase } = {}) {
+  const { buffer, fileName, stats } = await buildSectionZip(ref, { entryIds, passphrase });
   res.writeHead(200, {
     'content-type': 'application/zip',
     'content-length': buffer.length,
@@ -570,12 +562,12 @@ function normalizeSelection(input) {
   return out;
 }
 
-export async function buildBundleZip({ sections, withSecrets = true, passphrase } = {}) {
+export async function buildBundleZip({ sections, passphrase } = {}) {
   const sel = normalizeSelection(sections);
   const parts = [];
   const index = [];
   for (const item of sel) {
-    const { buffer, stats } = await buildSectionZip(item.id, { withSecrets, entryIds: item.entries });
+    const { buffer, stats } = await buildSectionZip(item.id, { entryIds: item.entries });
     const zipPath = `sections/${stats.section}.zip`;
     parts.push({ name: zipPath, data: buffer });
     index.push({
@@ -586,7 +578,7 @@ export async function buildBundleZip({ sections, withSecrets = true, passphrase 
   const exportedAt = nowIso();
   const manifest = {
     app: 'nx-sk', format: BUNDLE_FORMAT, formatVersion: BUNDLE_VERSION, appVersion: VERSION,
-    exportedAt, withSecrets,
+    exportedAt, withSecrets: true,
     counts: {
       sections: index.length,
       entries: index.reduce((n, x) => n + x.entries, 0),
@@ -598,7 +590,7 @@ export async function buildBundleZip({ sections, withSecrets = true, passphrase 
     'nx-sk 全局导出包（多栏目）', '',
     `时间：${exportedAt}`,
     `栏目：${index.length}　条目：${manifest.counts.entries}　附件：${manifest.counts.files}`,
-    `凭据：${withSecrets ? '含明文（请妥善保管）' : '已打码'}`,
+    `凭据：包内为明文，保护靠口令`,
     '',
     '每个栏目在 sections/<id>.zip 里，结构与单栏目导出完全一致；bundle.json 只是索引。',
     '导入：面板「导出与备份 → 导出导入」，或',
@@ -618,13 +610,13 @@ export async function buildBundleZip({ sections, withSecrets = true, passphrase 
     fileName: `nx-sk-bundle-${stamp()}.zip`,
     stats: {
       sections: index.length, entries: manifest.counts.entries, files: manifest.counts.files,
-      bytes: buffer.length, withSecrets, encrypted,
+      bytes: buffer.length, encrypted,
     },
   };
 }
 
-export async function exportBundleToFile({ sections, out, withSecrets = true, dryRun = false, passphrase } = {}) {
-  const { buffer, fileName, stats } = await buildBundleZip({ sections, withSecrets, passphrase });
+export async function exportBundleToFile({ sections, out, dryRun = false, passphrase } = {}) {
+  const { buffer, fileName, stats } = await buildBundleZip({ sections, passphrase });
   if (dryRun) {
     return { status: 'skipped', dryRun: true, wouldWrite: { fileName, ...stats } };
   }
@@ -638,8 +630,8 @@ export async function exportBundleToFile({ sections, out, withSecrets = true, dr
   return { status: 'ok', path: displayPath(target), pathRaw: target, bytes: await fileSize(target), ...stats };
 }
 
-export async function serveBundleZip({ sections, res, withSecrets = true, passphrase } = {}) {
-  const { buffer, fileName, stats } = await buildBundleZip({ sections, withSecrets, passphrase });
+export async function serveBundleZip({ sections, res, passphrase } = {}) {
+  const { buffer, fileName, stats } = await buildBundleZip({ sections, passphrase });
   res.writeHead(200, {
     // 加密包不是 zip：给 octet-stream，别让浏览器 / 代理按 zip 去嗅探
     'content-type': stats.encrypted ? 'application/octet-stream' : 'application/zip',
@@ -749,7 +741,7 @@ export function importBundleFromBuffer(buffer, { fileName, onConflict, dryRun, p
 export function renderExportZip(d) {
   return [
     `已导出栏目 ${d.sectionTitle}（${d.section}）→ ${d.path}`,
-    `条目 ${d.entries}${d.available !== undefined && d.entries !== d.available ? ` / 共 ${d.available}` : ''} · 附件 ${d.files} · ${(d.bytes / 1024).toFixed(1)}KB · 凭据 ${d.withSecrets ? '含明文' : '已打码'}${d.encrypted ? ' · 已用口令加密' : ''}`,
+    `条目 ${d.entries}${d.available !== undefined && d.entries !== d.available ? ` / 共 ${d.available}` : ''} · 附件 ${d.files} · ${(d.bytes / 1024).toFixed(1)}KB${d.encrypted ? ' · 已用口令加密' : ''}`,
     d.missingFiles ? `注意：${d.missingFiles} 个附件在磁盘上找不到，未打包` : '',
   ].filter(Boolean).join('\n');
 }
@@ -763,7 +755,7 @@ export function renderImport(d) {
       `条目: 共 ${d.entries.total}，新增 ${d.entries.fresh}，冲突 ${d.entries.conflicts.length}`,
       `字段: 将补 ${s.fieldsToAdd.length} 个${s.fieldsToAdd.length ? `（${s.fieldsToAdd.map((f) => f.key).join(', ')}）` : ''}`,
       `附件: 新增 ${d.files.new}，复用 ${d.files.reused}，${(d.files.bytes / 1024).toFixed(1)}KB`,
-      `凭据: ${d.withSecrets ? '含明文' : '已打码'}${d.secrets.masked ? `（${d.secrets.masked} 个需重填）` : ''}`,
+      `凭据: ${d.secrets.masked ? `${d.secrets.masked} 个需重填` : '随包（明文，靠口令保护）'}${d.encrypted ? ' · 已加密' : ''}`,
     ];
     if (d.entries.conflicts.length) {
       lines.push('冲突（默认跳过，可用 --on-conflict copy|overwrite）:');
@@ -790,7 +782,7 @@ export function renderBundleExport(d) {
   }
   return [
     `已导出 ${d.sections} 个栏目 / ${d.entries} 条条目 / ${d.files} 个附件 → ${d.path}`,
-    `${(d.bytes / 1024 / 1024).toFixed(1)}MB · 凭据 ${d.withSecrets ? '含明文' : '已打码'}${d.encrypted ? ' · 已用口令加密' : ''}`,
+    `${(d.bytes / 1024 / 1024).toFixed(1)}MB${d.encrypted ? ' · 已用口令加密' : ''}`,
   ].join('\n');
 }
 
@@ -799,7 +791,7 @@ export function renderBundlePreview(d) {
   const lines = [
     `全局包: ${d.fileName}（${d.exportedAt || '未知时间'}）`,
     `栏目 ${t.sections}（将新建 ${t.newSections}）· 条目 ${t.entries}（新增 ${t.fresh} / 冲突 ${t.conflicts}）`,
-    `附件 新增 ${t.filesNew} / 复用 ${t.filesReused}（${(t.bytes / 1024).toFixed(1)}KB）· 凭据 ${d.withSecrets ? '含明文' : '已打码'}${d.encrypted ? ' · 口令已验证' : ''}`,
+    `附件 新增 ${t.filesNew} / 复用 ${t.filesReused}（${(t.bytes / 1024).toFixed(1)}KB）${d.encrypted ? ' · 口令已验证' : ''}`,
   ];
   for (const s of d.sections) {
     lines.push(`  · ${s.title}（${s.id}）${s.willCreate ? ' 新建' : ''}：条目 ${s.entries.total}，冲突 ${s.entries.conflicts.length}，补字段 ${s.fieldsToAdd.length}`);
