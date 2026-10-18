@@ -369,6 +369,23 @@ step('skill get 人类模式是三段拼接', skillHuman.out.startsWith('# === n
 const refEscape = await cliError(['skill', 'get', 'nx-sk', '../package.json']);
 step('skill get 拒绝路径穿越', refEscape.code === 'INVALID_INPUT');
 
+// sk-pdf：PDF → 图文 SOP 的配套 skill。它带**可执行脚本**，坏了用户才发现得了，
+// 所以这里钉住「随包分发 + 脚本在 + SKILL.md 里提到的脚本真的存在」。
+const skillList = await cliJson(['skill', 'list']);
+const pdfSkill = skillList.skills.find((s) => s.name === 'sk-pdf');
+step('sk-pdf 随包分发', !!pdfSkill && pdfSkill.hasSkillMd === true, pdfSkill ? `refs: ${pdfSkill.refs.join(', ')}` : '未找到');
+
+const pdfGet = await cliJson(['skill', 'get', 'sk-pdf', '--dry-run']);
+step('sk-pdf 可取全文', pdfGet.skillName === 'sk-pdf' && pdfGet.contentBytes > 2000);
+
+const { existsSync } = await import('node:fs');
+const scriptDir = join(ROOT, 'assets', 'sk-pdf', 'scripts');
+step('sk-pdf 的抽取脚本随包存在',
+  existsSync(join(scriptDir, 'pdf_probe.py')) && existsSync(join(scriptDir, 'pdf_extract.py')));
+
+const pdfRef = await cliJson(['skill', 'get', 'sk-pdf', '30-pitfalls', '--dry-run']);
+step('sk-pdf 的踩坑文档可单独取', pdfRef.ref === 'references/30-pitfalls.md' && pdfRef.contentBytes > 1000);
+
 // 软链模式（shim）：目标是项目源码的软链，改完立刻生效；三态照旧
 const linkDir = join(home, 'skills-link');
 const linkDry = await cliJson(['skill', 'install', '--mode', 'symlink', '--to', linkDir, '--dry-run']);

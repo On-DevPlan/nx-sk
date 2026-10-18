@@ -315,20 +315,43 @@ export NX_SK_PASSPHRASE='你的长口令'      # 之后所有密文都用它派�
 ## 给 agent 用
 
 ```bash
-nx-sk skill install                 # 装到 ~/.claude/skills/nx-sk（三态，不静默覆盖）
+nx-sk skill list                   # 内置 skill 清单
+nx-sk skill install               # 装到 ~/.claude/skills/nx-sk（三态，不静默覆盖）
 nx-sk skill get nx-sk --json        # {skillName, ref, content, contentBytes, install}
 nx-sk skill get nx-sk 10-sections-entries   # 裸名 → references/10-sections-entries.md
 ```
 
-内置 skill 的 ref 路由表：
+`nx-sk` 的 ref 路由表：
 
 | ref | 何时读 |
 | --- | --- |
 | `00-design` | 为什么这么分层、错误码与 `{status}` 的分工 |
 | `10-sections-entries` | 填/改信息的完整命令与 AI 补全流程 |
 | `20-secrets` | 密文机制、密钥来源、排查「解不开」 |
-| `30-export-backup` | 导出、快照与回滚 |
 | `40-files` | 附件库：导入（默认移动）与还原、`file` 字段与条目的链接、附件中心由栏目驱动 |
+| `50-deploy` | 存/取 Dockerfile、compose、k8s 清单 |
+| `60-transfer` | 栏目 ZIP：导出、预览、导入、冲突策略 |
+
+### sk-pdf：PDF → 图文 SOP 栏目
+
+把用户手册、操作指南转成 nx-sk 里的图文 SOP 栏目（抽正文、按版面挑截图、
+上传成附件、在 `md` 字段里 `![]()` 引用），带两个已验证的抽取脚本：
+
+```bash
+nx-sk skill install sk-pdf
+nx-sk skill get sk-pdf             # 全文
+nx-sk skill get sk-pdf 30-pitfalls # 踩过的坑
+
+# 不装也能用（零依赖，只需 PyMuPDF）
+python assets/sk-pdf/scripts/pdf_probe.py   book.pdf      # 先探查：有没有图、是不是扫描件
+python assets/sk-pdf/scripts/pdf_extract.py book.pdf --out /tmp/out
+```
+
+| ref | 何时读 |
+| --- | --- |
+| `10-extract` | 为什么必须按版面坐标排序取图（顺序错 = 图全配错步骤） |
+| `20-sop-schema` | 栏目六段结构（简介/准备材料/入口/手册/常见问题/自检）、账号怎么拆 sensitive 字段 |
+| `30-pitfalls` | 占位符忘换 id、本地路径渲染不出、密码泄漏、md 图片被误判未引用… |
 
 ## 开发
 
