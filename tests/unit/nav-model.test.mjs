@@ -202,3 +202,33 @@ test('validate：平铺顺序里出现不存在的栏目要判红', () => {
   const problems = m.validate(cfg, ALL);
   assert.match(problems.map((p) => p.message).join(' | '), /平铺顺序里的栏目 ghost 已不存在/);
 });
+
+test('分组角标 = 栏目数，不是条目数之和', () => {
+  // 组里 3 个栏目，条目数天差地别：角标必须是 3
+  const group = {
+    title: '求职资料',
+    sections: [
+      { id: 'job', title: '求职档案', count: 16 },
+      { id: 'projects', title: '项目经历', count: 2 },
+      { id: 'campus', title: '校内职务', count: 0 },
+    ],
+  };
+  assert.equal(m.groupSectionCount(group), 3);
+
+  // 曾经的口径：把条目数加起来 = 18，看着像「这个分组有 18 条记录」
+  const wrong = group.sections.reduce((n, s) => n + (s.count || 0), 0);
+  assert.equal(wrong, 18);
+  assert.notEqual(m.groupSectionCount(group), wrong, '角标不能等于条目数之和');
+});
+
+test('分组角标：空组与缺字段都按 0，不炸', () => {
+  assert.equal(m.groupSectionCount({ title: '空组', sections: [] }), 0);
+  assert.equal(m.groupSectionCount({ title: '没有 sections' }), 0);
+  assert.equal(m.groupSectionCount(undefined), 0);
+});
+
+test('分组角标：只看栏目数，条目数变化不影响角标', () => {
+  const before = { title: 'g', sections: [{ id: 'a', count: 1 }, { id: 'b', count: 1 }] };
+  const after = { title: 'g', sections: [{ id: 'a', count: 99 }, { id: 'b', count: 0 }] };
+  assert.equal(m.groupSectionCount(before), m.groupSectionCount(after));
+});

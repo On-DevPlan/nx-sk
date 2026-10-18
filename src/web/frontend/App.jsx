@@ -3,6 +3,7 @@ import { SECTION_VIEW, VIEWS } from './registry.js';
 import { Copyable, DialogHost, ErrorBoundary, Toasts } from './components/ui.jsx';
 import { useStore } from './store.jsx';
 import { normalizeViewId, resolveActiveView } from './activeView.js';
+import { groupSectionCount } from './components/navModel.js';
 
 function viewFromHash() {
   const m = /^#\/?([^?/]*)/.exec(window.location.hash || '');
@@ -167,7 +168,8 @@ function GroupTab({ group, currentId, onGo }) {
   // 离开时**延迟**再关：鼠标斜着从 pill 划到菜单行会短暂出界，立刻关就「刚展开就消失」
   const closeTimer = useRef(null);
   const active = group.sections.some((s) => s.id === currentId);
-  const total = group.sections.reduce((n, s) => n + (s.count || 0), 0);
+  // 角标是**栏目数**，不是条目数之和 —— 组是容器，不是「一条栏目」；展开后每行有自己的条目数
+  const sectionCount = groupSectionCount(group);
 
   const cancelClose = () => {
     if (closeTimer.current) { clearTimeout(closeTimer.current); closeTimer.current = null; }
@@ -195,9 +197,14 @@ function GroupTab({ group, currentId, onGo }) {
       onMouseEnter={openNow}
       onMouseLeave={closeSoon}
     >
-      <button className={`tab ${active ? 'active' : ''}`} aria-expanded={open} onClick={openNow}>
+      <button
+        className={`tab ${active ? 'active' : ''}`}
+        aria-expanded={open}
+        onClick={openNow}
+        title={`${group.title}：${sectionCount} 个栏目`}
+      >
         {group.title}
-        <span className="count">{total}</span>
+        <span className="count">{sectionCount}</span>
         <span className="caret" aria-hidden />
       </button>
       {open ? (

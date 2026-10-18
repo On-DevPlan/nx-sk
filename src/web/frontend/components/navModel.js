@@ -175,6 +175,16 @@ export const isHidden = (cfg, sid) => cfg.hidden.includes(sid);
 
 export const groupedIds = (cfg) => cfg.groups.flatMap((g) => g.sections);
 
+/**
+ * 分组入口上的角标 = **栏目数**（这个分组收拢了几个栏目）。
+ *
+ * 为什么不是条目数之和：角标紧挨着组名，回答的是「这一坨里有多少个栏目」；
+ * 条目数是**每个栏目各自**的属性，把它们加在一起塞给组名，会让人以为这个分组本身
+ * 是个栏目、底下挂着 N 条记录 —— 展开后每行又有自己的条目数，角标既冗余又误导。
+ * （组内某个栏目有 16 条，不代表这个分组有 16 条。）
+ */
+export const groupSectionCount = (group) => (group?.sections || []).length;
+
 /** 「平铺」容器里的栏目（既不在分组里、也没被隐藏），按平铺顺序。 */
 export const ungroupedIds = (cfg, allIds) => {
   const skip = new Set([...groupedIds(cfg), ...cfg.hidden]);
