@@ -1,16 +1,26 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../../web/frontend/api/client.js';
 import { useStore } from '../../web/frontend/store.jsx';
 import { CliHints, Empty, Modal, Tag } from '../../web/frontend/components/ui.jsx';
-
-const TYPES = ['text', 'textarea', 'number', 'date', 'month', 'bool', 'select', 'tags', 'secret', 'file'];
+import { checkZipFile, fmtBytes, postZip } from '../../web/frontend/api/zip.js';
 
 export default function SectionsView() {
-  const { reload, toast, guard, dialog } = useStore();
+  const { reload, toast, guard, dialog, boot, patchUi } = useStore();
+  // 字段类型是**后端定义的封闭枚举**（core/fields.FIELD_TYPES），面板不再自己抄一份：
+  // 抄一份的后果是「后端加了一种类型，这里的下拉框永远看不到它」，而且没人会发现。
+  const types = boot?.fieldTypes || [];
+  // 类型的中文名（后端下发）：下拉框渲染成「图文（可贴图）（md）」，
+  // 既看得懂，也不丢内部 id（排查时用得上）。
+  const labels = boot?.fieldTypeLabels || {};
   const [data, setData] = useState(null);
   const [templates, setTemplates] = useState([]);
   const [err, setErr] = useState(null);
   const [modal, setModal] = useState(null);
+  // 零配置导入：不选栏目，按包内结构新建；id 冲突自动加序号
+  const [zip, setZip] = useState(null);
+  const [importing, setImporting] = useState(false);
+  const [dragDepth, setDragDepth] = useState(0);
+  const zipInput = useRef(null);
 
   const load = useCallback(async () => {
     try {
@@ -78,14 +88,17 @@ export default function SectionsView() {
   const syncFields = guard(async (m) => {
     const r = await api(`/api/sections/${encodeURIComponent(m.id)}/sync`, { method: 'POST' });
     if (r.upToDate) {
-      toast('已是最新，模板里没有需要补的字段');
+      toast(r.changedFields?.length
+        ? `已是最新（无需补字段）；另有 ${r.changedFields.length} 个字段的模板定义改过，本栏目保留原值`
+        : '已是最新，模板里没有需要补的字段');
       return;
     }
     const bits = [
       r.addedGroups?.length ? `分组 ${r.addedGroups.join('、')}` : '',
       r.addedFields?.length ? `字段 ${r.addedFields.join('、')}` : '',
     ].filter(Boolean).join('；');
-    toast(`已按模板补齐：${bits || '无变化'}`);
+    const drift = r.changedFields?.length ? `；${r.changedFields.length} 个字段模板已改（保留原值）` : '';
+    toast(`已按模板补齐：${bits || '无变化'}${drift}`);
     const fresh = await api(`/api/sections/${encodeURIComponent(m.id)}`);
     setModal({ ...m, full: fresh });
     await load();
@@ -116,16 +129,79 @@ export default function SectionsView() {
     await reload();
   });
 
+  const handleZip = guard(async (file) => {
+    if (!file) return;
+    const bad = checkZipFile(file);
+    if (bad) { toast(bad, 'bad'); return; }
+    setImporting(true);
+    try {
+      const buffer = await file.arrayBuffer();
+      const preview = await postZip('/api/import.zip?dry-run=1', buffer, file.name);
+      setZip({ fileName: file.name, buffer, preview });
+    } catch (e) {
+      toast(e.message || String(e), 'bad');
+    } finally {
+      setImporting(false);
+    }
+  });
+
+  const applyZip = guard(async () => {
+    if (!zip) return;
+    setImporting(true);
+    try {
+      const r = await postZip('/api/import.zip', zip.buffer, zip.fileName);
+      setZip(null);
+      toast(`已导入为新栏目「${r.section.title}」（${r.entries.added} 条）`);
+      await load();
+      await reload();
+      // 直接跳到新栏目，省掉「导入完还得自己找」
+      patchUi({ view: r.section.id, entry: '' });
+    } catch (e) {
+      toast(e.message || String(e), 'bad');
+    } finally {
+      setImporting(false);
+    }
+  });
+
+  const hasFiles = (e) => [...(e.dataTransfer?.types || [])].includes('Files');
+  const onDragEnter = (e) => { if (!hasFiles(e)) return; e.preventDefault(); setDragDepth((d) => d + 1); };
+  const onDragOver = (e) => { if (hasFiles(e)) e.preventDefault(); };
+  const onDragLeave = () => setDragDepth((d) => Math.max(0, d - 1));
+  const onDrop = (e) => {
+    e.preventDefault();
+    setDragDepth(0);
+    const f = [...(e.dataTransfer?.files || [])][0];
+    if (f) handleZip(f);
+  };
+
   if (err) return <div className="pad stack"><div className="bad"><strong>读不到栏目</strong></div><pre className="block">{err}</pre></div>;
   if (!data) return <div className="pad muted">加载中…</div>;
 
   return (
-    <>
+    <div
+      className="section-wrap"
+      onDragEnter={onDragEnter}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+    >
       <div className="toolbar rowgap pad">
         <strong>栏目</strong>
         <span className="muted">共 {data.count} 个 · 条目 {data.totalEntries} 条</span>
         <span className="grow" />
         <button className="btn small ghost" onClick={load}>刷新</button>
+        <button className="btn small ghost" onClick={() => zipInput.current?.click()}>导入 ZIP</button>
+        <input
+          ref={zipInput}
+          type="file"
+          accept=".zip,application/zip"
+          style={{ display: 'none' }}
+          onChange={(e) => {
+            const f = [...(e.target.files || [])][0];
+            e.target.value = '';
+            handleZip(f);
+          }}
+        />
         <button className="btn small" onClick={() => setModal({ kind: 'create', form: { id: '', title: '', template: templates[0]?.id || '', description: '', order: '50' } })}>新建栏目</button>
       </div>
 
@@ -146,7 +222,7 @@ export default function SectionsView() {
                 <button className="btn small ghost" onClick={() => removeSection(s)}>删除</button>
               </span>
             </div>
-          )) : <Empty>还没有栏目。点「新建栏目」，用内置模板（求职 / 密钥）起步。</Empty>}
+          )) : <Empty>还没有栏目。点「新建栏目」，用内置模板（求职 / 密钥 / 项目 / 实习 / 校内实践）起步，或建一个空栏目自己定义字段。</Empty>}
         </div>
       </div>
 
@@ -155,6 +231,42 @@ export default function SectionsView() {
       </div>
 
       <CliHints module="sections" />
+
+      {dragDepth > 0 ? <div className="drop-mask"><div>松开导入为新栏目</div></div> : null}
+
+      {zip ? (
+        <Modal
+          title={`导入为新栏目 · ${zip.fileName}`}
+          onClose={() => { if (!importing) setZip(null); }}
+          footer={(
+            <>
+              <button className="btn ghost" onClick={() => setZip(null)} disabled={importing}>取消</button>
+              <button className="btn" onClick={applyZip} disabled={importing}>{importing ? '导入中…' : '导入为新栏目'}</button>
+            </>
+          )}
+        >
+          {(() => {
+            const p = zip.preview;
+            return (
+              <div className="stack">
+                <div>
+                  将新建栏目：<strong>{p.section.title}</strong>
+                  <span className="muted">（{p.section.targetId}）</span>
+                  {p.section.renamedFrom ? <span className="bad">　id {p.section.renamedFrom} 已存在，已另存</span> : null}
+                </div>
+                <div className="hint">导出时间 {p.exportedAt || '未知'}　·　{p.withSecrets ? '含凭据明文' : '凭据已打码'}</div>
+                <div className="rowgap">
+                  <Tag>条目 {p.entries.total}</Tag>
+                  <Tag>字段 {p.section.fieldsToAdd.length}</Tag>
+                  <Tag>附件 新增 {p.files.new} / 复用 {p.files.reused}（{fmtBytes(p.files.bytes)}）</Tag>
+                </div>
+                <div className="hint">栏目结构、字段字典、附件都会一起建好，导入后可直接使用。</div>
+                {p.warnings.map((w) => <div key={w} className="hint bad">注意：{w}</div>)}
+              </div>
+            );
+          })()}
+        </Modal>
+      ) : null}
 
       {modal ? (
         <Modal title={modalTitle(modal)} onClose={() => setModal(null)}>
@@ -173,6 +285,8 @@ export default function SectionsView() {
           {modal.kind === 'edit' ? (
             <EditForm
               modal={modal}
+              types={types}
+              labels={labels}
               onChange={(f) => setModal((m) => ({ ...m, form: { ...m.form, ...f } }))}
               onSave={() => saveEdit(modal)}
               onSync={() => syncFields(modal)}
@@ -183,7 +297,7 @@ export default function SectionsView() {
           ) : null}
         </Modal>
       ) : null}
-    </>
+    </div>
   );
 }
 
@@ -231,7 +345,7 @@ function CreateForm({ templates, form, onChange, onSubmit }) {
   );
 }
 
-function EditForm({ modal, onChange, onSave, onSync, onAddField, onRemoveField, onClose }) {
+function EditForm({ modal, types, labels, onChange, onSave, onSync, onAddField, onRemoveField, onClose }) {
   const [nf, setNf] = useState({ key: '', label: '', type: 'text', group: '' });
   const full = modal.full;
   const groups = full?.groupList || [];
@@ -314,7 +428,11 @@ function EditForm({ modal, onChange, onSave, onSync, onAddField, onRemoveField, 
           <input style={{ width: 150 }} placeholder="key（英文字母开头）" value={nf.key} onChange={(e) => setNf({ ...nf, key: e.target.value })} />
           <input style={{ width: 150 }} placeholder="标签（中文名）" value={nf.label} onChange={(e) => setNf({ ...nf, label: e.target.value })} />
           <select style={{ width: 110 }} value={nf.type} onChange={(e) => setNf({ ...nf, type: e.target.value })}>
-            {TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+            {types.map((t) => (
+              <option key={t} value={t}>
+                {labels[t] ? `${labels[t]}（${t}）` : t}
+              </option>
+            ))}
           </select>
           <select style={{ width: 150 }} value={nf.group} onChange={(e) => setNf({ ...nf, group: e.target.value })}>
             <option value="">（首个分组）</option>

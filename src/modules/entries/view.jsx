@@ -1,11 +1,13 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../web/frontend/api/client.js';
+import { checkZipFile, fmtBytes, postZip } from '../../web/frontend/api/zip.js';
 import { useStore } from '../../web/frontend/store.jsx';
 import { CliHints, Empty, Modal, Tag } from '../../web/frontend/components/ui.jsx';
 import { FieldGroup } from '../../web/frontend/components/fieldEditor.jsx';
 import KvTable from './kvTable.jsx';
 
 const norm = (x) => (x === null || x === undefined ? '' : (Array.isArray(x) ? x.join('、') : String(x)));
+
 
 /**
  * 栏目详情视图。按栏目的形状分两种布局：
@@ -24,6 +26,15 @@ export default function SectionView({ sectionId }) {
   const [draft, setDraft] = useState(null);
   const [modal, setModal] = useState(null);
   const [quick, setQuick] = useState('');
+  // 栏目 ZIP：zip = { fileName, buffer, preview }（buffer 用于确认时再 POST 一次，服务端不存状态）
+  const [zip, setZip] = useState(null);
+  const [conflict, setConflict] = useState('skip');
+  const [importing, setImporting] = useState(false);
+  const [dragDepth, setDragDepth] = useState(0);
+  // 精确导出：选中的条目 id；空集合 = 导出全部（菜单文案会跟着变）
+  const [selected, setSelected] = useState(() => new Set());
+  const zipInput = useRef(null);
+  const moreRef = useRef(null);
   const mask = !!ui.mask;
 
   const load = useCallback(async (keepId) => {
@@ -47,8 +58,32 @@ export default function SectionView({ sectionId }) {
   }, [sectionId, mask]);
 
   useEffect(() => { load(); }, [load]);
+  // 切栏目、或条目被删掉后，选择里不能留下不存在的 id（导出会因为「找不到条目」整包失败）
+  useEffect(() => { setSelected(new Set()); }, [sectionId]);
+  useEffect(() => {
+    setSelected((prev) => {
+      const valid = new Set((data?.entries || []).map((e) => e.id));
+      const next = new Set([...prev].filter((id) => valid.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [data]);
 
   const current = useMemo(() => data?.entries.find((e) => e.id === draft?.id) || null, [data, draft]);
+  // 「已标不填」只对**真的空着**的可选字段有意义：填了值的可选字段不属于跳过，
+  // 否则一份填满的资料会被显示成「另有 N 项已标不填」，自相矛盾。
+  const skippedExcluded = useMemo(
+    () => (current?.excluded || []).filter((m) => norm(current.values?.[m.key]) === ''),
+    [current],
+  );
+  const allIds = useMemo(() => (data?.entries || []).map((e) => e.id), [data]);
+  const allPicked = allIds.length > 0 && allIds.every((id) => selected.has(id));
+  const togglePick = (id) => setSelected((prev) => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+  const toggleAll = () => setSelected(allPicked ? new Set() : new Set(allIds));
+
   const groups = useMemo(() => {
     if (!data) return [];
     return data.groups.map((g) => ({ ...g, fields: data.fields.filter((f) => f.group === g.id) })).filter((g) => g.fields.length);
@@ -124,6 +159,77 @@ export default function SectionView({ sectionId }) {
     });
   });
 
+  const closeMore = () => { if (moreRef.current) moreRef.current.open = false; };
+
+  /** 浏览器下载：让 <a download> 去接，前端不碰 zip 内容；含凭据与否由菜单项决定。 */
+  const exportZip = (withSecrets) => {
+    closeMore();
+    const q = new URLSearchParams();
+    if (!withSecrets) q.set('no-secrets', '1');
+    if (selected.size) q.set('entries', [...selected].join(','));
+    const qs = q.toString();
+    const a = document.createElement('a');
+    a.href = `/api/sections/${encodeURIComponent(sectionId)}/export.zip${qs ? `?${qs}` : ''}`;
+    a.download = '';
+    document.body.appendChild(a);
+    a.click();
+    // 立刻 remove 会让 Chromium 把下载判成取消；留给它一拍
+    setTimeout(() => a.remove(), 1000);
+    toast(withSecrets ? '开始下载（含凭据，请妥善保管）' : '开始下载（凭据已打码）');
+  };
+
+  const handleZip = guard(async (file) => {
+    closeMore();
+    if (!file) return;
+    const bad = checkZipFile(file);
+    if (bad) { toast(bad, 'bad'); return; }
+    setImporting(true);
+    try {
+      const buffer = await file.arrayBuffer();
+      const preview = await postZip(
+        `/api/sections/${encodeURIComponent(sectionId)}/import.zip?dry-run=1`, buffer, file.name,
+      );
+      setZip({ fileName: file.name, buffer, preview });
+      setConflict('skip');
+    } catch (e) {
+      toast(e.message || String(e), 'bad');
+    } finally {
+      setImporting(false);
+    }
+  });
+
+  const applyZip = guard(async () => {
+    if (!zip) return;
+    setImporting(true);
+    try {
+      const r = await postZip(
+        `/api/sections/${encodeURIComponent(sectionId)}/import.zip?on-conflict=${encodeURIComponent(conflict)}`,
+        zip.buffer, zip.fileName,
+      );
+      setZip(null);
+      toast(`导入完成：新增 ${r.entries.added}，另存 ${r.entries.copied}，覆盖 ${r.entries.overwritten}，跳过 ${r.entries.skipped}`);
+      await load();
+      await reload();
+    } catch (e) {
+      toast(e.message || String(e), 'bad');
+    } finally {
+      setImporting(false);
+    }
+  });
+
+  // 拖拽用深度计数：dragenter/dragleave 在子元素间穿梭会成对触发，
+  // 只按布尔值会在「还没离开就熄掉」和「离开后不熄」之间抖。
+  const hasFiles = (e) => [...(e.dataTransfer?.types || [])].includes('Files');
+  const onDragEnter = (e) => { if (!hasFiles(e)) return; e.preventDefault(); setDragDepth((d) => d + 1); };
+  const onDragOver = (e) => { if (hasFiles(e)) e.preventDefault(); };
+  const onDragLeave = () => setDragDepth((d) => Math.max(0, d - 1));
+  const onDrop = (e) => {
+    e.preventDefault();
+    setDragDepth(0);
+    const f = [...(e.dataTransfer?.files || [])][0];
+    if (f) handleZip(f);
+  };
+
   if (err) {
     return (
       <div className="pad stack">
@@ -139,7 +245,13 @@ export default function SectionView({ sectionId }) {
   if (data.section.kv) return <KvTable sectionId={sectionId} sectionTitle={data.section.title} />;
 
   return (
-    <>
+    <div
+      className="section-wrap"
+      onDragEnter={onDragEnter}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+    >
       <div className="toolbar rowgap pad">
         <strong>{data.section.title}</strong>
         <Tag>{data.section.id}</Tag>
@@ -150,14 +262,47 @@ export default function SectionView({ sectionId }) {
           打码显示（投屏/截图时用）
         </label>
         <button className="btn small ghost" onClick={() => load()}>刷新</button>
-        <button className="btn small ghost" onClick={exportSection}>导出本栏目</button>
+        <details className="more" ref={moreRef}>
+          <summary className="btn small ghost">更多</summary>
+          <div className="more-menu">
+            <button type="button" onClick={() => exportZip(true)}>
+              {selected.size ? `导出选中 ${selected.size} 条（含凭据）` : '导出 ZIP（含凭据）'}
+            </button>
+            <button type="button" onClick={() => exportZip(false)}>
+              {selected.size ? `导出选中 ${selected.size} 条（打码）` : '导出 ZIP（打码）'}
+            </button>
+            <button type="button" onClick={() => { closeMore(); zipInput.current?.click(); }}>导入 ZIP…</button>
+            <button type="button" onClick={() => { closeMore(); exportSection(); }}>导出 JSON / Markdown</button>
+          </div>
+        </details>
+        <input
+          ref={zipInput}
+          type="file"
+          accept=".zip,application/zip"
+          style={{ display: 'none' }}
+          onChange={(e) => {
+            // FileList 是活的：先拷成数组再清 value
+            const f = [...(e.target.files || [])][0];
+            e.target.value = '';
+            handleZip(f);
+          }}
+        />
         <button className="btn small" onClick={addEntry}>新建条目</button>
       </div>
 
       <div className="cols">
         <div className="col" style={{ flex: '0 0 300px' }}>
           <div className="card">
-            <div className="colhead">条目列表<span className="right muted">{data.count}</span></div>
+            <div className="colhead">
+              <label className="inline pickall" title="全选 / 取消全选（只影响导出与批量操作）">
+                <input type="checkbox" checked={allPicked} onChange={toggleAll} />
+                <span>条目列表</span>
+              </label>
+              <span className="right muted">
+                {selected.size ? `已选 ${selected.size} / ${data.count}` : data.count}
+                {selected.size ? <button type="button" className="btn small ghost" onClick={() => setSelected(new Set())}>清空</button> : null}
+              </span>
+            </div>
             <div className="colbody">
               {data.entries.length ? data.entries.map((e) => (
                 <div
@@ -165,6 +310,14 @@ export default function SectionView({ sectionId }) {
                   className={`row selectable ${e.id === draft?.id ? 'selected' : ''}`}
                   onClick={() => { patchUi({ entry: e.id }); setDraft({ id: e.id, title: e.title, values: { ...e.values } }); }}
                 >
+                  <input
+                    type="checkbox"
+                    className="pick"
+                    checked={selected.has(e.id)}
+                    onClick={(ev) => ev.stopPropagation()}
+                    onChange={() => togglePick(e.id)}
+                    title="选中后可只导出这一条"
+                  />
                   <span className="name">{e.title || '（无名）'}</span>
                   <span className="acts">
                     {e.missing.length ? <span className="tag">{e.completeness.ratio}%</span> : <span className="tag strong">已填满</span>}
@@ -219,8 +372,8 @@ export default function SectionView({ sectionId }) {
                 {current?.missing.length ? (
                   <span className="hint">模板建议里还有 {current.missing.length} 项没填（不影响使用）：{current.missing.slice(0, 5).map((m) => m.label).join('、')}{current.missing.length > 5 ? '…' : ''}</span>
                 ) : null}
-                {current?.excluded?.length ? (
-                  <span className="hint">另有 {current.excluded.length} 项已标不填、不计入完整度：{current.excluded.slice(0, 6).map((m) => m.label).join('、')}{current.excluded.length > 6 ? '…' : ''}</span>
+                {skippedExcluded.length ? (
+                  <span className="hint">另有 {skippedExcluded.length} 项已标不填、不计入完整度：{skippedExcluded.slice(0, 6).map((m) => m.label).join('、')}{skippedExcluded.length > 6 ? '…' : ''}</span>
                 ) : null}
               </div>
             </div>
@@ -230,11 +383,71 @@ export default function SectionView({ sectionId }) {
 
       <CliHints module="entries" />
 
+      {dragDepth > 0 ? (
+        <div className="drop-mask"><div>松开导入栏目 ZIP</div></div>
+      ) : null}
+
+      {zip ? (
+        <Modal
+          title={`导入预览 · ${zip.fileName}`}
+          onClose={() => { if (!importing) setZip(null); }}
+          footer={(
+            <>
+              <button className="btn ghost" onClick={() => setZip(null)} disabled={importing}>取消</button>
+              <button className="btn" onClick={applyZip} disabled={importing}>{importing ? '导入中…' : '确认导入'}</button>
+            </>
+          )}
+        >
+          {(() => {
+            const p = zip.preview;
+            return (
+              <div className="stack">
+                <div>
+                  来源：<strong>{p.section.source.title}</strong><span className="muted">（{p.section.source.id}）</span>
+                  {' → '}目标：<strong>{p.section.title}</strong><span className="muted">（{p.section.targetId}）</span>
+                  {p.section.willCreate ? <span className="bad">　将新建栏目</span> : null}
+                </div>
+                <div className="hint">导出时间 {p.exportedAt || '未知'}　·　{p.withSecrets ? '含凭据明文' : '凭据已打码'}</div>
+                <div className="rowgap">
+                  <Tag>条目 {p.entries.total}</Tag>
+                  <Tag>将新增 {p.entries.fresh}</Tag>
+                  {p.entries.conflicts.length ? <span className="tag bad">冲突 {p.entries.conflicts.length}</span> : null}
+                  <Tag>附件 新增 {p.files.new} / 复用 {p.files.reused}（{fmtBytes(p.files.bytes)}）</Tag>
+                </div>
+                {p.section.fieldsToAdd.length ? (
+                  <div className="hint">将补 {p.section.fieldsToAdd.length} 个字段：{p.section.fieldsToAdd.map((f) => f.label).join('、')}</div>
+                ) : null}
+                {p.entries.conflicts.length ? (
+                  <div className="block">
+                    <div>冲突条目：</div>
+                    <ul style={{ margin: '4px 0 0 18px' }}>
+                      {p.entries.conflicts.slice(0, 6).map((c) => (
+                        <li key={`${c.id}-${c.existingId}`}>{c.title}（{c.reason === 'id' ? '同 id' : '同名'}）</li>
+                      ))}
+                      {p.entries.conflicts.length > 6 ? <li>… 共 {p.entries.conflicts.length} 条</li> : null}
+                    </ul>
+                  </div>
+                ) : null}
+                {p.entries.conflicts.length ? (
+                  <div className="stack">
+                    <div className="flabel"><span>冲突怎么处理</span></div>
+                    <label className="inline"><input type="radio" checked={conflict === 'skip'} onChange={() => setConflict('skip')} /> 跳过（保留现有）</label>
+                    <label className="inline"><input type="radio" checked={conflict === 'copy'} onChange={() => setConflict('copy')} /> 另存为新条目（标题加「导入」）</label>
+                    <label className="inline"><input type="radio" checked={conflict === 'overwrite'} onChange={() => setConflict('overwrite')} /> 覆盖现有条目的字段</label>
+                  </div>
+                ) : null}
+                {p.warnings.map((w) => <div key={w} className="hint bad">注意：{w}</div>)}
+              </div>
+            );
+          })()}
+        </Modal>
+      ) : null}
+
       {modal ? (
         <Modal title={modal.title} onClose={() => setModal(null)}>
           {modal.body}
         </Modal>
       ) : null}
-    </>
+    </div>
   );
 }

@@ -7,6 +7,8 @@ import { applySpec, compareRoutes, compileRoute, usageOf } from './spec.js';
 
 // 附件可能是扫描件/照片，base64 再膨胀约 1/3；32MB 上限覆盖绝大多数简历、成绩单与头像
 const MAX_BODY = 32 * 1024 * 1024;
+// 栏目 ZIP 走**原始二进制**上传（不 base64），上限单独放宽
+const MAX_UPLOAD_BODY = 64 * 1024 * 1024;
 
 export const ROUTES = ACTIONS
   .filter((a) => Array.isArray(a.http))
@@ -46,6 +48,18 @@ async function readBody(req) {
   }
 }
 
+/** 原始二进制 body（ZIP 导入用）：不解码、不 base64。 */
+async function readBinaryBody(req, limit) {
+  const chunks = [];
+  let size = 0;
+  for await (const c of req) {
+    size += c.length;
+    if (size > limit) throw new AppError(CODES.INVALID_INPUT, `上传内容过大（上限 ${Math.round(limit / 1024 / 1024)}MB）`);
+    chunks.push(c);
+  }
+  return Buffer.concat(chunks);
+}
+
 /** 服务在 127.0.0.1，但用户浏览器里的任意页面都能向它发请求——写操作必须校验 Origin。 */
 function originAllowed(req) {
   const origin = req.headers.origin;
@@ -81,6 +95,17 @@ export async function handleApi(req, res, url) {
   route.keys.forEach((k, i) => { raw[k] = params[i]; }); // 路径占位符
   if (!write) {
     for (const [k, v] of url.searchParams) raw[k] = v; // query
+  } else if (route.action.binaryBody) {
+    // 二进制上传：query 仍然要绑（dry-run / on-conflict），body 读成 Buffer 原样交给 action
+    for (const [k, v] of url.searchParams) raw[k] = v;
+    try {
+      raw.__body = await readBinaryBody(req, route.action.maxBody || MAX_UPLOAD_BODY);
+      const name = String(req.headers['x-file-name'] || '');
+      if (name) raw.__fileName = decodeURIComponent(name);
+    } catch (err) {
+      const e = toErrorShape(err);
+      return send(res, httpStatusOf(e.code), { ok: false, error: e.message, code: e.code });
+    }
   } else {
     // ⚠️ 无条件合并 body，而不是「只有 body 里有才覆盖」——否则无 body 的 DELETE
     // 永远绑不上参数（args 与路由占位符靠「同名」绑定，名字对不上就静默传 undefined）
@@ -89,6 +114,11 @@ export async function handleApi(req, res, url) {
 
   try {
     const ctx = applySpec(route.action, raw);
+    // 二进制 body 不是声明式参数，applySpec 会丢掉，这里补回去
+    if (route.action.binaryBody) {
+      ctx.__body = raw.__body;
+      ctx.__fileName = raw.__fileName || '';
+    }
     // raw action：直接把文件本体流式写回，不走 JSON 包装（预览/下载附件用）
     if (route.action.raw === true) {
       if (typeof route.action.serveRaw !== 'function') {

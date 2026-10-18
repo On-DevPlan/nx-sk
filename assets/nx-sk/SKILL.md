@@ -1,18 +1,28 @@
 ---
 name: nx-sk
-description: 本机个人资源管理器——栏目化存储个人信息（求职档案等）与大模型 API Key，CLI 与 Web 面板同源，敏感字段密文落盘。当用户要"记录/更新我的个人信息"、"填一份求职档案"、"存一个大模型 key"、"管理我的密钥"、"导出我的资料"、"起一个个人资料面板"，或需要在填表单/网申时批量取用个人字段、用 CLI 快速设置某个栏目内容时使用。触发词：nx-sk、个人资源管理器、个人信息、求职档案、栏目、条目、密钥、API key、密文、导出、面板、serve。不适用：纯问答、不需要落盘的临时讨论；也不适用于把密钥同步/上传到远程服务的场景——nx-sk 只在本机落盘，不做任何上传。
+description: 本机个人资源管理器——栏目化存储个人信息（求职档案等）、大模型 API Key、以及可复用的 Dockerfile / docker-compose / k8s 清单，CLI 与 Web 面板同源，敏感字段密文落盘。当用户要"记录/更新我的个人信息"、"填一份求职档案"、"存一个大模型 key"、"管理我的密钥"、"存一份 Dockerfile / compose / k8s 配置"、"找一份可复用的部署配置"、"导出我的资料"、"起一个个人资料面板"，或需要在填表单/网申时批量取用个人字段、用 CLI 快速设置某个栏目内容时使用。触发词：nx-sk、个人资源管理器、个人信息、求职档案、栏目、条目、密钥、API key、密文、导出、面板、serve、部署配置、Dockerfile、docker-compose、k8s 清单。不适用：纯问答、不需要落盘的临时讨论；也不适用于把密钥同步/上传到远程服务的场景——nx-sk 只在本机落盘，不做任何上传。
 ---
 
 # nx-sk · 本机个人资源管理器
 
 一句话：**把「你的信息」按栏目存起来，CLI 与 Web 面板是同一套业务，敏感字段密文落盘。**
 
-数据落在 `~/nx-sk/`（可用环境变量 `NX_SK_HOME` / `NX_SK_STORE` 覆盖）。默认两个栏目：
+数据落在 `~/nx-sk/`（可用环境变量 `NX_SK_HOME` / `NX_SK_STORE` 覆盖）。首次运行按内置模板播种 6 个栏目：
 
 | 栏目 | id | 内容 |
 | --- | --- | --- |
 | 求职 | `job` | 求职用的个人信息档案（姓名/学历/求职意向/简历头像成绩单附件…约 80 个字段） |
+| 项目经历 | `projects` | 一个项目一个条目：名称 / 角色 / 时间 / 技术栈 / 职责与亮点 |
+| 实习/工作经历 | `internships` | 一段经历一个条目：公司 / 岗位 / 时间 / 职责 |
+| 校内职务/实践 | `campus` | 一条职务或实践一个条目 |
 | 密钥 | `secret` | **一张 KV 表**（`kv: true`）：一行一个键值对。面板渲染成表格，值以 AES-256-GCM 密文落盘 |
+| 部署配置 | `deploy` | **一份配置文件一个条目**（Dockerfile / compose / k8s 清单）：正文即文件原文 + 放哪 + 哪些值要替换 + 何时用。详见 [[50-deploy]] |
+
+**这 6 个只是起点，不是固定清单**：栏目可以新建（`section add`，不给模板就是空栏目全自定义）、
+可以加/删字段（`section update --add-field`，或直接 `entry update --set 任意键=值` 自动登记）、
+也可以删掉整个栏目。内置模板共 6 个（`job` / `secret` / `projects` / `internships` / `campus` / `deploy`），
+`section templates` 列出它们；模板在栏目实例化时被**深拷贝**，此后各自独立演化，
+模板后来的新增用 `section sync` 补（只增不改不删）。
 
 ## 核心不变量
 
@@ -116,6 +126,8 @@ nx-sk setting set --set 'navGroups=[]'   # 清空 = 全部栏目恢复平铺
 | `20-secrets` | 存/读大模型 key、密文机制、密钥来源（环境变量 vs 本机密钥文件）、什么时候会解不开 |
 | `30-export-backup` | 整体导出、只导出某个栏目、快照与回滚、明文密钥的取舍 |
 | `40-files` | **传/换简历头像成绩单等二进制原件时读**——附件库台账、导入（默认移动）与还原、`file` 字段怎么和条目建立链接、附件中心为什么由栏目驱动、看不到上传字段怎么办 |
+| `50-deploy` | **存/取 Dockerfile、docker-compose、k8s 清单时读**——一份配置一个条目的字段约定、`kind` 取值、复用流程（找 → 取正文 → 替换变量 → 落盘）、为什么明文密钥不写在这里 |
+| `60-transfer` | **搬栏目 / 分享栏目 / 局部迁移时读**——单栏目与全局 bundle 的 ZIP 结构、`transfer export/import/bundle-*` 怎么用、三种冲突策略、附件按 sha256 复用与引用重映射、凭据打码的边界 |
 
 取 ref 全文（外部 agent 用这条，不必进终端翻文件）：
 
@@ -123,6 +135,8 @@ nx-sk setting set --set 'navGroups=[]'   # 清空 = 全部栏目恢复平铺
 nx-sk skill get nx-sk                          # SKILL.md 全文
 nx-sk skill get nx-sk 10-sections-entries      # 裸名 → references/10-sections-entries.md
 nx-sk skill get nx-sk 40-files                 # 附件库：导入 / 链接 / 还原
+nx-sk skill get nx-sk 50-deploy                # 部署配置：存 / 找 / 复用
+nx-sk skill get nx-sk 60-transfer              # 栏目 ZIP：导出 / 预览 / 导入
 nx-sk skill get nx-sk references/20-secrets.md # 也可写完整路径
 nx-sk skill get nx-sk --json                   # 四元 JSON：{skillName, ref, content, contentBytes, install}
 ```

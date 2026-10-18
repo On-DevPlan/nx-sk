@@ -5,7 +5,10 @@ export const LS_KEY = 'nx-sk-ui';
 
 // 只持久化**选择**，不持久化**数据**——数据永远从 /api 拉，避免陈旧缓存。
 export const DEFAULT_UI = {
-  view: 'job', // 当前 tab
+  // 当前 tab。空串 = **还没做过选择**，此时由 App 回落到 settings.defaultSection
+  // （再不行才是第一个栏目）。写死成 'job' 会让「默认栏目」这个设置项彻底失效，
+  // 而且删掉 job 栏目后首屏就落在一个不存在的 id 上。
+  view: '',
   entry: '', // 各栏目选中的条目
   q: '', // 搜索词
   mask: false, // 打码显示密文字段（默认原文；投屏时勾上）
@@ -13,7 +16,12 @@ export const DEFAULT_UI = {
 
 function loadUi() {
   try {
-    return { ...DEFAULT_UI, ...JSON.parse(localStorage.getItem(LS_KEY) || '{}') };
+    const saved = JSON.parse(localStorage.getItem(LS_KEY) || '{}');
+    // 旧版本把「当前 tab」也落了盘。现在它归地址栏管（见 App 的 hash 处理），
+    // 落盘会和 settings.defaultSection 抢「打开时落在哪」——用户改了默认栏目
+    // 却看不到变化，正是双记忆源最典型的表现。老数据就地丢弃。
+    if (saved && typeof saved === 'object') delete saved.view;
+    return { ...DEFAULT_UI, ...saved };
   } catch {
     return { ...DEFAULT_UI };
   }
@@ -31,7 +39,13 @@ export function StoreProvider({ children }) {
   const patchUi = useCallback((patch) => {
     setUi((prev) => {
       const next = { ...prev, ...patch };
-      try { localStorage.setItem(LS_KEY, JSON.stringify(next)); } catch { /* 隐私模式 */ }
+      try {
+        // 只持久化**跨会话有意义**的选择；当前 tab 不在其中（它由地址栏决定，
+        // 见 App 里的解析顺序）。其余键一律照存，将来加键不必记得改这里。
+        const rest = { ...next };
+        delete rest.view;
+        localStorage.setItem(LS_KEY, JSON.stringify(rest));
+      } catch { /* 隐私模式 */ }
       return next;
     });
   }, []);

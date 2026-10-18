@@ -129,8 +129,19 @@ export default function SettingsView() {
               <div className="fctrl"><input value={form.exportDir} onChange={(e) => setForm({ ...form, exportDir: e.target.value })} /></div>
             </div>
             <div className="field">
-              <div className="flabel"><span>默认栏目</span><span className="fkey">CLI 未指定 --section 时的首选</span></div>
-              <div className="fctrl"><input value={form.defaultSection} onChange={(e) => setForm({ ...form, defaultSection: e.target.value })} /></div>
+              <div className="flabel"><span>默认栏目</span><span className="fkey">打开面板时落在哪</span></div>
+              <div className="fctrl">
+                <select value={form.defaultSection || ''} onChange={(e) => setForm({ ...form, defaultSection: e.target.value })}>
+                  <option value="">（第一个栏目）</option>
+                  {sections.map((s) => <option key={s.id} value={s.id}>{s.title}（{s.id}）</option>)}
+                  {/* 历史值指向已删栏目：留着看得见（而不是被悄悄改成第一项），
+                      保存时后端会拒绝并提示现有栏目 */}
+                  {form.defaultSection && !sections.some((s) => s.id === form.defaultSection) ? (
+                    <option value={form.defaultSection}>{form.defaultSection}（栏目已不存在）</option>
+                  ) : null}
+                </select>
+              </div>
+              <div className="hint">地址里带 <code>#/栏目id</code> 时以地址为准；改完下次打开生效。</div>
             </div>
             <div className="field">
               <div className="flabel"><span>导出默认带明文密钥</span><span className="fkey">默认开；要分享出去时关掉</span></div>

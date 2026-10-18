@@ -3,6 +3,7 @@ import { api } from '../../web/frontend/api/client.js';
 import { useStore } from '../../web/frontend/store.jsx';
 import { CliHints, Copyable, Empty, Modal, Tag } from '../../web/frontend/components/ui.jsx';
 import BackupPanel from '../backup/view.jsx';
+import TransferPanel from '../../web/frontend/components/transferPanel.jsx';
 
 // 「导出与备份」合并页：明文导出（带走可读文件）与口令加密备份（整份可还原）
 // 对用户来说是同一件事——把数据倒出去、再倒回来，所以并成一个 tab。
@@ -69,8 +70,10 @@ export default function ExportView() {
         <span className="muted">明文导出走可读文件（JSON / Markdown），加密备份走口令保护的 .nxskbak（整份可还原）；都只在本机落盘</span>
       </div>
 
+      <TransferPanel />
+
       <div className="card">
-        <div className="colhead">导出为 JSON / Markdown</div>
+        <div className="colhead">另外：导出为可读 JSON / Markdown</div>
         <div className="pad">
           <div className="grid">
             <div className="field">

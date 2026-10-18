@@ -15,8 +15,7 @@ test('默认设置含 navGroups: []，老 store（没有这个键）读一次自
   assert.deepEqual((await loadStore()).settings.navGroups, []);
 });
 
-test('navGroups：写数组落盘，组内重复与「id/标题混写」都归一成真实 id', async () => {
-  const r = await settings.updateSettings({
+test('navGroups：写数组落盘，组内重复与「id/标题混写」都归一成真实 id', async () => {  const r = await settings.updateSettings({
     set: { navGroups: [{ title: '求职', sections: ['projects', '项目经历', '', 'internships'] }] },
   });
   assert.equal(r.status, 'ok');
@@ -133,4 +132,33 @@ test('navOrder / navHidden：CLI 的 JSON 串写法也认（`["a","b"]` 与 `a,b
     (e) => e.code === 'INVALID_INPUT',
   );
   await settings.updateSettings({ set: { navOrder: [] } });
+});
+
+// —— defaultSection ——
+// 它曾经是**死配置**：设置页能改、落盘也存，但没有任何读取方
+// （面板初始 tab 来自 localStorage 里写死的 'job'，CLI 也不读它）。
+// 现在两件事钉住：写入必须指向真实栏目（否则又是一个静默失效的配置），
+// 以及它不能被「结构化项」那道渲染跳过逻辑吃掉。
+
+test('defaultSection：只接受真实存在的栏目；空串 = 交给面板取第一个', async () => {
+  const r = await settings.updateSettings({ set: { defaultSection: 'projects' } });
+  assert.equal(r.set.defaultSection, 'projects');
+
+  // 写标题也认，归一成真实 id
+  const byTitle = await settings.updateSettings({ set: { defaultSection: '密钥' } });
+  assert.equal(byTitle.set.defaultSection, 'secret');
+
+  // 指向不存在的栏目：写入即报错，并列出可选项（不静默存一个永远不生效的值）
+  await assert.rejects(
+    () => settings.updateSettings({ set: { defaultSection: 'no_such_section' } }),
+    (e) => e.code === 'INVALID_INPUT' && /默认栏目不存在/.test(e.message) && /secret/.test(e.message),
+  );
+
+  const cleared = await settings.updateSettings({ set: { defaultSection: '' } });
+  assert.equal(cleared.set.defaultSection, '');
+});
+
+test('renderSettings 仍然列出 defaultSection（带校验器但不是「结构化项」）', async () => {
+  const d = await settings.getSettings();
+  assert.match(settings.renderSettings(d), /defaultSection/);
 });

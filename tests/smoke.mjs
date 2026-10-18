@@ -88,7 +88,7 @@ step('help 由声明生成且含模块分组', help.out.includes('entry') && hel
 
 const templates = await cliJson(['section', 'templates']);
 step('section templates 列出内置模板',
-  templates.templates.length === 5 && ['job', 'secret', 'projects', 'internships', 'campus'].every((id) => templates.templates.some((t) => t.id === id)),
+  ['job', 'secret', 'projects', 'internships', 'campus', 'deploy'].every((id) => templates.templates.some((t) => t.id === id)),
   `${templates.templates.length} 个模板`);
 
 const fields = await cliJson(['entry', 'fields', '--section', 'job']);
@@ -117,6 +117,49 @@ step('自动登记时推断 bool（是/否 不存成文本）', afterAuto.values
 const ledger = await cliJson(['entry', 'fields', '--section', 'job']);
 step('新字段进了台账（已知字段 = 模板建议 + 写过的）', ledger.sections[0].fields.some((f) => f.key === '技术博客'));
 step('中文键直接可用（不必记英文别名）', ledger.sections[0].fields.some((f) => f.key === '是否有offer'));
+
+// ─── 栏目 ZIP 导出 / 导入 ─────────────────────────────────────
+const zipPath = join(home, 'job-export.zip');
+const exp = await cliJson(['transfer', 'export', 'job', '--out', zipPath]);
+step('transfer export 打出栏目 ZIP', exp.bytes > 0 && exp.entries >= 1, `${exp.entries} 条目 / ${exp.bytes}B`);
+
+const zpv = await cliJson(['transfer', 'import', 'jobcopy', '--file', zipPath, '--dry-run']);
+step('transfer import --dry-run 只预览、不建栏目', zpv.status === 'preview' && zpv.section.willCreate === true && zpv.entries.total === exp.entries);
+
+const zimp = await cliJson(['transfer', 'import', 'jobcopy', '--file', zipPath]);
+step('transfer import 新建栏目并导入条目', zimp.section.created === true && zimp.entries.added === exp.entries, `新增 ${zimp.entries.added}`);
+
+const zgot = await cliJson(['entry', 'get', '冒烟测试', '--section', 'jobcopy']);
+step('导入后的条目可读（字段与值都在）', zgot.values.name === '冒烟测试' && zgot.values.phone === '13800000000');
+
+const zskip = await cliJson(['transfer', 'import', 'jobcopy', '--file', zipPath, '--on-conflict', 'skip']);
+step('重复导入默认跳过冲突', zskip.entries.skipped === exp.entries && zskip.entries.added === 0);
+
+// 副本栏目里有一条同名条目，会污染后续「按名字定位」的步骤 —— 测完就删
+const zrm = await cliJson(['section', 'remove', 'jobcopy', '--force']);
+step('清理导入测试的副本栏目', zrm.status === 'ok');
+
+// 精确导出 + 零配置导入
+const pickZip = join(home, 'job-pick.zip');
+const pexp = await cliJson(['transfer', 'export', 'job', '--entries', '冒烟测试', '--out', pickZip]);
+step('transfer export --entries 只导出选中条目', pexp.entries === 1, `${pexp.entries}/${pexp.available}`);
+
+const pnew = await cliJson(['transfer', 'import-new', '--file', pickZip]);
+step('零配置导入按包内结构新建栏目', pnew.section.created === true && pnew.section.id !== 'job', pnew.section.id);
+const psec = await cliJson(['section', 'get', pnew.section.id]);
+step('导入的栏目结构完整', psec.fields > 0 && psec.groups > 0, `${psec.fields} 字段`);
+await cliJson(['section', 'remove', pnew.section.id, '--force']);
+
+// 全局多栏目包
+const bzip = join(home, 'bundle.zip');
+const bexp = await cliJson(['transfer', 'bundle-export', '--sections', 'job,projects', '--out', bzip]);
+step('bundle export 打出多栏目包', bexp.sections === 2 && bexp.entries >= 1, `${bexp.sections} 栏目 / ${bexp.entries} 条目`);
+
+const bprev = await cliJson(['transfer', 'bundle-import', '--file', bzip, '--dry-run']);
+step('bundle import --dry-run 汇总栏目数', bprev.status === 'preview' && bprev.totals.sections === 2);
+
+const bimp = await cliJson(['transfer', 'bundle-import', '--file', bzip, '--on-conflict', 'skip']);
+step('bundle import 默认跳过冲突', bimp.totals.skipped >= 1 && bimp.totals.added === 0);
 
 const updated = await cliJson(['entry', 'update', '冒烟测试', '--set', '目标岗位=后端开发', '--set', '是否应届生=是', '--unset', '电话']);
 step('entry update 是 PATCH 语义', updated.changed.includes('targetPosition') && updated.changed.includes('-phone'));

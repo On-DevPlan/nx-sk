@@ -1,0 +1,75 @@
+# 栏目导出 / 导入（ZIP）
+
+**什么时候读**：要把一个栏目连同附件搬到另一台机器、发给同事、或做局部备份/迁移时。
+它只处理**一个栏目**（不碰其它栏目与整库），和 `30-export-backup` 的整库导出/加密备份是两条路。
+
+## 面板操作
+
+栏目页右上角「更多」：
+
+- **导出 ZIP（含凭据）**：浏览器直接下载，文件里有明文密码（本机单人默认）。
+- **导出 ZIP（打码）**：凭据换成 `******`，适合发给别人。
+- **导入 ZIP…**：选文件；或者把 zip **拖到栏目页任意位置**。
+- **导出 JSON / Markdown**：老的整体导出（写到 `~/nx-sk/export`，不是浏览器下载）。
+
+**精确导出**：条目列表左侧有复选框，表头可全选/清空。选中若干条后，菜单文案变成
+「导出选中 N 条（含凭据）」，包里只带这些条目**和它们引用的附件**（不会带无关文件）。
+不选 = 导出整个栏目。
+
+导入会先弹**预览**：来源/目标栏目、条目新增与冲突、将补哪些字段、附件新增/复用、凭据是否打码。
+选冲突策略后才写盘：
+
+| 策略 | 行为 |
+| --- | --- |
+| `skip`（默认） | 同 id 或同名的条目**保留现有**，不导入 |
+| `copy` | 另存为新条目，标题加「（导入）」；标题是 CLI 定位键，所以必须唯一 |
+| `overwrite` | 用包里的值覆盖现有条目的字段（没带的字段保持本地值） |
+
+## CLI
+
+```bash
+# 导出（默认含凭据明文）
+nx-sk transfer export deploy --out ~/deploy.zip
+nx-sk transfer export deploy --out ~/deploy-share.zip --no-secrets
+# 只导出选中的条目（id 或标题，逗号分隔）
+nx-sk transfer export deploy --entries "k8s-deployment,docker-compose" --out ~/part.zip
+
+# 先预览（不写盘）
+nx-sk transfer import deploy2 --file ~/deploy.zip --dry-run
+
+# 真导入：栏目不存在就新建；存在就合并/补字段
+nx-sk transfer import deploy2 --file ~/deploy.zip --on-conflict skip
+
+# 零配置：不指定栏目，按包内结构新建（id 冲突自动加序号）
+nx-sk transfer import-new --file ~/deploy.zip
+```
+
+`--json` 可用于预览结果（`section.fieldsToAdd`、`entries.conflicts`、`files.new/reused`）。
+
+## 包里有什么
+
+```
+manifest.json            栏目定义（groups/fields/kv/titleField）+ 条目 + 附件清单（sha256）
+README.txt               给人看的说明
+attachments/<id><ext>    附件原件
+```
+
+- 只打包**这个栏目条目实际引用**的附件：`file` 字段的 id + `md` 正文里的 `![…](f_x)`。
+- 导入时附件按 **sha256 去重**：本机已有同一份文件就复用，不会存两份。
+- 条目里的旧 file id 会**自动重映射**到新 id（`file` 字段数组与 md 图片引用都改）。
+
+## 凭据怎么处理
+
+- 导出默认**明文**（跨机器导入才能用；包落盘请自己保管）。
+- `--no-secrets` 时打成 `******`；导入侧识别这个标记并**跳过该字段**，不会把打码串当新密码。
+  预览会提示「N 个凭据字段需重填」。
+- 导入后敏感字段用**本机 vaultKey** 重新加密落盘，与手填的字段没有区别。
+
+## 限制与坑
+
+- 上限：2000 个 zip 条目、单文件 100MB、上传 body 64MB；超过会明确报错。
+  大包请用 CLI（本地直接读文件，不走 HTTP）。
+- 导入到**同一个栏目**一定会命中冲突（同 id），需要显式选 `copy` 或 `overwrite`；
+  默认 `skip` 时预览会显示「冲突 N」而不是静默成功。
+- 栏目不存在时用包里的定义新建（字段/分组一起建）；存在时只**补缺失字段**，不覆盖已有字段定义。
+- zip 内路径做了安全校验（拒绝绝对路径与 `..`），不要手改包里路径后指望能导入。

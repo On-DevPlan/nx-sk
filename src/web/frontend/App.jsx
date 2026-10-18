@@ -2,25 +2,21 @@ import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { SECTION_VIEW, VIEWS } from './registry.js';
 import { Copyable, DialogHost, ErrorBoundary, Toasts } from './components/ui.jsx';
 import { useStore } from './store.jsx';
+import { normalizeViewId, resolveActiveView } from './activeView.js';
 
 function viewFromHash() {
   const m = /^#\/?([^?/]*)/.exec(window.location.hash || '');
   const id = m ? decodeURIComponent(m[1]) : '';
-  return LEGACY_VIEW[id] || id;
+  return normalizeViewId(id);
 }
-
-// 加密备份并入「导出与备份」合并页后，旧书签（#/backup）与 localStorage 里
-// 残留的 ui.view 都要落到合并页——否则会被「找不到 tab」的兜底甩到第一个栏目。
-const LEGACY_VIEW = { backup: 'export' };
 
 export default function App() {
   const { boot, bootError, ui, patchUi, reload } = useStore();
-  const view = LEGACY_VIEW[ui.view] || ui.view;
+  const view = normalizeViewId(ui.view);
 
   // 栏目 tab 是**数据驱动**的（bootstrap.sections）；分组与隐藏来自 settings（设置页可配）；
   // 静态 tab 来自前端注册表。渲染顺序：未分组栏目（按 order）→ 分组（按配置顺序）→ 工具（按 order）。
-  const nav = useMemo(() => {
-    const all = (boot?.sections || []).map((s) => ({
+  const nav = useMemo(() => {    const all = (boot?.sections || []).map((s) => ({
       id: s.id, title: s.title, order: s.order, kind: 'section', count: s.entries,
     }));
     // 隐藏**只隐藏入口**：`#/栏目id` 直达仍然渲染，所以 all 里保留全部栏目
@@ -52,16 +48,18 @@ export default function App() {
   }, [boot]);
 
   // 没 boot 之前**不要**拿第一个 tab 兜底：那时动态栏目还没到，nav 里只有静态视图，
-  // 兜底会选中第一个静态视图并由下面的 effect 写进 ui —— 于是「默认视图 = 求职」被顶掉、
+  // 兜底会选中第一个静态视图并由下面的 effect 写进 ui —— 于是「默认视图」被顶掉、
   // 头部高亮也错位，连 `#/job` 这类深链都会被首屏覆盖。
+  // 规则本体在 ./activeView.js（纯函数，单测覆盖）：深链 > 本次选择 > 默认栏目 > 第一个 tab。
   const booted = !!boot;
-  const current = nav.all.find((t) => t.id === view) || (booted ? nav.all[0] : null) || null;
+  const current = resolveActiveView(ui.view, nav.all, boot?.settings?.defaultSection, { booted });
+  // 高亮/分组展开都按**解析后**的 tab 算：view 可能是空串（没选过）或已失效的 id
+  const currentId = current ? current.id : '';
 
-  // hash 与 localStorage 双写对齐：只在挂载时对齐一次，之后交给 hashchange
+  // hash → ui：挂载时把深链里的选择写回 ui，之后交给 hashchange
   useEffect(() => {
     const fromHash = viewFromHash();
     if (fromHash && fromHash !== view) patchUi({ view: fromHash });
-    else if (!window.location.hash) window.location.hash = `#/${view}`;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -71,10 +69,10 @@ export default function App() {
     return () => window.removeEventListener('hashchange', on);
   }, [patchUi]);
 
-  useEffect(() => {
-    if (booted && current && current.id !== view) patchUi({ view: current.id });
-  }, [booted, current, view, patchUi]);
-
+  // 注意：这里**刻意不**给「兜底选出来的 tab」补一个 hash：
+  // 一旦补上（无论是 location.hash 还是 replaceState），下次打开地址栏里就带着它，
+  // 于是深链优先 → 设置里的「默认栏目」又变成一个永远不生效的配置。
+  // 规则因此是：地址栏里只有**用户真的点过**的栏目；没有就按默认栏目落地。
   const go = (id) => {
     patchUi({ view: id });
     window.location.hash = `#/${id}`;
@@ -114,7 +112,7 @@ export default function App() {
           </button>
         ))}
         {nav.groups.map((g) => (
-          <GroupTab key={g.title} group={g} currentId={view} onGo={go} />
+          <GroupTab key={g.title} group={g} currentId={currentId} onGo={go} />
         ))}
         {nav.tools.length ? <span className="tabs-sep" aria-hidden /> : null}
         {nav.tools.map((t) => (

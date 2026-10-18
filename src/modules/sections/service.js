@@ -249,12 +249,18 @@ export async function syncSection(ref, { 'dry-run': dryRun } = {}) {
   const tpl = getTemplate(target.template);
   if (!tpl) throw badInput(`栏目记录了模板 ${target.template}，但该模板已不存在（可能被重命名或移除）。`);
 
-  const { groups, fields, addedGroups, addedFields } = mergeTemplate(target, tpl);
+  const { groups, fields, addedGroups, addedFields, changedFields } = mergeTemplate(target, tpl);
+  // 漂移只是**提示**：定义归栏目，sync 绝不覆盖用户改过的 label/hint/fill。
+  // upToDate 仍只看「有没有可补的」——否则用户改过一个标签，就会永远报「不是最新」。
   if (!addedGroups.length && !addedFields.length) {
-    return { status: 'ok', upToDate: true, id: target.id, addedGroups: [], addedFields: [], section: summarize(store, target) };
+    return {
+      status: 'ok', upToDate: true, id: target.id,
+      addedGroups: [], addedFields: [], changedFields,
+      section: summarize(store, target),
+    };
   }
   if (dryRun) {
-    return { status: 'skipped', dryRun: true, wouldSync: { groups: addedGroups, fields: addedFields } };
+    return { status: 'skipped', dryRun: true, wouldSync: { groups: addedGroups, fields: addedFields }, changedFields };
   }
 
   const snapshot = await snapshotStore(`section-sync-${target.id}`);
@@ -265,7 +271,10 @@ export async function syncSection(ref, { 'dry-run': dryRun } = {}) {
     t.updatedAt = nowIso();
   });
   const after = await loadStore();
-  return { status: 'ok', id: target.id, addedGroups, addedFields, section: summarize(after, mustFind(after, target.id)), snapshot };
+  return {
+    status: 'ok', id: target.id, addedGroups, addedFields, changedFields,
+    section: summarize(after, mustFind(after, target.id)), snapshot,
+  };
 }
 
 /**
@@ -365,8 +374,24 @@ export function renderSectionDump(d) {
   return lines.join('\n');
 }
 
+/** 模板漂移提示：只在**真的存在差异**时追加，且明确写清「没有自动改」。 */
+function driftNote(changed, { indent = '' } = {}) {
+  if (!Array.isArray(changed) || !changed.length) return '';
+  const shown = changed.slice(0, 8).map((c) => `${indent}  ${c.key}: ${c.diff.join(', ')}`);
+  if (changed.length > 8) shown.push(`${indent}  …另有 ${changed.length - 8} 个`);
+  return (
+    `\n${indent}注意：${changed.length} 个字段的模板定义已变，本栏目保留原值（sync 只增不改）：\n` +
+    `${shown.join('\n')}\n` +
+    `${indent}要换成模板的新定义：section update <栏目> --fields '<整份字段数组>'（或先 --remove-field 再 --add-field）。`
+  );
+}
+
 export function renderSectionChange(d) {
-  if (d.status === 'skipped') return `试运行（未落盘）：${JSON.stringify(d.wouldCreate || d.wouldChange || d.wouldRemove || d.wouldSync)}`;
+  if (d.status === 'skipped') {
+    const body = JSON.stringify(d.wouldCreate || d.wouldChange || d.wouldRemove || d.wouldSync);
+    // 试运行也要报漂移：否则「先 --dry-run 看一眼」这条最该用它的路径反而看不到差异
+    return `试运行（未落盘）：${body}${driftNote(d.changedFields)}`;
+  }
   // `removed` 在两条路径上形状不同：remove 给的是**对象** {id,title,entries}，
   // update 给的是**被删字段 key 的数组**。数组恒为真值，所以必须显式排除数组——
   // 否则 `section update` 会打印「已删除栏目 undefined」，
@@ -374,7 +399,9 @@ export function renderSectionChange(d) {
   if (d.removed && !Array.isArray(d.removed)) {
     return `已删除栏目 ${d.removed.id}（连带 ${d.removed.entries} 条条目）\n快照: ${d.snapshot}`;
   }
-  if (d.upToDate) return `栏目 ${d.id} 已是最新：模板里没有需要补的分组或字段。`;
+  if (d.upToDate) {
+    return `栏目 ${d.id} 已是最新：模板里没有需要补的分组或字段。${driftNote(d.changedFields)}`;
+  }
   if (d.created) return `已创建栏目 ${d.section.id} · ${d.section.title}（${d.section.fields} 字段）\n快照: ${d.snapshot}`;
   // sync：只增不改——把模板新增、栏目还缺的分组/字段补进来
   if (d.addedFields || d.addedGroups) {
@@ -382,7 +409,7 @@ export function renderSectionChange(d) {
       d.addedGroups?.length ? `新增分组 ${d.addedGroups.join(', ')}` : '',
       d.addedFields?.length ? `新增字段 ${d.addedFields.join(', ')}` : '',
     ].filter(Boolean).join('；');
-    return `已同步栏目 ${d.id} 的模板字段：${bits}\n快照: ${d.snapshot}`;
+    return `已同步栏目 ${d.id} 的模板字段：${bits}\n快照: ${d.snapshot}${driftNote(d.changedFields)}`;
   }
   const extra = [
     d.added?.length ? `新增字段 ${d.added.join(', ')}` : '',

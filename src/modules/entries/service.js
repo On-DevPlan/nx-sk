@@ -9,11 +9,12 @@ import { loadStore, mutateStore, snapshotStore } from '../../core/store.js';
 import { assertFieldKey } from '../../core/paths.js';
 import { badInput, conflict, notFound } from '../../core/errors.js';
 import { BOOL_FALSE, BOOL_TRUE, findKvSection, findSection, isSensitiveField, sectionNames } from '../../core/fields.js';
-import { completeness, displaySensitive, serializeEntry } from '../../core/render.js';
+import { completeness, displaySensitive, isBlank, serializeEntry } from '../../core/render.js';
 import { newId, nowIso } from '../../core/ids.js';
 import { decryptValue, encryptValue, isCipherBlob, maskValue } from '../../core/crypto.js';
 import { resolveVaultKey, sensitiveViewer } from '../../core/vault.js';
 import * as att from '../../core/attachments.js';
+import { mdImageIds, rewriteMdImages } from '../../core/mdimages.js';
 import { displayPath } from '../../core/paths.js';
 
 export function mustFindSection(store, ref) {
@@ -225,21 +226,30 @@ export async function getEntry(ref, { mask, section } = {}) {
   if (!sec) throw notFound(`条目 ${entry.id} 指向的栏目已不存在: ${entry.section}`);
   const decrypt = await sensitiveViewer(sec, [entry]);
   const serialized = serializeEntry(sec, entry, { mask: !!mask, decrypt });
-  // 附带 file 字段引用的附件信息：键 = 字段值（附件 id / 文件名），值为名称 / 路径 / 链接。
-  // 一个字段可挂多个附件，所以逐个 id 建表。
+  // 附带附件信息：键 = 附件 id / 文件名，值为名称 / 路径 / 链接。
+  // 两个来源：`file` 字段挂的附件，以及**图文字段正文里内嵌的图片**（`![说明](f_x)`）——
+  // 后者不进来的话，`entry get` 只能打印一串 f_xxx，而人/agent 要的是「这份文件在磁盘哪」。
   const files = {};
+  const putFile = (ref) => {
+    if (!ref || files[ref]) return;
+    const rec = att.findFileRecord(store, ref);
+    if (!rec) return;
+    const links = att.fileLinks(rec);
+    files[ref] = {
+      id: rec.id, name: rec.name, ext: rec.ext, isImage: att.isImageExt(rec.ext),
+      path: displayPath(att.fileRecordAbs(rec)), url: links.url, downloadUrl: links.downloadUrl,
+    };
+  };
   for (const f of sec.fields.filter((x) => x.type === 'file')) {
-    for (const ref of att.fileIdsOf(serialized.values[f.key])) {
-      const rec = att.findFileRecord(store, ref);
-      if (!rec) continue;
-      const links = att.fileLinks(rec);
-      files[ref] = {
-        id: rec.id, name: rec.name, ext: rec.ext, isImage: att.isImageExt(rec.ext),
-        path: displayPath(att.fileRecordAbs(rec)), url: links.url, downloadUrl: links.downloadUrl,
-      };
-    }
+    for (const ref of att.fileIdsOf(serialized.values[f.key])) putFile(ref);
   }
-  return { ...serialized, sectionTitle: sec.title, mask: !!mask, files };
+  for (const f of sec.fields.filter((x) => x.type === 'md')) {
+    for (const id of mdImageIds(serialized.values[f.key])) putFile(id);
+  }
+  // 字段类型随读出来：CLI 渲染要知道哪个值是「图文」，才能把 f_xxx 换成文件名/路径
+  const fieldTypes = {};
+  for (const f of sec.fields) fieldTypes[f.key] = f.type;
+  return { ...serialized, sectionTitle: sec.title, mask: !!mask, files, fieldTypes };
 }
 
 export async function addEntry({ section, title, set, data, tags, 'dry-run': dryRun } = {}) {
@@ -532,8 +542,11 @@ export function renderEntryList(d) {
     lines.push(`  ${e.id}  ${(e.title || '（无名）').padEnd(16)} ${String(e.completeness.ratio).padStart(3)}% 完整度　[${e.section}]`);
     const missing = e.missing.slice(0, 6).map((m) => m.label).join('、');
     if (missing) lines.push(`      未填: ${missing}${e.missing.length > 6 ? ` 等 ${e.missing.length} 项` : ''}`);
-    if (e.completeness?.excluded) {
-      lines.push(`      不填: ${e.excluded.map((m) => m.label).join('、')}（主动跳过，不计入完整度）`);
+    // 「不填」只报**真的空着**的可选字段。可选字段填了值还列出来，会让人以为
+    // 这份数据缺东西（`excluded` 是策略标记，不是空值清单）。
+    const skipped = (e.excluded || []).filter((m) => isBlank(e.values?.[m.key]));
+    if (skipped.length) {
+      lines.push(`      不填: ${skipped.map((m) => m.label).join('、')}（主动跳过，不计入完整度）`);
     }
   }
   lines.push('', '看全部字段: nx-sk entry get <id> --json　或　nx-sk entry fields --section <id>');
@@ -545,26 +558,36 @@ export function renderEntryList(d) {
  * - 附件（`file` 字段，值可能是 id 列表）：解析成「附件名　物理路径」，**几个占几行**
  * - 其它数组（tags 之类）：仍旧一行、顿号连接——不要顺手把它们也拆成多行
  */
-function valueLines(d, v) {
+function valueLines(d, v, type) {
   const asFile = (x) => (d.files && d.files[x] ? `${d.files[x].name}　${d.files[x].path}` : null);
   if (Array.isArray(v) && v.length && v.every((x) => asFile(x))) return v.map(asFile);
   const one = asFile(v);
   if (one) return [one];
   if (Array.isArray(v)) return [v.join('、')];
   if (typeof v === 'boolean') return [v ? '是' : '否'];
-  return [String(v)];
+  // 图文字段：`![说明](f_x)` → `[图片: 说明] 本地路径`。不换的话 CLI 只会吐一串 id，
+  // 而「这个 id 对应哪个文件」正是读的人唯一想知道的。缺附件时保留醒目的「图片缺失」。
+  const s = String(v);
+  const text = type === 'md' ? rewriteMdImages(s, (id) => d.files?.[id] || null) : s;
+  // 多行正文（YAML / Dockerfile / 一段说明）按行拆开再回填缩进。
+  // 不拆的话只有第一行带着键名列宽，后面每一行都从第 0 列开始 ——
+  // 一段 40 行的清单打印出来像"掉出了表格"，人眼完全没法对。
+  return text.includes('\n') ? text.split('\n') : [text];
 }
 
 export function renderEntryGet(d) {
   const c = d.completeness || {};
+  // 只算**真的空着**的可选字段：填了值的可选字段不属于「跳过」，
+  // 否则一份填满的资料会被报成「另有 7 项已标不填」，自相矛盾。
+  const skipped = (d.excluded || []).filter((m) => isBlank(d.values?.[m.key]));
   const lines = [
     `${d.title || d.id}（${d.id}）· 栏目 ${d.section} · 完整度 ${c.filled}/${c.total} = ${c.ratio}%`
-    + (c.excluded ? ` · 另有 ${c.excluded} 项已标不填` : '')
+    + (skipped.length ? ` · 另有 ${skipped.length} 项已标不填` : '')
     + `${d.mask ? ' · 已打码' : ''}`,
   ];
   for (const [k, v] of Object.entries(d.values)) {
     if (v === null) continue;
-    const rendered = valueLines(d, v);
+    const rendered = valueLines(d, v, d.fieldTypes?.[k]);
     lines.push(`  ${k.padEnd(24)} ${rendered[0]}`);
     for (const extra of rendered.slice(1)) lines.push(`  ${' '.repeat(24)} ${extra}`);
   }
@@ -573,9 +596,9 @@ export function renderEntryGet(d) {
   }
   // 「不填」和「未填」必须分开说：混在一起会让人以为这些字段还欠着，
   // 而它们恰恰是用户主动决定跳过的。
-  if (d.excluded?.length) {
-    lines.push('', `不填（${d.excluded.length}）· 主动跳过、不计入完整度: `
-      + d.excluded.map((m) => `${m.label}(${m.key}｜${m.fillLabel || m.fill})`).join('、'));
+  if (skipped.length) {
+    lines.push('', `不填（${skipped.length}）· 主动跳过、不计入完整度: `
+      + skipped.map((m) => `${m.label}(${m.key}｜${m.fillLabel || m.fill})`).join('、'));
   }
   return lines.join('\n');
 }

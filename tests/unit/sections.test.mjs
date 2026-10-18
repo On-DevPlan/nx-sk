@@ -143,3 +143,109 @@ test('renderSectionChange 覆盖 sync / upToDate 分支', () => {
   const up = renderSectionChange({ status: 'ok', upToDate: true, id: 'job' });
   assert.match(up, /已是最新/);
 });
+
+// —— 模板漂移（只报告，不自动改）——
+// 「只增不改」的代价是：模板改了默认 label/hint 时**完全无声**，
+// 用户会以为「同步过了 = 跟模板一致」。这里钉住两件事：
+// 1) 差异要算出来并明说不会自动改；2) 等价定义不能被误报成差异（否则噪音淹没真差异）。
+
+test('mergeTemplate 报告漂移：同名字段定义不同就列出来，但栏目侧定义不动', () => {
+  const section = {
+    groups: [{ id: 'a', title: 'A' }],
+    fields: [{ key: 'f1', label: '我改过的', type: 'text', group: 'a' }],
+  };
+  const template = {
+    groups: [{ id: 'a', title: 'A' }],
+    fields: [{ key: 'f1', label: '模板标签', type: 'text', group: 'a', hint: '模板提示' }],
+  };
+  const r = mergeTemplate(section, template);
+  assert.deepEqual(r.addedFields, []);
+  assert.equal(r.changedFields.length, 1);
+  assert.equal(r.changedFields[0].key, 'f1');
+  assert.ok(r.changedFields[0].diff.includes('label'), JSON.stringify(r.changedFields[0]));
+  assert.ok(r.changedFields[0].diff.includes('hint'), JSON.stringify(r.changedFields[0]));
+  // 栏目侧原样保留（同步绝不覆盖用户改过的定义）
+  assert.equal(r.fields[0].label, '我改过的');
+});
+
+test('mergeTemplate：等价定义不算漂移（fill 缺省 = normal、options 缺失 = 空）', () => {
+  const section = { groups: [], fields: [{ key: 'x', label: 'X', type: 'text', group: 'g' }] };
+  const template = { groups: [], fields: [{ key: 'x', label: 'X', type: 'text', group: 'g', fill: 'normal', options: [] }] };
+  assert.deepEqual(mergeTemplate(section, template).changedFields, []);
+});
+
+test('renderSectionChange：漂移单独提示，并写明「只增不改」怎么跟进', () => {
+  const out = renderSectionChange({
+    status: 'ok', upToDate: true, id: 'job',
+    addedFields: [], addedGroups: [],
+    changedFields: [{ key: 'phone', diff: ['label'] }],
+  });
+  assert.match(out, /已是最新/);
+  assert.match(out, /1 个字段的模板定义已变/);
+  assert.match(out, /phone: label/);
+  assert.match(out, /只增不改/);
+  assert.match(out, /--fields/, '要告诉用户怎么才能真正跟进模板');
+});
+
+test('renderSectionChange：没有漂移就不打印提示（老形状也不炸）', () => {
+  const out = renderSectionChange({ status: 'ok', upToDate: true, id: 'job' });
+  assert.ok(!out.includes('模板定义已变'), out);
+});
+
+test('bootstrap 下发 fieldTypes：面板的类型下拉框据此渲染，不再各抄一份', async () => {
+  const { bootstrapInfo } = await import('../../src/modules/system/service.js');
+  const { FIELD_TYPES } = await import('../../src/core/fields.js');
+  const boot = await bootstrapInfo();
+  assert.deepEqual(boot.fieldTypes, FIELD_TYPES);
+  assert.ok(boot.fieldTypes.includes('file'), 'file 类型必须在列表里');
+});
+
+// —— deploy 模板：Docker / K8s 规范资源 ——
+// 一个条目 = 一份可复用的配置文件。光存正文不够：还要「放哪」「哪些值要替换」
+// 「什么场景用」—— 缺了后三项，正文只是一段没有上下文的 YAML，下次没法照着用。
+
+test('deploy 模板：正文是 textarea，kind 是带候选的 select', async () => {
+  const { getTemplate } = await import('../../src/core/fields.js');
+  const t = getTemplate('deploy');
+  assert.ok(t, 'deploy 模板应存在');
+  const byKey = new Map(t.fields.map((x) => [x.key, x]));
+  assert.equal(byKey.get('content').type, 'textarea', '正文必须是多行文本');
+  assert.equal(byKey.get('kind').type, 'select');
+  assert.ok(byKey.get('kind').options.includes('Dockerfile'));
+  assert.ok(byKey.get('kind').options.includes('k8s-deployment'));
+  assert.ok(byKey.has('path'), '要有「建议落盘路径」');
+  assert.ok(byKey.has('vars'), '要有「需替换的变量」');
+  assert.equal(t.titleField, 'name');
+});
+
+test('deploy 栏目：YAML 正文写入后原样读回（换行与缩进不能被改写）', async () => {
+  const entries = await import('../../src/modules/entries/service.js');
+  await service.addSection({ id: 'deploytest', title: '部署配置', template: 'deploy' });
+  const yaml = 'apiVersion: apps/v1\nkind: Deployment\nspec:/n  replicas: 1';
+  await entries.addEntry({
+    section: 'deploytest',
+    title: 'node-web 部署',
+    set: { kind: 'k8s-deployment', content: yaml },
+  });
+  const got = await entries.getEntry('node-web 部署', { section: 'deploytest' });
+  assert.equal(got.values.content, yaml);
+});
+
+test('entry get 把多行正文按行拆开（否则整段从第 0 列掉出去）', async () => {
+  const entries = await import('../../src/modules/entries/service.js');
+  const out = entries.renderEntryGet({
+    id: 'e1',
+    title: 'node-web 部署',
+    section: 'deploy',
+    mask: false,
+    completeness: { filled: 1, total: 1, ratio: 100 },
+    values: { content: 'line1\nline2' },
+    missing: [],
+    excluded: [],
+  });
+  const lines = out.split('\n');
+  const i = lines.findIndex((l) => l.includes('line1'));
+  assert.ok(i >= 0, out);
+  assert.ok(lines[i + 1].trim() === 'line2', out);
+  assert.ok(lines[i + 1].startsWith(' '), `续行要缩进到内容列，实际: ${JSON.stringify(lines[i + 1])}`);
+});

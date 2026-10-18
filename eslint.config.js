@@ -30,6 +30,7 @@ const SIBLING_MODULES = [
   '../entries/*',
   '../files/*',
   '../export/*',
+  '../transfer/*',
   '../backup/*',
   '../skill/*',
 ];
@@ -69,8 +70,9 @@ export default [
     },
   },
 
-  // 聚合模块是刻意的例外（它要读各模块状态）
-  { files: ['src/modules/system/**/*.js'], rules: { 'no-restricted-imports': 'off' } },
+  // 聚合模块是刻意的例外（system 读各模块状态；transfer 负责栏目导出导入的跨模块编排，
+  // 依赖方向单向 transfer → entries/sections，不构成环）
+  { files: ['src/modules/system/**/*.js', 'src/modules/transfer/**/*.js'], rules: { 'no-restricted-imports': 'off' } },
 
   // JSX 里的组件引用要算「使用」，否则每个组件都报 no-unused-vars
   {

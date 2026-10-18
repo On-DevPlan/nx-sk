@@ -233,7 +233,7 @@ test('视图里调用的每个 /api/... 都有对应路由（规则本身先反�
   assert.deepEqual(problems, [], `视图里调用了不存在的端点:\n${problems.join('\n')}`);
 });
 
-test('eslint 的模块互依禁列覆盖所有兄弟模块（settings 是唯一例外）', async () => {
+test('eslint 的模块互依禁列覆盖所有兄弟模块（settings 是唯一数据依赖；system / transfer 是聚合例外）', async () => {
   const cfg = await readFile(join(ROOT, 'eslint.config.js'), 'utf8');
   const block = /const SIBLING_MODULES = \[([\s\S]*?)\];/.exec(cfg);
   assert.ok(block, '找不到 SIBLING_MODULES 声明');

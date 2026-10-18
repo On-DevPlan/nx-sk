@@ -1,0 +1,778 @@
+// 栏目级导出 / 导入（ZIP）—— 这是**编排模块**，不是数据模块。
+//
+// 数据模块之间互不依赖（entries 只管条目、sections 只管栏目、files 只管附件）；
+// 这里要把三者串起来完成「打一个包 / 解一个包」，所以显式跨模块调用它们的 service。
+// 依赖方向是单向的（transfer → entries/sections），不构成环。
+//
+// 包的形状：
+//   manifest.json            栏目定义 + 条目 + 附件清单（sha256）
+//   README.txt               给人看的说明
+//   attachments/<id><ext>    附件原件
+//
+// 导出的凭据默认是**明文**（与 export 模块一致，本机单人工具）；
+// `--no-secrets` 时打码，导入侧会识别 `******` 并跳过该字段（不是把打码串存进去）。
+import fsp from 'node:fs/promises';
+import { basename, dirname, extname, join, resolve } from 'node:path';
+import { createHash } from 'node:crypto';
+import { createZip, readZip } from '../../core/zip.js';
+import { loadStore, mutateStore, snapshotStore } from '../../core/store.js';
+import { displayPath, exportDir, VERSION } from '../../core/paths.js';
+import { findSection, isSensitiveField, sectionNames } from '../../core/fields.js';
+import { maskValue } from '../../core/crypto.js';
+import { decryptValue, isCipherBlob } from '../../core/crypto.js';
+import { resolveVaultKey } from '../../core/vault.js';
+import { CATEGORY_IDS, fileIdsOf, fileRecordAbs, findFileRecord, importContent } from '../../core/attachments.js';
+import { mdImageIds } from '../../core/mdimages.js';
+import { badInput, notFound } from '../../core/errors.js';
+import { nowIso, stamp } from '../../core/ids.js';
+import { ensureDir, fileSize, writeAtomic } from '../../core/fsx.js';
+import { addEntry, updateEntry } from '../entries/service.js';
+import { addSection, updateSection } from '../sections/service.js';
+
+const FORMAT = 'nx-sk.section';
+const FORMAT_VERSION = 1;
+const CONFLICT_POLICIES = ['skip', 'copy', 'overwrite'];
+
+function safeCategory(cat) {
+  return CATEGORY_IDS.includes(cat) ? cat : 'other';
+}
+
+/** 目标 ref 是「栏目 id」还是「栏目标题」：id 可以直接新建，标题不行（会建出非法 id）。 */
+const isSectionId = (s) => /^[a-z0-9][a-z0-9_-]*$/i.test(String(s || ''));
+
+/** 零配置导入：包里的 id 已存在时换一个，绝不静默并进别人的栏目。 */
+function uniqueSectionId(store, base) {
+  const taken = new Set(store.sections.map((s) => s.id));
+  if (!taken.has(base)) return base;
+  for (let i = 2; i < 1000; i += 1) {
+    const id = `${base}-${i}`;
+    if (!taken.has(id)) return id;
+  }
+  return `${base}-${Date.now()}`;
+}
+
+async function plainValues(section, values) {
+  const out = {};
+  for (const [k, v] of Object.entries(values || {})) {
+    if (!isSensitiveField(section, k)) { out[k] = v; continue; }
+    if (isCipherBlob(v)) {
+      const { key } = await resolveVaultKey();
+      out[k] = decryptValue(key, v);
+    } else {
+      out[k] = v;
+    }
+  }
+  return out;
+}
+
+function maskedValues(section, values) {
+  const out = {};
+  for (const [k, v] of Object.entries(values || {})) {
+    out[k] = isSensitiveField(section, k) && v !== null && v !== undefined ? maskValue(String(v)) : v;
+  }
+  return out;
+}
+
+/** 一个栏目引用了哪些附件：`file` 字段的 id 列表 + `md` 正文里的图片引用。 */
+function referencedFileIds(section, entries) {
+  const ids = new Set();
+  for (const e of entries) {
+    for (const f of section.fields) {
+      const v = e.values?.[f.key];
+      if (v === null || v === undefined) continue;
+      if (f.type === 'file') for (const id of fileIdsOf(v)) ids.add(id);
+      else if (f.type === 'md') for (const id of mdImageIds(v)) ids.add(id);
+    }
+  }
+  return ids;
+}
+
+const extensionOf = (rec) => rec.ext || extname(rec.name || '').toLowerCase();
+
+/**
+ * 生成栏目 ZIP（内存里）。返回 { buffer, fileName, stats }。
+ */
+export async function buildSectionZip(ref, { withSecrets = true, entryIds } = {}) {
+  const store = await loadStore();
+  const section = findSection(store, ref);
+  if (!section) throw notFound(`找不到栏目: ${ref} —— 现有: ${sectionNames(store)}`);
+  const all = store.entries.filter((e) => e.section === section.id);
+  // 精确导出：按 id 或标题选条目；**只打包被选条目引用到的附件**（否则包会带一堆无关文件）
+  let rows = all;
+  const picked = (Array.isArray(entryIds) ? entryIds : []).map(String).filter(Boolean);
+  if (picked.length) {
+    const wanted = new Set(picked);
+    rows = all.filter((e) => wanted.has(e.id) || wanted.has(e.title));
+    const missing = picked.filter((x) => !rows.some((e) => e.id === x || e.title === x));
+    if (missing.length) throw badInput(`找不到条目: ${missing.join(', ')}（用 'nx-sk entry list --section ${section.id}' 看现有条目）`);
+  }
+
+  const entries = [];
+  for (const e of rows) {
+    const plain = await plainValues(section, e.values);
+    entries.push({
+      id: e.id,
+      title: e.title,
+      tags: e.tags || [],
+      createdAt: e.createdAt,
+      updatedAt: e.updatedAt,
+      values: withSecrets ? plain : maskedValues(section, plain),
+    });
+  }
+
+  const fileRecords = [];
+  const zipEntries = [];
+  let missingFiles = 0;
+  for (const id of referencedFileIds(section, rows)) {
+    const rec = findFileRecord(store, id);
+    if (!rec) { missingFiles += 1; continue; }
+    let data;
+    try {
+      data = await fsp.readFile(fileRecordAbs(rec));
+    } catch {
+      missingFiles += 1;
+      continue;
+    }
+    const zipPath = `attachments/${rec.id}${extensionOf(rec)}`;
+    fileRecords.push({
+      id: rec.id, name: rec.name, ext: rec.ext || '', category: safeCategory(rec.category),
+      bytes: data.length, sha256: rec.sha256 || createHash('sha256').update(data).digest('hex'), zipPath,
+    });
+    zipEntries.push({ name: zipPath, data });
+  }
+
+  const exportedAt = nowIso();
+  const manifest = {
+    app: 'nx-sk',
+    format: FORMAT,
+    formatVersion: FORMAT_VERSION,
+    appVersion: VERSION,
+    exportedAt,
+    withSecrets,
+    section: {
+      id: section.id, title: section.title, description: section.description || '',
+      titleLabel: section.titleLabel || '名称', titleField: section.titleField || null,
+      order: section.order, kv: section.kv === true,
+      groups: section.groups || [], fields: section.fields || [],
+    },
+    counts: { entries: entries.length, available: all.length, files: fileRecords.length },
+    selection: { partial: rows.length !== all.length, requested: picked },
+    entries,
+    files: fileRecords,
+  };
+  const readme = [
+    'nx-sk 栏目导出包',
+    '',
+    `栏目：${section.title}（${section.id}）`,
+    `时间：${exportedAt}`,
+    `条目：${entries.length}　附件：${fileRecords.length}`,
+    `凭据：${withSecrets ? '含明文（请妥善保管）' : '已打码'}`,
+    '',
+    '导入：在面板对应栏目点「更多 → 导入 ZIP」，或',
+    `  nx-sk transfer import ${section.id} --file <本文件> --dry-run   # 先预览`,
+    '',
+    'manifest.json 是数据本体；attachments/ 是附件原件。',
+  ].join('\n');
+
+  const buffer = createZip([
+    { name: 'manifest.json', data: JSON.stringify(manifest, null, 2) + '\n' },
+    { name: 'README.txt', data: readme },
+    ...zipEntries,
+  ]);
+
+  return {
+    buffer,
+    fileName: `${section.id}-${stamp()}.zip`,
+    stats: {
+      section: section.id, sectionTitle: section.title, entries: entries.length,
+      available: all.length, files: fileRecords.length, bytes: buffer.length, missingFiles, withSecrets,
+    },
+  };
+}
+
+/** CLI：写到磁盘（缺省 ~/nx-sk/export）。 */
+export async function exportToFile(ref, { out, withSecrets = true, entryIds } = {}) {
+  const { buffer, fileName, stats } = await buildSectionZip(ref, { withSecrets, entryIds });
+  let target = out ? resolve(out) : join(exportDir(), fileName);
+  // --out 指向已存在的目录时自动拼文件名；否则按文件路径处理
+  try {
+    const st = await fsp.stat(target);
+    if (st.isDirectory()) target = join(target, fileName);
+  } catch { /* 不存在：按文件路径处理 */ }
+  await ensureDir(dirname(target));
+  await writeAtomic(target, buffer);
+  return { status: 'ok', path: displayPath(target), pathRaw: target, bytes: await fileSize(target), ...stats };
+}
+
+/** HTTP raw：直接回 zip 流。 */
+export async function serveExportZip(ref, { res, withSecrets = true, entryIds } = {}) {
+  const { buffer, fileName, stats } = await buildSectionZip(ref, { withSecrets, entryIds });
+  res.writeHead(200, {
+    'content-type': 'application/zip',
+    'content-length': buffer.length,
+    // filename* 传中文/特殊字符，filename 给老客户端兜底（纯 ASCII）
+    'content-disposition': `attachment; filename="section-${stats.section}.zip"; filename*=UTF-8''${encodeURIComponent(fileName)}`,
+    'cache-control': 'no-store',
+  });
+  res.end(buffer);
+}
+
+// 同一个 buffer 在一次请求里会被预览和应用各解析一次；按 buffer 缓存，
+// 避免几百 MB 的包被解两遍。
+const bundleCache = new WeakMap();
+
+function parseBundle(buffer, fileName) {
+  const hit = bundleCache.get(buffer);
+  if (hit) return hit;
+  let files;
+  try {
+    files = readZip(buffer);
+  } catch (e) {
+    throw badInput(`ZIP 解析失败：${e.message}`);
+  }
+  const map = new Map(files.map((f) => [f.name, f.data]));
+  const raw = map.get('manifest.json');
+  if (!raw) throw badInput('ZIP 里没有 manifest.json —— 不是 nx-sk 栏目导出包');
+  let manifest;
+  try {
+    manifest = JSON.parse(raw.toString('utf8'));
+  } catch {
+    throw badInput('manifest.json 不是合法 JSON');
+  }
+  if (manifest?.format !== FORMAT) throw badInput(`不是栏目导出包（format=${manifest?.format || '未声明'}）`);
+  if (Number(manifest.formatVersion) > FORMAT_VERSION) {
+    throw badInput(`导出包版本过新（${manifest.formatVersion}），请先升级 nx-sk`);
+  }
+  if (!manifest.section || !Array.isArray(manifest.entries) || !Array.isArray(manifest.files)) {
+    throw badInput('manifest.json 结构不完整（缺 section / entries / files）');
+  }
+  const parsed = { manifest, map, fileName: fileName || 'upload.zip' };
+  bundleCache.set(buffer, parsed);
+  return parsed;
+}
+
+const entryTitleIndex = (entries) => {
+  const byTitle = new Map();
+  const byId = new Map();
+  for (const e of entries) {
+    byTitle.set(e.title, e);
+    byId.set(e.id, e);
+  }
+  return { byTitle, byId };
+};
+
+/**
+ * 预览导入：**不落盘**，只回答「会变成什么」。
+ * 冲突、字段缺口、附件去重、打码凭据都在这里算清楚，UI 直接展示。
+ */
+export async function previewImport(ref, buffer, { fileName } = {}) {
+  const { manifest, map } = parseBundle(buffer, fileName);
+  const store = await loadStore();
+  const target = ref ? findSection(store, ref) : null;
+  // 目标解析：显式 ref 优先；**不传 ref = 零配置** —— 按包内 id 新建，
+  // id 已存在就加序号（同一份包可以反复导入成多份，不会静默合并）。
+  let targetId = target?.id || (ref && isSectionId(ref) ? ref : manifest.section.id);
+  let sectionTitle = target?.title || manifest.section.title;
+  let renamedFrom = null;
+  if (!target && !ref) {
+    const fresh = uniqueSectionId(store, manifest.section.id);
+    if (fresh !== manifest.section.id) {
+      renamedFrom = manifest.section.id;
+      sectionTitle = `${manifest.section.title}（导入）`;
+    }
+    targetId = fresh;
+  }
+  const targetEntries = target ? store.entries.filter((e) => e.section === target.id) : [];
+  const { byTitle, byId } = entryTitleIndex(targetEntries);
+
+  const targetFieldKeys = new Set((target?.fields || []).map((f) => f.key));
+  const targetGroupIds = new Set((target?.groups || []).map((g) => g.id));
+  const fieldsToAdd = (manifest.section.fields || []).filter((f) => !targetFieldKeys.has(f.key));
+  const groupsToAdd = (manifest.section.groups || []).filter((g) => !targetGroupIds.has(g.id));
+
+  const conflicts = [];
+  for (const e of manifest.entries) {
+    const hitId = byId.get(e.id);
+    const hitTitle = byTitle.get(e.title);
+    if (hitId || hitTitle) {
+      conflicts.push({
+        id: e.id, title: e.title,
+        reason: hitId ? 'id' : 'title',
+        existingId: (hitId || hitTitle).id,
+        existingTitle: (hitId || hitTitle).title,
+      });
+    }
+  }
+
+  let zipBytes = 0;
+  let newFiles = 0;
+  let reusedFiles = 0;
+  const fileIssues = [];
+  for (const f of manifest.files) {
+    const data = map.get(f.zipPath);
+    if (!data) { fileIssues.push({ name: f.name, reason: 'zip 里缺文件' }); continue; }
+    zipBytes += data.length;
+    const sha = createHash('sha256').update(data).digest('hex');
+    if (f.sha256 && sha !== f.sha256) { fileIssues.push({ name: f.name, reason: 'sha256 不符' }); continue; }
+    if (store.files.some((r) => r.sha256 === sha)) reusedFiles += 1;
+    else newFiles += 1;
+  }
+
+  // 打码凭据：导入时不能把 `******` 当新密码存进去，只能跳过并提示重填
+  let maskedSecrets = 0;
+  const sensitiveKeys = new Set((manifest.section.fields || []).filter((f) => f.sensitive || f.type === 'secret').map((f) => f.key));
+  for (const e of manifest.entries) {
+    for (const k of sensitiveKeys) {
+      const v = e.values?.[k];
+      if (typeof v === 'string' && v.includes('******')) maskedSecrets += 1;
+    }
+  }
+
+  const warnings = [];
+  if (!manifest.withSecrets && maskedSecrets) warnings.push(`${maskedSecrets} 个凭据字段在导出时已打码，导入后需要重新填写`);
+  if (fileIssues.length) warnings.push(`${fileIssues.length} 个附件有问题（缺失或校验失败），将被跳过`);
+  // 只有「显式指定了目标栏目」时这句才成立；零配置导入是新建，说「当前栏目」会误导
+  if (ref && manifest.section.id !== targetId) warnings.push(`ZIP 来自栏目「${manifest.section.title}」（${manifest.section.id}），将导入到当前栏目`);
+
+  return {
+    status: 'preview',
+    fileName,
+    exportedAt: manifest.exportedAt,
+    appVersion: manifest.appVersion,
+    withSecrets: !!manifest.withSecrets,
+    section: {
+      source: { id: manifest.section.id, title: manifest.section.title },
+      targetId,
+      exists: !!target,
+      willCreate: !target,
+      renamedFrom,
+      title: sectionTitle,
+      fieldsToAdd: fieldsToAdd.map((f) => ({ key: f.key, label: f.label, type: f.type })),
+      groupsToAdd: groupsToAdd.map((g) => ({ id: g.id, title: g.title })),
+    },
+    entries: {
+      total: manifest.entries.length,
+      fresh: manifest.entries.length - conflicts.length,
+      conflicts,
+      titles: manifest.entries.slice(0, 12).map((e) => e.title),
+    },
+    files: {
+      total: manifest.files.length,
+      new: newFiles,
+      reused: reusedFiles,
+      bytes: zipBytes,
+      issues: fileIssues,
+    },
+    secrets: { sensitiveFields: sensitiveKeys.size, masked: maskedSecrets },
+    warnings,
+  };
+}
+
+function uniqueTitle(base, taken) {
+  if (!taken.has(base)) return base;
+  for (let i = 1; i < 1000; i += 1) {
+    const t = i === 1 ? `${base}（导入）` : `${base}（导入 ${i}）`;
+    if (!taken.has(t)) return t;
+  }
+  return `${base}（导入 ${Date.now()}）`;
+}
+
+function remapValues(section, values, idMap) {
+  const out = { ...values };
+  for (const f of section.fields || []) {
+    if (!(f.key in out)) continue;
+    if (f.type === 'file') {
+      const ids = fileIdsOf(out[f.key]).map((id) => idMap.get(id) || id).filter(Boolean);
+      out[f.key] = ids.length ? ids : null;
+    } else if (f.type === 'md' && typeof out[f.key] === 'string') {
+      out[f.key] = out[f.key].replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (m, alt, id) => (
+        idMap.has(id) ? `![${alt}](${idMap.get(id)})` : m
+      ));
+    }
+  }
+  return out;
+}
+
+/** 写入一个附件：同 sha 直接复用，不重复占空间。 */
+async function storeAttachment({ data, name, category }) {
+  const store = await loadStore();
+  const outcome = await importContent(store, { content: data.toString('base64'), name, category: safeCategory(category) });
+  if (outcome.duplicate) return { id: outcome.record.id, reused: true, bytes: 0 };
+  await mutateStore((s) => { s.files.push(outcome.record); });
+  return { id: outcome.record.id, reused: false, bytes: data.length };
+}
+
+/**
+ * 真正导入。先跑一次 preview（拿同一份 store 视图），再落盘。
+ */
+export async function applyImport(ref, buffer, { fileName, onConflict = 'skip' } = {}) {
+  if (!CONFLICT_POLICIES.includes(onConflict)) {
+    throw badInput(`冲突策略只能是 ${CONFLICT_POLICIES.join(' / ')}，收到 ${JSON.stringify(onConflict)}`);
+  }
+  const preview = await previewImport(ref, buffer, { fileName });
+  const { manifest, map } = parseBundle(buffer, fileName);
+  const targetId = preview.section.targetId;
+  const snapshot = await snapshotStore('section-import');
+
+  let sectionCreated = false;
+  let fieldsAdded = [];
+  let section = findSection(await loadStore(), targetId);
+  if (!section) {
+    await addSection({
+      id: targetId,
+      title: preview.section.title || targetId,
+      description: manifest.section.description || '',
+      order: Number.isFinite(manifest.section.order) ? manifest.section.order : 50,
+      groups: manifest.section.groups || [],
+      fields: manifest.section.fields || [],
+    });
+    if (manifest.section.titleField) await updateSection(targetId, { titleField: manifest.section.titleField });
+    // 结构随包：KV 表不是字段能表达的，必须单独带过来
+    if (manifest.section.kv === true) await updateSection(targetId, { kv: true });
+    sectionCreated = true;
+    fieldsAdded = (manifest.section.fields || []).map((f) => f.key);
+  } else if (preview.section.fieldsToAdd.length) {
+    const defs = (manifest.section.fields || []).filter((f) => preview.section.fieldsToAdd.some((x) => x.key === f.key));
+    await updateSection(targetId, { 'add-field': defs });
+    fieldsAdded = defs.map((f) => f.key);
+  }
+  section = findSection(await loadStore(), targetId);
+
+  // 附件先落，拿到「旧 id → 新 id」映射；条目里的引用随后重写
+  const idMap = new Map();
+  let filesAdded = 0;
+  let filesReused = 0;
+  let filesBytes = 0;
+  for (const f of manifest.files) {
+    const data = map.get(f.zipPath);
+    if (!data) continue;
+    const sha = createHash('sha256').update(data).digest('hex');
+    if (f.sha256 && sha !== f.sha256) continue;
+    const r = await storeAttachment({ data, name: f.name, category: f.category });
+    idMap.set(f.id, r.id);
+    if (r.reused) filesReused += 1;
+    else { filesAdded += 1; filesBytes += r.bytes; }
+  }
+
+  const existing = (await loadStore()).entries.filter((e) => e.section === targetId);
+  const takenTitles = new Set(existing.map((e) => e.title));
+  const byId = new Map(existing.map((e) => [e.id, e]));
+  let added = 0;
+  let copied = 0;
+  let overwritten = 0;
+  let skipped = 0;
+  let maskedSkipped = 0;
+
+  for (const src of manifest.entries) {
+    const values = remapValues(section, src.values || {}, idMap);
+    for (const f of section.fields) {
+      if (!isSensitiveField(section, f.key)) continue;
+      const v = values[f.key];
+      if (typeof v === 'string' && v.includes('******')) { delete values[f.key]; maskedSkipped += 1; }
+    }
+    const hit = byId.get(src.id) || existing.find((e) => e.title === src.title);
+    if (hit) {
+      if (onConflict === 'skip') { skipped += 1; continue; }
+      if (onConflict === 'overwrite') {
+        await updateEntry(hit.id, { section: targetId, set: values });
+        overwritten += 1;
+        continue;
+      }
+      // copy：另存为新条目，标题去重（标题是 CLI 的定位键，不能重名）
+    }
+    const title = hit
+      ? uniqueTitle(`${src.title}（导入）`, takenTitles)
+      : uniqueTitle(src.title, takenTitles);
+    const created = await addEntry({ section: targetId, title, set: values, tags: src.tags });
+    takenTitles.add(created.title);
+    if (hit) copied += 1;
+    else added += 1;
+  }
+
+  return {
+    status: 'ok',
+    section: { id: targetId, title: section.title, created: sectionCreated },
+    entries: { added, copied, overwritten, skipped, total: manifest.entries.length },
+    files: { added: filesAdded, reused: filesReused, bytes: filesBytes },
+    fieldsAdded,
+    maskedSkipped,
+    snapshot,
+    preview,
+  };
+}
+
+
+/** CLI：从文件导入（预览 or 应用）。 */
+export async function importFromFile(ref, { file, onConflict = 'skip', dryRun = false } = {}) {
+  if (!file) throw badInput('缺少 --file <zip 路径>');
+  let buffer;
+  try {
+    buffer = await fsp.readFile(resolve(file));
+  } catch (e) {
+    throw badInput(`读不到 ZIP: ${file}（${e.code || e.message}）`);
+  }
+  const fileName = basename(file);
+  return dryRun
+    ? previewImport(ref, buffer, { fileName })
+    : applyImport(ref, buffer, { fileName, onConflict });
+}
+
+/** HTTP：二进制 body（跳过 JSON 解析），直接交给 preview / apply。 */
+export function importFromBuffer(ref, buffer, { fileName, onConflict, dryRun }) {
+  return dryRun
+    ? previewImport(ref, buffer, { fileName })
+    : applyImport(ref, buffer, { fileName, onConflict });
+}
+
+
+// ─── 全局多栏目包（bundle） ──────────────────────────────────────
+//
+// 外层 zip 只是**容器**：bundle.json 记索引，sections/<id>.zip 是已经验证过的单栏目包。
+// 这样全局导入不需要把「结构/附件/冲突」再实现一遍 —— 逐个栏目复用同一套 preview/apply，
+// 行为与栏目页的导入天然一致。
+const BUNDLE_FORMAT = 'nx-sk.bundle';
+const BUNDLE_VERSION = 1;
+
+function normalizeSelection(input) {
+  let arr = input;
+  if (typeof arr === 'string') {
+    try { arr = JSON.parse(arr); } catch { arr = arr.split(/[,，\s]+/).filter(Boolean); }
+  }
+  if (!Array.isArray(arr) || !arr.length) throw badInput('至少选一个栏目');
+  const out = arr.map((x) => (typeof x === 'string' ? { id: x } : { id: String(x?.id || ''), entries: x?.entries }))
+    .filter((x) => x.id);
+  if (!out.length) throw badInput('至少选一个栏目');
+  return out;
+}
+
+export async function buildBundleZip({ sections, withSecrets = true } = {}) {
+  const sel = normalizeSelection(sections);
+  const parts = [];
+  const index = [];
+  for (const item of sel) {
+    const { buffer, stats } = await buildSectionZip(item.id, { withSecrets, entryIds: item.entries });
+    const zipPath = `sections/${stats.section}.zip`;
+    parts.push({ name: zipPath, data: buffer });
+    index.push({
+      id: stats.section, title: stats.sectionTitle, zipPath,
+      entries: stats.entries, available: stats.available, files: stats.files,
+    });
+  }
+  const exportedAt = nowIso();
+  const manifest = {
+    app: 'nx-sk', format: BUNDLE_FORMAT, formatVersion: BUNDLE_VERSION, appVersion: VERSION,
+    exportedAt, withSecrets,
+    counts: {
+      sections: index.length,
+      entries: index.reduce((n, x) => n + x.entries, 0),
+      files: index.reduce((n, x) => n + x.files, 0),
+    },
+    sections: index,
+  };
+  const readme = [
+    'nx-sk 全局导出包（多栏目）', '',
+    `时间：${exportedAt}`,
+    `栏目：${index.length}　条目：${manifest.counts.entries}　附件：${manifest.counts.files}`,
+    `凭据：${withSecrets ? '含明文（请妥善保管）' : '已打码'}`,
+    '',
+    '每个栏目在 sections/<id>.zip 里，结构与单栏目导出完全一致；bundle.json 只是索引。',
+    '导入：面板「导出与备份 → 导出导入」，或',
+    '  nx-sk transfer bundle-import --file <本文件> --dry-run',
+  ].join('\n');
+  const buffer = createZip([
+    { name: 'bundle.json', data: JSON.stringify(manifest, null, 2) + '\n' },
+    { name: 'README.txt', data: readme },
+    ...parts,
+  ]);
+  return {
+    buffer,
+    fileName: `nx-sk-bundle-${stamp()}.zip`,
+    stats: { sections: index.length, entries: manifest.counts.entries, files: manifest.counts.files, bytes: buffer.length, withSecrets },
+  };
+}
+
+export async function exportBundleToFile({ sections, out, withSecrets = true, dryRun = false } = {}) {
+  const { buffer, fileName, stats } = await buildBundleZip({ sections, withSecrets });
+  if (dryRun) {
+    return { status: 'skipped', dryRun: true, wouldWrite: { fileName, ...stats } };
+  }
+  let target = out ? resolve(out) : join(exportDir(), fileName);
+  try {
+    const st = await fsp.stat(target);
+    if (st.isDirectory()) target = join(target, fileName);
+  } catch { /* 不存在：按文件路径 */ }
+  await ensureDir(dirname(target));
+  await writeAtomic(target, buffer);
+  return { status: 'ok', path: displayPath(target), pathRaw: target, bytes: await fileSize(target), ...stats };
+}
+
+export async function serveBundleZip({ sections, res, withSecrets = true } = {}) {
+  const { buffer, fileName } = await buildBundleZip({ sections, withSecrets });
+  res.writeHead(200, {
+    'content-type': 'application/zip',
+    'content-length': buffer.length,
+    'content-disposition': `attachment; filename="nx-sk-bundle.zip"; filename*=UTF-8''${encodeURIComponent(fileName)}`,
+    'cache-control': 'no-store',
+  });
+  res.end(buffer);
+}
+
+function parseGlobalBundle(buffer) {
+  let files;
+  try { files = readZip(buffer); } catch (e) { throw badInput(`ZIP 解析失败：${e.message}`); }
+  const map = new Map(files.map((f) => [f.name, f.data]));
+  const raw = map.get('bundle.json');
+  if (!raw) throw badInput('不是全局导出包：缺少 bundle.json');
+  let manifest;
+  try { manifest = JSON.parse(raw.toString('utf8')); } catch { throw badInput('bundle.json 不是合法 JSON'); }
+  if (manifest?.format !== BUNDLE_FORMAT) throw badInput(`不是全局导出包（format=${manifest?.format || '未声明'}）`);
+  if (Number(manifest.formatVersion) > BUNDLE_VERSION) throw badInput('导出包版本过新，请先升级 nx-sk');
+  const items = (manifest.sections || []).map((sec) => {
+    const data = map.get(sec.zipPath);
+    if (!data) throw badInput(`包内缺少栏目 ${sec.id} 的数据（${sec.zipPath}）`);
+    return { section: sec, buffer: data };
+  });
+  if (!items.length) throw badInput('全局导出包里没有栏目');
+  return { manifest, items };
+}
+
+export async function previewBundle(buffer, { fileName } = {}) {
+  const { manifest, items } = parseGlobalBundle(buffer);
+  const list = [];
+  const warnings = [];
+  for (const it of items) {
+    const p = await previewImport(it.section.id, it.buffer, { fileName: it.section.zipPath });
+    list.push({
+      id: it.section.id,
+      title: p.section.title,
+      willCreate: p.section.willCreate,
+      renamedFrom: p.section.renamedFrom,
+      entries: p.entries,
+      files: p.files,
+      fieldsToAdd: p.section.fieldsToAdd,
+    });
+    for (const w of p.warnings) warnings.push(`[${it.section.title}] ${w}`);
+  }
+  const totals = list.reduce((acc, x) => ({
+    sections: acc.sections + 1,
+    newSections: acc.newSections + (x.willCreate ? 1 : 0),
+    entries: acc.entries + x.entries.total,
+    fresh: acc.fresh + x.entries.fresh,
+    conflicts: acc.conflicts + x.entries.conflicts.length,
+    filesNew: acc.filesNew + x.files.new,
+    filesReused: acc.filesReused + x.files.reused,
+    bytes: acc.bytes + x.files.bytes,
+  }), { sections: 0, newSections: 0, entries: 0, fresh: 0, conflicts: 0, filesNew: 0, filesReused: 0, bytes: 0 });
+  return {
+    status: 'preview', fileName, exportedAt: manifest.exportedAt,
+    withSecrets: !!manifest.withSecrets, sections: list, totals, warnings,
+  };
+}
+
+export async function applyBundle(buffer, { fileName, onConflict = 'skip' } = {}) {
+  const { manifest, items } = parseGlobalBundle(buffer);
+  const sections = [];
+  for (const it of items) {
+    const r = await applyImport(it.section.id, it.buffer, { fileName, onConflict });
+    sections.push({
+      id: r.section.id, title: r.section.title, created: r.section.created,
+      entries: r.entries, files: r.files, fieldsAdded: r.fieldsAdded, maskedSkipped: r.maskedSkipped, snapshot: r.snapshot,
+    });
+  }
+  const totals = sections.reduce((a, x) => ({
+    sections: a.sections + 1,
+    createdSections: a.createdSections + (x.created ? 1 : 0),
+    added: a.added + x.entries.added,
+    copied: a.copied + x.entries.copied,
+    overwritten: a.overwritten + x.entries.overwritten,
+    skipped: a.skipped + x.entries.skipped,
+    filesAdded: a.filesAdded + x.files.added,
+    filesReused: a.filesReused + x.files.reused,
+  }), { sections: 0, createdSections: 0, added: 0, copied: 0, overwritten: 0, skipped: 0, filesAdded: 0, filesReused: 0 });
+  return { status: 'ok', fileName, exportedAt: manifest.exportedAt, sections, totals };
+}
+
+export async function importBundleFromFile({ file, onConflict = 'skip', dryRun = false } = {}) {
+  if (!file) throw badInput('缺少 --file <zip 路径>');
+  let buffer;
+  try { buffer = await fsp.readFile(resolve(file)); } catch (e) { throw badInput(`读不到 ZIP: ${file}（${e.code || e.message}）`); }
+  const fileName = basename(file);
+  return dryRun ? previewBundle(buffer, { fileName }) : applyBundle(buffer, { fileName, onConflict });
+}
+
+export function importBundleFromBuffer(buffer, { fileName, onConflict, dryRun } = {}) {
+  return dryRun ? previewBundle(buffer, { fileName }) : applyBundle(buffer, { fileName, onConflict });
+}
+
+// ─── 人读渲染 ────────────────────────────────────────────────────
+
+export function renderExportZip(d) {
+  return [
+    `已导出栏目 ${d.sectionTitle}（${d.section}）→ ${d.path}`,
+    `条目 ${d.entries}${d.available !== undefined && d.entries !== d.available ? ` / 共 ${d.available}` : ''} · 附件 ${d.files} · ${(d.bytes / 1024).toFixed(1)}KB · 凭据 ${d.withSecrets ? '含明文' : '已打码'}`,
+    d.missingFiles ? `注意：${d.missingFiles} 个附件在磁盘上找不到，未打包` : '',
+  ].filter(Boolean).join('\n');
+}
+
+export function renderImport(d) {
+  if (d.status === 'preview') {
+    const s = d.section;
+    const lines = [
+      `ZIP: ${d.fileName}（${d.exportedAt || '未知时间'}）`,
+      `来源栏目: ${s.source.title}（${s.source.id}）→ 目标: ${s.targetId}${s.willCreate ? '（将新建）' : ''}${s.renamedFrom ? `（id ${s.renamedFrom} 已存在，另存为 ${s.targetId}）` : ''}`,
+      `条目: 共 ${d.entries.total}，新增 ${d.entries.fresh}，冲突 ${d.entries.conflicts.length}`,
+      `字段: 将补 ${s.fieldsToAdd.length} 个${s.fieldsToAdd.length ? `（${s.fieldsToAdd.map((f) => f.key).join(', ')}）` : ''}`,
+      `附件: 新增 ${d.files.new}，复用 ${d.files.reused}，${(d.files.bytes / 1024).toFixed(1)}KB`,
+      `凭据: ${d.withSecrets ? '含明文' : '已打码'}${d.secrets.masked ? `（${d.secrets.masked} 个需重填）` : ''}`,
+    ];
+    if (d.entries.conflicts.length) {
+      lines.push('冲突（默认跳过，可用 --on-conflict copy|overwrite）:');
+      for (const c of d.entries.conflicts.slice(0, 8)) lines.push(`  · ${c.title}（${c.reason}）`);
+      if (d.entries.conflicts.length > 8) lines.push(`  … 共 ${d.entries.conflicts.length} 条`);
+    }
+    for (const w of d.warnings) lines.push(`注意: ${w}`);
+    return lines.join('\n');
+  }
+  return [
+    `导入完成 → 栏目 ${d.section.title}（${d.section.id}）${d.section.created ? '（新建）' : ''}`,
+    `条目 新增 ${d.entries.added} / 另存 ${d.entries.copied} / 覆盖 ${d.entries.overwritten} / 跳过 ${d.entries.skipped}`,
+    `附件 新增 ${d.files.added} / 复用 ${d.files.reused}（${(d.files.bytes / 1024).toFixed(1)}KB）`,
+    d.fieldsAdded.length ? `新增字段: ${d.fieldsAdded.join(', ')}` : '',
+    d.maskedSkipped ? `跳过 ${d.maskedSkipped} 个打码凭据（需重新填写）` : '',
+    `快照: ${d.snapshot}`,
+  ].filter(Boolean).join('\n');
+}
+
+export function renderBundleExport(d) {
+  if (d.status === 'skipped') {
+    const w = d.wouldWrite;
+    return `试运行（未写盘）：${w.sections} 栏目 / ${w.entries} 条目 / ${w.files} 附件 · ${(w.bytes / 1024 / 1024).toFixed(1)}MB → ${w.fileName}`;
+  }
+  return [
+    `已导出 ${d.sections} 个栏目 / ${d.entries} 条条目 / ${d.files} 个附件 → ${d.path}`,
+    `${(d.bytes / 1024 / 1024).toFixed(1)}MB · 凭据 ${d.withSecrets ? '含明文' : '已打码'}`,
+  ].join('\n');
+}
+
+export function renderBundlePreview(d) {
+  const t = d.totals;
+  const lines = [
+    `全局包: ${d.fileName}（${d.exportedAt || '未知时间'}）`,
+    `栏目 ${t.sections}（将新建 ${t.newSections}）· 条目 ${t.entries}（新增 ${t.fresh} / 冲突 ${t.conflicts}）`,
+    `附件 新增 ${t.filesNew} / 复用 ${t.filesReused}（${(t.bytes / 1024).toFixed(1)}KB）· 凭据 ${d.withSecrets ? '含明文' : '已打码'}`,
+  ];
+  for (const s of d.sections) {
+    lines.push(`  · ${s.title}（${s.id}）${s.willCreate ? ' 新建' : ''}：条目 ${s.entries.total}，冲突 ${s.entries.conflicts.length}，补字段 ${s.fieldsToAdd.length}`);
+  }
+  for (const w of d.warnings.slice(0, 6)) lines.push(`注意: ${w}`);
+  return lines.join('\n');
+}
+
+export function renderBundleApply(d) {
+  const t = d.totals;
+  return [
+    `导入完成：${t.sections} 个栏目（新建 ${t.createdSections}）`,
+    `条目 新增 ${t.added} / 另存 ${t.copied} / 覆盖 ${t.overwritten} / 跳过 ${t.skipped}`,
+    `附件 新增 ${t.filesAdded} / 复用 ${t.filesReused}`,
+  ].join('\n');
+}
