@@ -342,7 +342,7 @@ nx-sk skill install sk-pdf
 nx-sk skill get sk-pdf             # 全文
 nx-sk skill get sk-pdf 30-pitfalls # 踩过的坑
 
-# 不装也能用（零依赖，只需 PyMuPDF）
+# 不装也能用（唯一第三方依赖是 PyMuPDF）
 python assets/sk-pdf/scripts/pdf_probe.py   book.pdf      # 先探查：有没有图、是不是扫描件
 python assets/sk-pdf/scripts/pdf_extract.py book.pdf --out /tmp/out
 ```
