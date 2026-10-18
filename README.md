@@ -135,8 +135,9 @@ CLI 与 API 同源，skill 驱动 agent**。落到具体功能上：
 | `nx-sk transfer export <栏目> [--entries 条目,条目] [--passphrase 口令] [--out 文件]` | 栏目/选中条目 + 引用附件打成 ZIP，可设口令加密（栏目页「更多」里同源下载） |
 | `nx-sk transfer import <栏目> [--file ZIP] [--on-conflict skip\|copy\|overwrite] [--dry-run]` | 预览/导入到指定栏目；附件按 sha256 复用 |
 | `nx-sk transfer import-new [--file ZIP] [--dry-run]` | **零配置**：按包内结构新建栏目（id 冲突加序号） |
-| `nx-sk backup export [--password 口令] [--out DIR] [--with-files] [--dry-run]` | 口令对称加密整库，导出单个 `.nxskbak`（口令不落盘；`--with-files` 连附件原件） |
-| `nx-sk backup import --file <备份> [--password 口令] [--replace] [--dry-run]` | 解密导入：缺省「合并」（只增补、不覆盖已有值，冲突列清单），`--replace` 整份替换；动手前自动留安全快照 |
+| `nx-sk transfer bundle-export [--sections 栏目,栏目] [--passphrase 口令] [--no-files] [--out 文件]` | 多栏目/整库打包成 ZIP（`bundle.json + sections/<id>.zip`），可设口令加密 |
+| `nx-sk transfer bundle-import [--file ZIP] [--on-conflict skip\|copy\|overwrite] [--dry-run]` | 整库包解密导入；缺省「合并」只增补不覆盖 |
+| `nx-sk transfer import-new [--file ZIP] [--dry-run]` | **零配置**：自动识别单栏目包 / 整库包，按包内结构新建（id 冲突加序号） |
 | `nx-sk setting get \| set` | 全局设置 |
 | `nx-sk skill list \| install \| get` | 把内置 skill 装给 agent / 给外部 agent 取上下文 |
 
@@ -222,48 +223,38 @@ nx-sk setting set --set 'navGroups=[]'   # 清空 = 全部栏目恢复平铺
 
 分组只是**显示配置**（存在 `settings.navGroups`）：不动栏目与条目的数据，删掉栏目时头部自动略过。
 
-整体导出（凭据默认**含明文**——本机自己用；要分享给别人时加 `--no-secrets` 打码）：
+整体导出（落到本机目录的**人可读副本**，凭据默认含明文）：
 
 ```bash
 nx-sk export run --format both --out D:/备份/nx-sk
 nx-sk export list
 ```
 
-加密备份 / 恢复（口令对称加密，AES-256-GCM；导出设口令、恢复输口令）：
-
-```bash
-nx-sk backup export --password '你的备份口令'            # 写成 ~/nx-sk/backup/*.nxskbak
-nx-sk backup export --password '你的备份口令' --with-files  # 连附件原件一起打包
-nx-sk backup import --file ~/nx-sk/backup/xxx.nxskbak --password '你的备份口令' --dry-run  # 先看合并计划
-nx-sk backup import --file ~/nx-sk/backup/xxx.nxskbak --password '你的备份口令'            # 缺省「合并」导入
-nx-sk backup import --file ~/nx-sk/backup/xxx.nxskbak --password '你的备份口令' --replace  # 才是整份替换
-# 口令也可用环境变量 NX_SK_BACKUP_PASSWORD 提供
-```
-
-**导入缺省是「合并」**：只增补（补缺失的栏目/条目/附件、补空字段、结构只增不减），
-不覆盖你已填过的值——两边都有值且不同时保留本地、列入冲突清单由你处理；
-导入完成给出完整报告。`--replace` 才整份替换（灾难恢复 / 跨机器迁移用）。
-两种方式都先自动留安全快照。
-
-Web 面板的「导出与备份」页同样支持：导出在浏览器下载 `.nxskbak`（可勾选连附件一起打包），
-导入选择文件并输入口令、报告以弹窗呈现；口令错误或文件损坏会明确报错、不改动当前数据。
-
 ### 全局导出 / 导入（多栏目）
 
-「导出与备份」页顶部：栏目树可勾选栏目，展开后能只选部分条目；点「导出选中的 ZIP」下载。
-把 ZIP 拖进下方框即预览（栏目、条目新增/冲突、附件新增/复用、凭据），选冲突策略后确认。
-全局包 `bundle.json + sections/<id>.zip`，与单栏目包同构；导入时逐栏目复用同一套逻辑。
+**项目里只有一个导出导入模块，没有独立的「备份」模块。** 导出的包就是唯一回退手段：
+删栏目 / 条目 / 附件之前先导一份。
+
+「导出导入」页顶部：栏目横向排成 chips，悬浮或点击展开条目可逐条勾选；
+顶部「整库」按钮 = 所有栏目全选。选好内容 → 输两次口令（可留空）→「导出 ZIP」浏览器直接下载。
+把 ZIP 拖进右侧框即预览（栏目、条目新增/冲突、附件新增/复用），选冲突策略后确认。
+
+口令用**对称加密（AES-256-GCM）**：实现是「内部数据先加密，再套一层合法 ZIP」，
+所以外层始终能正常打开（只看到一个 `payload.enc`），不会报「文件夹无效」；
+缺口令时明确提示要口令，不会误报成坏包。
+
+整库包结构 `bundle.json + sections/<id>.zip`，与单栏目包同构；导入时逐栏目复用同一套逻辑。
 
 ```bash
 nx-sk transfer bundle-export --sections job,projects --out all.zip
 nx-sk transfer bundle-import --file all.zip --dry-run
 nx-sk transfer bundle-import --file all.zip --on-conflict copy
+nx-sk transfer import-new --file all.zip      # 零配置：自动识别单栏目包 / 整库包
 ```
-
 
 ### 只搬一个栏目：ZIP 导出 / 导入
 
-整库备份之外，栏目可以单独打包（含条目、栏目定义、实际引用到的附件）：
+栏目也可以单独打包（含条目、栏目定义、实际引用到的附件）：
 
 ```bash
 nx-sk transfer export deploy --out D:/tmp/deploy.zip            # 含凭据明文
@@ -292,10 +283,10 @@ nx-sk transfer import-new --file D:/tmp/deploy.zip               # 零配置：�
 | 数据目录 | `~/nx-sk/`，可用 `NX_SK_HOME` 覆盖 |
 | 状态文件 | `~/nx-sk/store.json`，可用 `NX_SK_STORE` 覆盖；**原子写**（临时文件 + rename） |
 | 密文密钥 | 环境变量 `NX_SK_PASSPHRASE`（scrypt 派生 + 盐）优先，否则 `~/nx-sk/.vaultkey`（32 字节随机，0600） |
-| 快照 | 每次破坏性写入前整库备份到 `~/nx-sk/backup/`（最多 20 份），拷回即回滚 |
+| 迁移 | 破坏性删除**不留本地快照**：先 `nx-sk transfer export` 导一份，导出的包就是唯一回退手段 |
 | 导出 | `~/nx-sk/export/`，默认不含凭据明文 |
 | 附件 | `~/nx-sk/files/` 存二进制原件，元数据在 `store.json` 的 `files`（sha256 去重；条目 `file` 字段存附件 id 即建立链接；`file restore` 可逆） |
-| 加密备份 | `.nxskbak`：整库经 scrypt(口令)+AES-256-GCM 加密，口令不落盘；附件台账恒随包（`--with-files` 连原件）；导入缺省「合并」只增不减，`--replace` 整份替换；动手前自动留安全快照 |
+| 加密导出 | `transfer` 的 `--passphrase`：内部数据经 scrypt(口令)+AES-256-GCM 加密成 `payload.enc`，再套一层**合法 ZIP**（外层能正常打开，不会报「文件夹无效」）；口令不落盘，导入时缺口令明确提示 |
 | 服务绑定 | 默认 `127.0.0.1`，不暴露到局域网；写操作校验 `Origin` |
 | 数据损坏 | `store.json` 解析失败会先被改名为 `.corrupt-<时间戳>.json`，不会静默覆盖 |
 

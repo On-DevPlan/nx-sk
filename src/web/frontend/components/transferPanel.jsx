@@ -23,7 +23,7 @@
 //   - 主操作（口令 + 导出）放在卡片头部，条目再多也不用滚动去找按钮。
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api/client.js';
-import { checkZipFile, fmtBytes, isEncryptedZip, postZip } from '../api/zip.js';
+import { checkZipFile, fmtBytes, isNeedPassphraseError, postZip } from '../api/zip.js';
 import { useStore } from '../store.jsx';
 import { Empty, Modal, Tag } from './ui.jsx';
 
@@ -51,6 +51,8 @@ export default function TransferPanel() {
   const [entries, setEntries] = useState({});
   const [passphrase, setPassphrase] = useState('');
   const [passphrase2, setPassphrase2] = useState('');
+  // 是否携带附件原件：勾上包会大（截图/PDF 都在里面），不勾只有数据本体
+  const [withFiles, setWithFiles] = useState(true);
   const [busy, setBusy] = useState(false);
   const [zip, setZip] = useState(null);
   const [ask, setAsk] = useState(null); // 加密包先问口令：{ fileName, buffer }
@@ -144,6 +146,7 @@ export default function TransferPanel() {
       const blob = await postJsonZip('/api/bundle/export.zip', {
         selection: list,
         ...(pw ? { passphrase: pw } : {}),
+        ...(withFiles ? {} : { 'no-files': true }),
       });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
@@ -153,7 +156,7 @@ export default function TransferPanel() {
       // 立刻 remove 会让 Chromium 把下载判成取消；留给它一拍
       setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
       setPassphrase(''); setPassphrase2('');
-      toast(`已开始下载：${list.length} 个栏目${pw ? ' · 已加密' : ' · 未设口令（明文包）'}`);
+      toast(`已开始下载：${list.length} 个栏目${pw ? ' · 已加密' : ' · 未设口令（明文包）'}${withFiles ? '' : ' · 不含附件'}`);
     } catch (e) {
       toast(e.message || String(e), 'bad');
     } finally {
@@ -184,15 +187,16 @@ export default function TransferPanel() {
       toast(`读不到文件：${e.message}`, 'bad');
       return;
     }
-    // 加密包：先问口令，别把「缺口令」当成「包坏了」报出来
-    if (isEncryptedZip(buffer)) {
-      setAsk({ fileName: file.name, buffer });
-      setAskPw('');
-      return;
-    }
+    // 先按明文试一次：加密包由服务端识片（外层 ZIP 里有 payload.enc），
+    // 它会说「缺口令」——那时再问，别把「缺口令」当成「包坏了」弹出去。
     try {
       await openZip(file.name, buffer, '');
     } catch (e) {
+      if (isNeedPassphraseError(e)) {
+        setAsk({ fileName: file.name, buffer });
+        setAskPw('');
+        return;
+      }
       toast(e.message || String(e), 'bad');
     }
   });
@@ -332,6 +336,11 @@ export default function TransferPanel() {
               </div>
             </div>
           ) : null}
+
+          <label className="inline pickall" title="不勾 = 只带数据本体（栏目/条目/字段），附件原件不进包——包小很多，但导入后图片/文档引用会指向不存在的附件">
+            <input type="checkbox" checked={withFiles} onChange={(e) => setWithFiles(e.target.checked)} />
+            <span>携带附件原件{withFiles ? '' : '（包内只有数据）'}</span>
+          </label>
 
           <p className="hint tp-tip">
             填了口令 = 整包 AES-256-GCM 加密，导入时要同一个口令；口令不在文件里，忘了打不开。

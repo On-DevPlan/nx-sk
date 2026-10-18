@@ -3,9 +3,12 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api/client.js';
 import { fileToDataUrl, listAttachments, mergeFiles, refreshAttachments } from '../api/files.js';
-import { Copyable } from './ui.jsx';
+import { Copyable, copyText } from './ui.jsx';
 import { Lightbox } from './lightbox.jsx';
-import { imageRefs, linkCount, tokenizeMd } from '../mdInline.js';
+import { MdView, imageRecord } from './mdView.jsx';
+import { imageRefs, linkCount } from '../mdInline.js';
+import { smartStats } from '../mdSmart.js';
+import { taskStats, toggleTaskAtLine } from '../mdSource.js';
 import { useStore } from '../store.jsx';
 
 /**
@@ -178,20 +181,23 @@ export function FileFieldControl({ def, value, onChange }) {
 }
 
 /**
- * 图文字段（`type: 'md'`）：一段 markdown 文字，里面可以嵌图片。
+ * 图文字段（`type: 'md'`）：一段 markdown 文字，里面可以嵌图片、写待办。
  *
  * 存在理由：部署 SOP 这类内容天然是「说明 + 截屏」混排。用 textarea 存不了图；
  * 用 file 字段又只有一堆附件、没有步骤叙述。所以这里让**正文即真相**：
  *
  *   ![截图](f_xxx)      ← 标准 markdown，导出/贴进仓库 README 都能直接渲染
+ *   - [ ] 改完配置重启   ← 任务列表：预览里点一下勾，写回正文的 `[x]`
  *
- * 三条交互：
+ * 四条交互：
  *   1. 贴图不离场：Ctrl+V / 拖进来 / 选文件 → 上传到附件库 → 插到光标处；
  *   2. 图片统一列在下方：长文里不用翻找，点开就是大图（滚轮缩放、拖动看细节）；
- *   3. 正文下方就地预览：贴完立刻能确认是不是要的那张，正文里的 http 网址直接可点。
+ *   3. 正文下方就地预览：标题/列表/表格/代码块都按 markdown 渲染，
+ *      http 网址直接可点，待办勾选框可直接点（改的是正文，不是另一份状态）；
+ *   4. 阅读优先：有内容时先给预览，点「编辑正文」才展开输入框。
  *
- * 行内解析（图片 / 链接）在 `../mdInline.js`：它是纯函数，能被单测钉住；
- * 这里只管把 token 渲染成 DOM。
+ * 渲染本身交给 `./mdView.jsx`（react-markdown + remark-gfm）；
+ * 这里只管「正文怎么被编辑」（上传、插入、写回），以及下方图库。
  */
 
 /** 粘贴来的截图往往没有可用文件名。这个名字会进正文说明文字，也进附件库。 */
@@ -204,18 +210,6 @@ function pastedName(file, index = 0) {
   const d = new Date();
   const p = (n) => String(n).padStart(2, '0');
   return `粘贴截图-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}${index ? `-${index + 1}` : ''}${ext}`;
-}
-
-/** 外链图片没有附件库记录，就地拼一个「同形状」的对象，预览/放大镜都按同一套逻辑走。 */
-function remoteRecord(ref) {
-  return { id: ref.id, name: ref.alt || ref.id, url: ref.id, remote: true };
-}
-
-function recordOf(ref, byId) {
-  if (ref.remote) return remoteRecord(ref);
-  // token 用 `src`、附件引用用 `id`，两个都认：只认一个的话，
-  // 另一种形状会拿 undefined 查表，图明明在库里也报「缺失」。
-  return byId.get(ref.id ?? ref.src) || null;
 }
 
 export function MdImageFieldControl({ def, value, onChange }) {
@@ -259,6 +253,8 @@ export function MdImageFieldControl({ def, value, onChange }) {
   const byId = useMemo(() => new Map((lib || []).map((f) => [f.id, f])), [lib]);
   const refs = useMemo(() => imageRefs(text), [text]);
   const links = useMemo(() => linkCount(text), [text]);
+  const tasks = useMemo(() => taskStats(text), [text]);
+  const smart = useMemo(() => smartStats(text), [text]);
   // 同一张图在正文里出现两次只列一次：下方是「这个字段用到了哪些图」，不是出现次数
   const uniqueRefs = useMemo(() => {
     const seen = new Set();
@@ -353,45 +349,26 @@ export function MdImageFieldControl({ def, value, onChange }) {
     if (rec) insert(`![${rec.name}](${rec.id})`);
   };
 
-  const openZoom = (rec) => setZoom(rec);
+  const openZoom = useCallback((rec) => setZoom(rec), []);
 
-  const preview = useMemo(() => tokenizeMd(text).map((t, i) => {
-    if (t.type === 'text') return <span key={i} className="md-plain">{t.text}</span>;
+  // 预览里勾选待办 = 改正文那一行。正文是唯一真相：没有第二份「勾选状态」，
+  // 所以刷新、导出、CLI 读到的都是勾完之后的样子。
+  const toggleTask = useCallback((line) => onChange(toggleTaskAtLine(text, line)), [text, onChange]);
 
-    if (t.type === 'link') {
-      return (
-        <a
-          key={i}
-          className={`md-link${t.bare ? ' bare' : ''}`}
-          href={t.href}
-          target="_blank"
-          rel="noopener noreferrer"
-          title={`在新标签页打开：${t.href}`}
-        >
-          {t.text}
-        </a>
-      );
-    }
+  // 正文里的 IP 点击即复制：反馈与 Copyable 同一套，用户不用再去别处找「复制」按钮
+  const copyMd = useCallback(async (value) => {
+    const ok = await copyText(value);
+    if (ok) toast(`已复制 ${value}`);
+    else toast('复制失败：浏览器拒绝了剪贴板访问', 'bad');
+  }, [toast]);
 
-    const rec = recordOf(t, byId);
-    if (!rec) {
-      return (
-        <span key={i} className="md-missing" title="这条引用指向的附件已不在库里（可能已在附件中心删除）；重新粘贴一次会得到新引用">
-          [图片缺失: {t.src}]
-        </span>
-      );
-    }
-    return (
-      <img
-        key={i}
-        className="md-inline"
-        src={rec.url}
-        alt={t.alt || rec.name}
-        title={rec.remote ? '外链图片（点击放大）' : '点击放大'}
-        onClick={() => openZoom(rec)}
-      />
-    );
-  }), [text, byId]);
+  // 一行说清「这篇里有什么」：图片张数 / 待办进度 / 可点链接数（含自动补协议的裸域名）/ IP 数
+  const stats = [
+    `图片 ${uniqueRefs.length} 张`,
+    tasks.total ? `待办 ${tasks.done}/${tasks.total}` : '',
+    links + smart.url ? `链接 ${links + smart.url} 个` : '',
+    smart.copy ? `IP ${smart.copy} 个（点击复制）` : '',
+  ].filter(Boolean).join(' · ');
 
   return (
     <div
@@ -409,7 +386,7 @@ export function MdImageFieldControl({ def, value, onChange }) {
           maxHeight={360}
           textareaRef={taRef}
           onPaste={onPaste}
-          placeholder="步骤说明…　截图直接 Ctrl+V 粘进来，或把图片拖到这块区域"
+          placeholder="步骤说明…　截图直接 Ctrl+V 粘进来；裸 IP 点击即复制，网址点击直接打开"
         />
       ) : null}
 
@@ -423,8 +400,7 @@ export function MdImageFieldControl({ def, value, onChange }) {
             {lib.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
           </select>
           <span className="hint">
-            语法 <code>![说明](附件id)</code>　图片 {uniqueRefs.length} 张
-            {links ? `　链接 ${links} 个（预览里可直接点）` : ''}
+            语法 <code>![说明](附件id)</code>　待办 <code>- [ ]</code>　{stats}
           </span>
           <button type="button" className="btn small ghost" onClick={() => setEditing(false)}>完成</button>
           <input
@@ -445,7 +421,7 @@ export function MdImageFieldControl({ def, value, onChange }) {
         <div className="md-tools">
           <button type="button" className="btn small ghost" onClick={() => setEditing(true)}>编辑正文</button>
           <span className="hint">
-            {text.length} 字 · 图片 {uniqueRefs.length} 张{links ? ` · 链接 ${links} 个（可直接点）` : ''}　只读预览
+            {text.length} 字 · {stats}　只读预览（勾选框可点，IP 点击复制）
           </span>
         </div>
       )}
@@ -453,33 +429,39 @@ export function MdImageFieldControl({ def, value, onChange }) {
       <div className={`md-preview${editing ? '' : ' reading'}`}>
         {!libReady && refs.length
           ? <span className="hint">正在加载图片…</span>
-          : text.trim() ? preview : <span className="hint">（还没有内容）</span>}
+          : text.trim()
+            ? <MdView text={text} byId={byId} onOpenImage={openZoom} onToggleTask={toggleTask} onCopy={copyMd} />
+            : <span className="hint">（还没有内容）</span>}
       </div>
 
-      <div className="md-gallery">
-        <div className="md-gallery-head">
-          <span>图片（{uniqueRefs.length}）</span>
-          <span className="hint">点击放大 · 滚轮缩放 · 拖动看细节</span>
+      {/* 阅读态 + 正文里没有图：这块只剩「图片（0）」和一句空提示，是纯噪音（上线清单这种
+          纯文字字段尤其明显）。编辑态留着 —— 它是「贴进来的图会出现在这里」的落点提示。 */}
+      {uniqueRefs.length || editing ? (
+        <div className="md-gallery">
+          <div className="md-gallery-head">
+            <span>图片（{uniqueRefs.length}）</span>
+            <span className="hint">点击放大 · 滚轮缩放 · 拖动看细节</span>
+          </div>
+          {uniqueRefs.length ? (
+            !libReady ? <span className="hint">正在加载图片…</span> : (
+              <div className="md-thumbs">
+                {uniqueRefs.map((r) => {
+                  const rec = imageRecord(byId, r.id, r.alt);
+                  if (!rec) {
+                    return <span key={r.id} className="md-thumb missing" title="这条引用指向的附件已不在库里（可能已在附件中心删除）">缺</span>;
+                  }
+                  return (
+                    <button type="button" key={r.id} className="md-thumb" title={`${rec.name}（点击放大）`} onClick={() => openZoom(rec)}>
+                      <img src={rec.url} alt={rec.name} />
+                      <span className="md-thumb-name">{r.alt || rec.name}{r.remote ? '（外链）' : ''}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )
+          ) : <span className="hint">正文里还没有图片。粘贴/拖入的图会出现在这里。</span>}
         </div>
-        {uniqueRefs.length ? (
-          !libReady ? <span className="hint">正在加载图片…</span> : (
-            <div className="md-thumbs">
-              {uniqueRefs.map((r) => {
-                const rec = recordOf(r, byId);
-                if (!rec) {
-                  return <span key={r.id} className="md-thumb missing" title="这条引用指向的附件已不在库里（可能已在附件中心删除）">缺</span>;
-                }
-                return (
-                  <button type="button" key={r.id} className="md-thumb" title={`${rec.name}（点击放大）`} onClick={() => openZoom(rec)}>
-                    <img src={rec.url} alt={rec.name} />
-                    <span className="md-thumb-name">{r.alt || rec.name}{r.remote ? '（外链）' : ''}</span>
-                  </button>
-                );
-              })}
-            </div>
-          )
-        ) : <span className="hint">正文里还没有图片。粘贴/拖入的图会出现在这里。</span>}
-      </div>
+      ) : null}
 
       {def.hint ? <span className="hint">{def.hint}</span> : null}
       {zoom ? <Lightbox item={zoom} onClose={() => setZoom(null)} /> : null}

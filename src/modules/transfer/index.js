@@ -22,10 +22,11 @@ export default {
         out: { type: 'string', hint: '保存路径（CLI）；缺省写到 ~/nx-sk/export/' },
         entries: { type: 'string', hint: '只导出这些条目：id 或标题，逗号分隔（缺省全部）' },
         passphrase: { type: 'string', hint: '加密口令（留空 = 明文包；也可用环境变量 NX_SK_TRANSFER_PASSPHRASE）' },
+        'no-files': { type: 'boolean', hint: '不带附件原件（包更小；导入后引用会指向不存在的附件）' },
       },
       raw: true,
-      run: (ctx) => service.exportToFile(ctx.ref, { out: ctx.out, entryIds: splitList(ctx.entries), passphrase: pwOf(ctx) }),
-      serveRaw: (ctx, frame) => service.serveExportZip(ctx.ref, { ...frame, entryIds: splitList(ctx.entries), passphrase: pwOf(ctx) }),
+      run: (ctx) => service.exportToFile(ctx.ref, { out: ctx.out, entryIds: splitList(ctx.entries), passphrase: pwOf(ctx), includeFiles: ctx['no-files'] !== true }),
+      serveRaw: (ctx, frame) => service.serveExportZip(ctx.ref, { ...frame, entryIds: splitList(ctx.entries), passphrase: pwOf(ctx), includeFiles: ctx['no-files'] !== true }),
       render: (d) => service.renderExportZip(d),
     },
     {
@@ -62,10 +63,11 @@ export default {
         out: { type: 'string', hint: '保存路径（CLI）；缺省 ~/nx-sk/export/' },
         'dry-run': { type: 'boolean', hint: '只算体积与数量，不写盘' },
         passphrase: { type: 'string', hint: '加密口令（留空 = 明文包；也可用环境变量 NX_SK_TRANSFER_PASSPHRASE）' },
+        'no-files': { type: 'boolean', hint: '不带附件原件（包更小；导入后引用会指向不存在的附件）' },
       },
       raw: true,
-      run: (ctx) => service.exportBundleToFile({ sections: ctx.selection ?? ctx.sections, out: ctx.out, dryRun: ctx['dry-run'] === true, passphrase: pwOf(ctx) }),
-      serveRaw: (ctx, frame) => service.serveBundleZip({ sections: ctx.selection ?? ctx.sections, res: frame.res, passphrase: pwOf(ctx) }),
+      run: (ctx) => service.exportBundleToFile({ sections: ctx.selection ?? ctx.sections, out: ctx.out, dryRun: ctx['dry-run'] === true, passphrase: pwOf(ctx), includeFiles: ctx['no-files'] !== true }),
+      serveRaw: (ctx, frame) => service.serveBundleZip({ sections: ctx.selection ?? ctx.sections, res: frame.res, passphrase: pwOf(ctx), includeFiles: ctx['no-files'] !== true }),
       render: (d) => service.renderBundleExport(d),
     },
     {
@@ -101,9 +103,9 @@ export default {
       run: (ctx) => {
         const opts = { dryRun: ctx['dry-run'] === true, passphrase: pwOf(ctx) };
         if (ctx.__body) {
-          return service.importFromBuffer(null, ctx.__body, { ...opts, fileName: ctx.__fileName || 'upload.zip' });
+          return service.importAuto(ctx.__body, { ...opts, fileName: ctx.__fileName || 'upload.zip' });
         }
-        return service.importFromFile(null, { ...opts, file: ctx.file });
+        return service.importAuto(null, { ...opts, file: ctx.file });
       },
       render: (d) => service.renderImport(d),
     },

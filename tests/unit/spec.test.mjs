@@ -160,10 +160,11 @@ test('v1 → v3 迁移：密钥栏目缩成 KV 表，旧值不删，且先留原
   const onDisk = JSON.parse(await fsp.readFile(p, 'utf8'));
   assert.equal(onDisk.version, 3, '迁移要就地落盘（幂等靠这个）');
 
-  const before = (await fsp.readdir(join(dir, 'backup'))).length;
+  // 迁移副本目录从 backup 改名为 migrate（本地备份功能已删，这里只有迁移那一次性副本）
+  const before = (await fsp.readdir(join(dir, 'migrate'))).length;
   await loadStore(p);
-  const after = (await fsp.readdir(join(dir, 'backup'))).length;
-  assert.equal(after, before, '第二次读盘不该再迁移、再留快照');
+  const after = (await fsp.readdir(join(dir, 'migrate'))).length;
+  assert.equal(after, before, '第二次读盘不该再迁移、再留副本');
 });
 
 test('没有栏目可迁时不会瞎迁，版本号照常落到当前', () => {

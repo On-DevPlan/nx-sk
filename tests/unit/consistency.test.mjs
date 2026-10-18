@@ -385,7 +385,7 @@ function codeSpans(markdown) {
   return parts.join('\n');
 }
 
-test('反向：代码里的写命令都声明了 --dry-run，破坏性写命令留快照', async () => {
+test('反向：代码里的写命令都声明了 --dry-run；本地备份已删，不再留快照', async () => {
   const snapshots = [];
   const missingDryRun = [];
   for (const a of ACTIONS) {
@@ -397,10 +397,10 @@ test('反向：代码里的写命令都声明了 --dry-run，破坏性写命令�
     snapshots.push({ id: a.id, module: a.module, hasSnapshot: /snapshotStore|snapshot\(/.test(src), fnName });
   }
   assert.deepEqual(missingDryRun, [], `这些写命令缺 --dry-run: ${missingDryRun.join(', ')}`);
-  const destructive = snapshots.filter((s) => /remove|update|set/.test(s.id));
-  for (const s of destructive) {
-    const src = await readFile(join(ROOT, 'src/modules', s.module, 'service.js'), 'utf8');
-    assert.match(src, /snapshotStore\(/, `${s.module} 的破坏性写操作应先留快照`);
+  // 本地备份/快照机制已整个删除（用户确认：「又有文件导出了，没必要备份逻辑」）。
+  // 这里反向键住：任何服务都不该再出现 snapshotStore，否则就是自相矛盾的半件产品。
+  for (const s of snapshots) {
+    assert.ok(!s.hasSnapshot, `${s.module} 还在留快照（snapshotStore 应已全部删除）`);
   }
 });
 

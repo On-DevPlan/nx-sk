@@ -496,7 +496,87 @@ a.file-name:hover { text-decoration: underline; }
 }
 /* 阅读态（没展开输入框）：给正文更多高度——这时候看的就是它，不该只有 340px */
 .md-preview.reading { max-height: 560px; }
-.md-plain { white-space: pre-wrap; }
+
+/* ── markdown 正文（react-markdown 渲染出来的元素）──
+ * 面板的排版基调是「12px / 行高 1.6 / 只用 1px 浅线」，这里全部照抄：
+ * 标题靠字重与字号分档，不靠颜色；代码块/表格用浅底与细线，不加投影。 */
+.md-body { min-width: 0; word-break: break-word; }
+.md-body > :first-child { margin-top: 0; }
+.md-body > :last-child { margin-bottom: 0; }
+.md-body p { margin: 0 0 8px; }
+.md-body h1, .md-body h2, .md-body h3, .md-body h4, .md-body h5, .md-body h6 {
+  margin: 14px 0 6px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+.md-body h1 { font-size: 17px; }
+.md-body h2 { font-size: 15px; }
+.md-body h3 { font-size: 13.5px; }
+.md-body h4, .md-body h5, .md-body h6 { font-size: 12.5px; color: var(--mid); }
+.md-body ul, .md-body ol { margin: 0 0 8px; padding-left: 20px; }
+.md-body li { margin: 2px 0; }
+/* 列表项里的段落不要额外留白，否则每个 li 之间会拉开一大截 */
+.md-body li > p { margin: 0; }
+.md-body li > p + ul, .md-body li > p + ol { margin-top: 2px; }
+/* 任务列表：去掉项目符号（有序列表的序号要留着），勾选框与文字对齐。
+ * 注意**不要**动 padding-left：嵌套的待办靠它缩进，压平了就分不出层级。 */
+.md-body ul.contains-task-list,
+.md-body ul.contains-task-list > li.task-list-item { list-style: none; }
+.md-body input.md-task {
+  width: 13px;
+  height: 13px;
+  margin: 0 6px 0 0;
+  vertical-align: -2px;
+  cursor: pointer;
+  accent-color: var(--ink);
+}
+.md-body input.md-task:disabled { cursor: default; }
+.md-body code {
+  background: var(--soft-2);
+  border-radius: 4px;
+  padding: 0 4px;
+  font-size: 11.5px;
+}
+.md-body pre {
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  background: var(--paper);
+  border: var(--border);
+  border-radius: 6px;
+  overflow: auto;
+}
+.md-body pre code { background: none; padding: 0; font-size: 11.5px; }
+.md-body blockquote {
+  margin: 0 0 8px;
+  padding: 2px 0 2px 10px;
+  border-left: 2px solid var(--soft-2);
+  color: var(--mid);
+}
+.md-body hr { border: 0; border-top: var(--border); margin: 10px 0; }
+.md-body strong { font-weight: 600; }
+.md-body del { color: var(--mid); }
+/* 表格可能比面板宽：外面套一层横向滚动，别把整个卡片撑出横向滚动条 */
+.md-table { margin: 0 0 8px; overflow-x: auto; }
+.md-body table { border-collapse: collapse; font-size: 11.5px; }
+.md-body th, .md-body td { border: var(--border); padding: 3px 8px; text-align: left; vertical-align: top; }
+.md-body th { background: var(--soft-2); font-weight: 600; }
+/* 不可点的「链接」（`[说明](f_xxx)` 查不到附件时）：按原文渲染，别给假的可点暗示 */
+.md-link-dead { color: inherit; }
+/* 正文里的裸 IP（含端口）：点一下复制。用**虚下划线**与链接的实下划线区分 ——
+ * 一眼就能看出「这个点了是复制，那个点了是打开」。 */
+.md-body .md-copy {
+  font-family: ui-monospace, Consolas, "Courier New", monospace;
+  padding: 0 3px;
+  border: 0;
+  border-bottom: 1px dashed var(--mid);
+  border-radius: 3px;
+  background: none;
+  color: var(--ink);
+  cursor: copy;
+  word-break: break-all;
+}
+.md-body .md-copy:hover { background: var(--soft-2); border-bottom-color: var(--ink); }
+.md-body .md-copy:focus-visible { outline: 1px solid var(--mid); outline-offset: 1px; }
 .md-inline {
   display: block;
   max-width: 100%;
@@ -759,7 +839,26 @@ a.file-name:hover { text-decoration: underline; }
 .conflict-row .title { font-weight: 600; }
 .conflict-row .ok { color: var(--ink); }
 
-/* drop-box + preview row: shared by both columns */
+/* 拖入 ZIP：整页遮罩 + 一句提示；pointer-events:none 让 drop 落到下面容器 */
+.drop-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 55;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(20, 22, 26, .38);
+  pointer-events: none;
+}
+.drop-mask > div {
+  padding: 18px 28px;
+  border-radius: 12px;
+  background: var(--paper);
+  border: var(--border);
+  font-size: 14px;
+}
+
+/* 拖入区与预览里的栏目行：面板左右两栏都用得到，单独放一块 */
 .drop-box {
   display: flex;
   flex-direction: column;

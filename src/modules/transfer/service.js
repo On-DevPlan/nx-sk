@@ -17,14 +17,14 @@ import { basename, dirname, extname, join, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 import { createZip, readZip } from '../../core/zip.js';
 import { isEncryptedPackage, openPackage, sealPackage } from '../../core/securezip.js';
-import { loadStore, mutateStore, snapshotStore } from '../../core/store.js';
+import { loadStore, mutateStore } from '../../core/store.js';
 import { displayPath, exportDir, VERSION } from '../../core/paths.js';
 import { findSection, isSensitiveField, sectionNames } from '../../core/fields.js';
 import { decryptValue, isCipherBlob } from '../../core/crypto.js';
 import { resolveVaultKey } from '../../core/vault.js';
 import { CATEGORY_IDS, fileIdsOf, fileRecordAbs, findFileRecord, importContent } from '../../core/attachments.js';
 import { mdImageIds } from '../../core/mdimages.js';
-import { badInput, notFound } from '../../core/errors.js';
+import { badInput, blocked, notFound } from '../../core/errors.js';
 import { nowIso, stamp } from '../../core/ids.js';
 import { ensureDir, fileSize, writeAtomic } from '../../core/fsx.js';
 import { addEntry, updateEntry } from '../entries/service.js';
@@ -85,7 +85,7 @@ const extensionOf = (rec) => rec.ext || extname(rec.name || '').toLowerCase();
 /**
  * 生成栏目 ZIP（内存里）。返回 { buffer, fileName, stats }。
  */
-export async function buildSectionZip(ref, { entryIds, passphrase } = {}) {
+export async function buildSectionZip(ref, { entryIds, passphrase, includeFiles = true } = {}) {
   const store = await loadStore();
   const section = findSection(store, ref);
   if (!section) throw notFound(`找不到栏目: ${ref} —— 现有: ${sectionNames(store)}`);
@@ -119,6 +119,16 @@ export async function buildSectionZip(ref, { entryIds, passphrase } = {}) {
   for (const id of referencedFileIds(section, rows)) {
     const rec = findFileRecord(store, id);
     if (!rec) { missingFiles += 1; continue; }
+    const zipPath = `attachments/${rec.id}${extensionOf(rec)}`;
+    // 不带附件：台账条目仍记录（导入时知道有哪些引用），但不打包原件、
+    // 也不写 zipPath —— 预览里据此提示「N 个附件未随包」。
+    if (!includeFiles) {
+      fileRecords.push({
+        id: rec.id, name: rec.name, ext: rec.ext || '', category: safeCategory(rec.category),
+        bytes: Number(rec.bytes) || 0, sha256: rec.sha256 || '', zipPath: '', bundled: false,
+      });
+      continue;
+    }
     let data;
     try {
       data = await fsp.readFile(fileRecordAbs(rec));
@@ -126,10 +136,10 @@ export async function buildSectionZip(ref, { entryIds, passphrase } = {}) {
       missingFiles += 1;
       continue;
     }
-    const zipPath = `attachments/${rec.id}${extensionOf(rec)}`;
     fileRecords.push({
       id: rec.id, name: rec.name, ext: rec.ext || '', category: safeCategory(rec.category),
       bytes: data.length, sha256: rec.sha256 || createHash('sha256').update(data).digest('hex'), zipPath,
+      bundled: true,
     });
     zipEntries.push({ name: zipPath, data });
   }
@@ -172,9 +182,11 @@ export async function buildSectionZip(ref, { entryIds, passphrase } = {}) {
     { name: 'README.txt', data: readme },
     ...zipEntries,
   ]);
-  // 口令只作用在**最外层**：附件与 manifest 一起被加密，包里任何文件名都不泄露。
+  // 加密时**先加密内部、再打 zip**：外层始终是合法 ZIP，
+  // 所以用系统自带的「压缩文件夹」也能打开（里面只有一个看不懂的 payload.enc），
+  // 不会弹「文件夹无效」。反过来说，只有 nx-sk 能解开它。
   const encrypted = !!String(passphrase ?? '');
-  const buffer = encrypted ? sealPackage(plain, passphrase) : plain;
+  const buffer = encrypted ? wrapEncrypted(plain, passphrase, readme) : plain;
 
   return {
     buffer,
@@ -188,8 +200,8 @@ export async function buildSectionZip(ref, { entryIds, passphrase } = {}) {
 }
 
 /** CLI：写到磁盘（缺省 ~/nx-sk/export）。 */
-export async function exportToFile(ref, { out, entryIds, passphrase } = {}) {
-  const { buffer, fileName, stats } = await buildSectionZip(ref, { entryIds, passphrase });
+export async function exportToFile(ref, { out, entryIds, passphrase, includeFiles } = {}) {
+  const { buffer, fileName, stats } = await buildSectionZip(ref, { entryIds, passphrase, includeFiles });
   let target = out ? resolve(out) : join(exportDir(), fileName);
   // --out 指向已存在的目录时自动拼文件名；否则按文件路径处理
   try {
@@ -202,8 +214,8 @@ export async function exportToFile(ref, { out, entryIds, passphrase } = {}) {
 }
 
 /** HTTP raw：直接回 zip 流。 */
-export async function serveExportZip(ref, { res, entryIds, passphrase } = {}) {
-  const { buffer, fileName, stats } = await buildSectionZip(ref, { entryIds, passphrase });
+export async function serveExportZip(ref, { res, entryIds, passphrase, includeFiles } = {}) {
+  const { buffer, fileName, stats } = await buildSectionZip(ref, { entryIds, passphrase, includeFiles });
   res.writeHead(200, {
     'content-type': 'application/zip',
     'content-length': buffer.length,
@@ -214,24 +226,80 @@ export async function serveExportZip(ref, { res, entryIds, passphrase } = {}) {
   res.end(buffer);
 }
 
+// 加密包的外层入口名。放在 ZIP 里而不是把整个文件变成密文 ——
+// 这样外层始终是合法 ZIP（系统「压缩文件夹」能打开，只会看到一个看不懂的 payload.enc），
+// 不会弹「文件夹无效」；同时也让「是不是加密包」的判定只需要看条目名，不用嗅探 magic。
+const ENC_ENTRY = 'payload.enc';
+
+/** 把内部 ZIP 用口令加密后，再套一个合法 ZIP。innerReadme 用来说明这个包是什么。 */
+function wrapEncrypted(innerZip, passphrase, innerReadme) {
+  const readme = [
+    'nx-sk 加密导出包',
+    '',
+    '这个 ZIP 里只有一个 payload.enc —— 真正的数据（栏目、条目、附件）被 AES-256-GCM 加密过，',
+    '只有 nx-sk 能解开。用系统自带的压缩文件夹打开也只能看到这个文件，属正常。',
+    '',
+    '导入：面板「导出导入」页把这个文件拖进去，输入导出时设的口令；或',
+    '  nx-sk transfer import <栏目> --file <本文件> --passphrase <口令> --dry-run',
+    '',
+    '口令不在文件里，忘了就打不开。',
+    '',
+    '── 以下是无口令时本包内部的说明（同样被加密） ──',
+    innerReadme,
+  ].join('\n');
+  return createZip([
+    { name: ENC_ENTRY, data: sealPackage(innerZip, passphrase) },
+    { name: 'README.txt', data: readme },
+  ]);
+}
+
+/** 需要口令的判定：外层有 payload.enc。旧版（0.11.x）把整个文件做成密文，也一并认。 */
+export function needsPassphrase(buffer) {
+  if (isEncryptedPackage(buffer)) return true; // 旧格式：文件本身就是密文
+  try {
+    return readZip(buffer).some((f) => f.name === ENC_ENTRY);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 取出**内部 ZIP**：明文包原样返回；加密包先解口令。
+ * 顺序不能反——必须「先解密内部，再当 zip 读」，这正是导出的逆过程。
+ */
+function innerZipOf(buffer, passphrase) {
+  if (isEncryptedPackage(buffer)) {
+    // 旧格式（整个文件是密文）：直接解
+    return readZip(openPackage(buffer, passphrase));
+  }
+  const files = readZip(buffer);
+  const enc = files.find((f) => f.name === ENC_ENTRY);
+  if (!enc) return files; // 明文包
+  if (!String(passphrase ?? '')) throw blocked(NEED_PW_MESSAGE);
+  return readZip(openPackage(enc.data, passphrase));
+}
+
+const NEED_PW_MESSAGE = '这个包已加密，请输入导出时设置的口令';
+
 // 同一个 buffer 在一次请求里会被预览和应用各解析一次；按 buffer 缓存，
 // 避免几百 MB 的包被解两遍。
 const bundleCache = new WeakMap();
 
+/**
+ * 归一成「ZIP 条目列表」：传 buffer 就走解密封装，传已经解开的列表就原样用。
+ * applyImport 已经解过一次，把列表传进来避免同一个大包被解两遍。
+ */
+function asZipFiles(bufferOrFiles, passphrase) {
+  return Array.isArray(bufferOrFiles) ? bufferOrFiles : innerZipOf(bufferOrFiles, passphrase);
+}
+
 function parseBundle(buffer, fileName, passphrase) {
-  const encrypted = isEncryptedPackage(buffer);
-  // 先解信封：明文包原样返回，加密包在这里校验口令（错了就抛，不会走到后面的解析）。
-  const plain = openPackage(buffer, passphrase);
-  // 缓存只在**明文包**上用。密文包的解析结果依赖口令，按 buffer 缓存会让后续
+  // 先取内部 ZIP（加密包在这一步校验口令，错了就抛，不会走到后面的解析）
+  const files = asZipFiles(buffer, passphrase);
+  // 缓存只在**明文包**上用。加密包的解析结果依赖口令，按 buffer 缓存会让后续
   // 「没给口令」的调用命中别人解出来的结果——等于把口令检查绕过去了。
-  const hit = encrypted ? null : bundleCache.get(buffer);
+  const hit = isEncryptedPackage(buffer) ? null : bundleCache.get(buffer);
   if (hit) return hit;
-  let files;
-  try {
-    files = readZip(plain);
-  } catch (e) {
-    throw badInput(`ZIP 解析失败：${e.message}`);
-  }
   const map = new Map(files.map((f) => [f.name, f.data]));
   const raw = map.get('manifest.json');
   if (!raw) throw badInput('ZIP 里没有 manifest.json —— 不是 nx-sk 栏目导出包');
@@ -248,8 +316,11 @@ function parseBundle(buffer, fileName, passphrase) {
   if (!manifest.section || !Array.isArray(manifest.entries) || !Array.isArray(manifest.files)) {
     throw badInput('manifest.json 结构不完整（缺 section / entries / files）');
   }
-  const parsed = { manifest, map, fileName: fileName || 'upload.zip', encrypted };
-  if (!encrypted) bundleCache.set(buffer, parsed);
+  const enc = needsPassphrase(buffer);
+  const parsed = { manifest, map, fileName: fileName || 'upload.zip', encrypted: enc };
+  // 缓存只存**明文包**：加密包的解析结果依赖口令，按 buffer 缓存会让后续
+  // 「没给口令」的调用命中别人解出来的结果——等于把口令检查绕过去。
+  if (!enc) bundleCache.set(buffer, parsed);
   return parsed;
 }
 
@@ -267,8 +338,10 @@ const entryTitleIndex = (entries) => {
  * 预览导入：**不落盘**，只回答「会变成什么」。
  * 冲突、字段缺口、附件去重、打码凭据都在这里算清楚，UI 直接展示。
  */
-export async function previewImport(ref, buffer, { fileName, passphrase } = {}) {
-  const { manifest, map, encrypted } = parseBundle(buffer, fileName, passphrase);
+export async function previewImport(ref, buffer, { fileName, passphrase, encrypted } = {}) {
+  const parsed = parseBundle(buffer, fileName, passphrase);
+  const { manifest, map } = parsed;
+  const isEnc = encrypted === undefined ? parsed.encrypted : !!encrypted;
   const store = await loadStore();
   const target = ref ? findSection(store, ref) : null;
   // 目标解析：显式 ref 优先；**不传 ref = 零配置** —— 按包内 id 新建，
@@ -338,7 +411,9 @@ export async function previewImport(ref, buffer, { fileName, passphrase } = {}) 
     }
   }
 
+  const notBundled = manifest.files.filter((f) => f.bundled === false).length;
   const warnings = [];
+  if (notBundled) warnings.push(`${notBundled} 个附件未随包（导出时没勾「携带附件」），导入后这些引用会指向不存在的附件`);
   if (!manifest.withSecrets && maskedSecrets) warnings.push(`${maskedSecrets} 个凭据字段在导出时已打码，导入后需要重新填写`);
   if (fileIssues.length) warnings.push(`${fileIssues.length} 个附件有问题（缺失或校验失败），将被跳过`);
   // 只有「显式指定了目标栏目」时这句才成立；零配置导入是新建，说「当前栏目」会误导
@@ -347,7 +422,7 @@ export async function previewImport(ref, buffer, { fileName, passphrase } = {}) 
   return {
     status: 'preview',
     fileName,
-    encrypted: !!encrypted,
+    encrypted: isEnc,
     exportedAt: manifest.exportedAt,
     appVersion: manifest.appVersion,
     withSecrets: !!manifest.withSecrets,
@@ -373,6 +448,8 @@ export async function previewImport(ref, buffer, { fileName, passphrase } = {}) 
       reused: reusedFiles,
       bytes: zipBytes,
       issues: fileIssues,
+      // 导出时选了「不带附件」：台账记录还在（知道有哪些引用），但没有原件可落
+      notBundled: manifest.files.filter((f) => f.bundled === false).length,
     },
     secrets: { sensitiveFields: sensitiveKeys.size, masked: maskedSecrets },
     warnings,
@@ -420,13 +497,12 @@ export async function applyImport(ref, buffer, { fileName, onConflict = 'skip', 
   if (!CONFLICT_POLICIES.includes(onConflict)) {
     throw badInput(`冲突策略只能是 ${CONFLICT_POLICIES.join(' / ')}，收到 ${JSON.stringify(onConflict)}`);
   }
-  // 解密只做一次：预览与随后的落盘都吃这份明文，否则同一个大包会被 GCM 解两遍。
-  const plain = openPackage(buffer, passphrase);
-  const encrypted = isEncryptedPackage(buffer);
-  const preview = await previewImport(ref, plain, { fileName });
+  // 解密只做一次：预览与随后的落盘都吃这份内部 ZIP，否则同一个大包会被解两遍。
+  const plain = innerZipOf(buffer, passphrase);
+  const encrypted = needsPassphrase(buffer);
+  const preview = await previewImport(ref, plain, { fileName, encrypted });
   const { manifest, map } = parseBundle(plain, fileName);
   const targetId = preview.section.targetId;
-  const snapshot = await snapshotStore('section-import');
 
   let sectionCreated = false;
   let fieldsAdded = [];
@@ -513,11 +589,38 @@ export async function applyImport(ref, buffer, { fileName, onConflict = 'skip', 
     files: { added: filesAdded, reused: filesReused, bytes: filesBytes },
     fieldsAdded,
     maskedSkipped,
-    snapshot,
     preview,
   };
 }
 
+
+/**
+ * 零配置导入：**单栏目包与全局包都吃**。
+ *
+ * 判据是解开外层之后里面有没有 bundle.json —— 用户不该记住「我这个包是哪种」，
+ * 尤其加密包在解开口令前看不出任何结构。全局包走逐栏目复用，单栏目包走原路径。
+ */
+export async function importAuto(buffer, { fileName, onConflict = 'skip', dryRun = false, passphrase, file } = {}) {
+  // CLI 传的是路径，HTTP 传的是 buffer —— 在这里归一，调用方不必分叉
+  if (!buffer && file) {
+    try {
+      buffer = await fsp.readFile(resolve(file));
+    } catch (e) {
+      throw badInput(`读不到 ZIP: ${file}（${e.code || e.message}）`);
+    }
+    fileName = fileName || basename(file);
+  }
+  const files = asZipFiles(buffer, passphrase);
+  const isBundle = files.some((f) => f.name === 'bundle.json');
+  if (!isBundle) {
+    return dryRun
+      ? previewImport(null, buffer, { fileName, passphrase })
+      : applyImport(null, buffer, { fileName, onConflict, passphrase });
+  }
+  return dryRun
+    ? previewBundle(buffer, { fileName, passphrase })
+    : applyBundle(buffer, { fileName, onConflict, passphrase });
+}
 
 /** CLI：从文件导入（预览 or 应用）。 */
 export async function importFromFile(ref, { file, onConflict = 'skip', dryRun = false, passphrase } = {}) {
@@ -562,12 +665,12 @@ function normalizeSelection(input) {
   return out;
 }
 
-export async function buildBundleZip({ sections, passphrase } = {}) {
+export async function buildBundleZip({ sections, passphrase, includeFiles = true } = {}) {
   const sel = normalizeSelection(sections);
   const parts = [];
   const index = [];
   for (const item of sel) {
-    const { buffer, stats } = await buildSectionZip(item.id, { entryIds: item.entries });
+    const { buffer, stats } = await buildSectionZip(item.id, { entryIds: item.entries, includeFiles });
     const zipPath = `sections/${stats.section}.zip`;
     parts.push({ name: zipPath, data: buffer });
     index.push({
@@ -593,7 +696,7 @@ export async function buildBundleZip({ sections, passphrase } = {}) {
     `凭据：包内为明文，保护靠口令`,
     '',
     '每个栏目在 sections/<id>.zip 里，结构与单栏目导出完全一致；bundle.json 只是索引。',
-    '导入：面板「导出与备份 → 导出导入」，或',
+    '导入：面板「导出导入」页把这个文件拖进去，或',
     '  nx-sk transfer bundle-import --file <本文件> --dry-run',
   ].join('\n');
   const plain = createZip([
@@ -601,10 +704,10 @@ export async function buildBundleZip({ sections, passphrase } = {}) {
     { name: 'README.txt', data: readme },
     ...parts,
   ]);
-  // 外层整体加密：内层各栏目 zip 不再单独加密（同一个口令没必要解 N 遍），
+  // 先加密内部、再打 zip：外层始终是合法 ZIP（系统压缩文件夹能打开，只看到 payload.enc），
   // 同时把「里面有哪些栏目」也一并藏起来。
   const encrypted = !!String(passphrase ?? '');
-  const buffer = encrypted ? sealPackage(plain, passphrase) : plain;
+  const buffer = encrypted ? wrapEncrypted(plain, passphrase, readme) : plain;
   return {
     buffer,
     fileName: `nx-sk-bundle-${stamp()}.zip`,
@@ -615,8 +718,8 @@ export async function buildBundleZip({ sections, passphrase } = {}) {
   };
 }
 
-export async function exportBundleToFile({ sections, out, dryRun = false, passphrase } = {}) {
-  const { buffer, fileName, stats } = await buildBundleZip({ sections, passphrase });
+export async function exportBundleToFile({ sections, out, dryRun = false, passphrase, includeFiles } = {}) {
+  const { buffer, fileName, stats } = await buildBundleZip({ sections, passphrase, includeFiles });
   if (dryRun) {
     return { status: 'skipped', dryRun: true, wouldWrite: { fileName, ...stats } };
   }
@@ -630,8 +733,8 @@ export async function exportBundleToFile({ sections, out, dryRun = false, passph
   return { status: 'ok', path: displayPath(target), pathRaw: target, bytes: await fileSize(target), ...stats };
 }
 
-export async function serveBundleZip({ sections, res, passphrase } = {}) {
-  const { buffer, fileName, stats } = await buildBundleZip({ sections, passphrase });
+export async function serveBundleZip({ sections, res, passphrase, includeFiles } = {}) {
+  const { buffer, fileName, stats } = await buildBundleZip({ sections, passphrase, includeFiles });
   res.writeHead(200, {
     // 加密包不是 zip：给 octet-stream，别让浏览器 / 代理按 zip 去嗅探
     'content-type': stats.encrypted ? 'application/octet-stream' : 'application/zip',
@@ -643,9 +746,7 @@ export async function serveBundleZip({ sections, res, passphrase } = {}) {
 }
 
 function parseGlobalBundle(buffer, passphrase) {
-  const plain = openPackage(buffer, passphrase);
-  let files;
-  try { files = readZip(plain); } catch (e) { throw badInput(`ZIP 解析失败：${e.message}`); }
+  const files = innerZipOf(buffer, passphrase);
   const map = new Map(files.map((f) => [f.name, f.data]));
   const raw = map.get('bundle.json');
   if (!raw) throw badInput('不是全局导出包：缺少 bundle.json');
@@ -676,6 +777,7 @@ export async function previewBundle(buffer, { fileName, passphrase } = {}) {
       entries: p.entries,
       files: p.files,
       fieldsToAdd: p.section.fieldsToAdd,
+      notBundled: p.files.notBundled || 0,
     });
     for (const w of p.warnings) warnings.push(`[${it.section.title}] ${w}`);
   }
@@ -691,7 +793,7 @@ export async function previewBundle(buffer, { fileName, passphrase } = {}) {
   }), { sections: 0, newSections: 0, entries: 0, fresh: 0, conflicts: 0, filesNew: 0, filesReused: 0, bytes: 0 });
   return {
     status: 'preview', fileName,
-    encrypted: isEncryptedPackage(buffer),
+    encrypted: needsPassphrase(buffer),
     exportedAt: manifest.exportedAt,
     withSecrets: !!manifest.withSecrets, sections: list, totals, warnings,
   };
@@ -704,7 +806,7 @@ export async function applyBundle(buffer, { fileName, onConflict = 'skip', passp
     const r = await applyImport(it.section.id, it.buffer, { fileName, onConflict });
     sections.push({
       id: r.section.id, title: r.section.title, created: r.section.created,
-      entries: r.entries, files: r.files, fieldsAdded: r.fieldsAdded, maskedSkipped: r.maskedSkipped, snapshot: r.snapshot,
+      entries: r.entries, files: r.files, fieldsAdded: r.fieldsAdded, maskedSkipped: r.maskedSkipped,
     });
   }
   const totals = sections.reduce((a, x) => ({
@@ -771,7 +873,6 @@ export function renderImport(d) {
     `附件 新增 ${d.files.added} / 复用 ${d.files.reused}（${(d.files.bytes / 1024).toFixed(1)}KB）`,
     d.fieldsAdded.length ? `新增字段: ${d.fieldsAdded.join(', ')}` : '',
     d.maskedSkipped ? `跳过 ${d.maskedSkipped} 个打码凭据（需重新填写）` : '',
-    `快照: ${d.snapshot}`,
   ].filter(Boolean).join('\n');
 }
 

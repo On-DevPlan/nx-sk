@@ -38,9 +38,9 @@ test('boot 之前绝不兜底（否则深链会被第一个静态工具页顶掉
   assert.equal(resolveActiveView('files', [V('files')], '', { booted: false }).id, 'files');
 });
 
-test('旧别名仍可解析（#/backup → 导出与备份）', () => {
-  assert.equal(LEGACY_VIEW.backup, 'export');
-  assert.equal(normalizeViewId('backup'), 'export');
+test('旧别名仍可解析（#/backup → 设置：备份模块已删，落到设置页）', () => {
+  assert.equal(LEGACY_VIEW.backup, 'settings');
+  assert.equal(normalizeViewId('backup'), 'settings');
   assert.equal(normalizeViewId(''), '');
-  assert.equal(resolveActiveView('backup', [V('export')], '').id, 'export');
+  assert.equal(resolveActiveView('backup', [V('settings')], '').id, 'settings');
 });

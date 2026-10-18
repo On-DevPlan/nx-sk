@@ -2,7 +2,7 @@
 import fsp from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { APP_LABEL, APP_NAME, ENV_HOME, ENV_PASSPHRASE, ENV_STORE, VERSION, appHome, displayPath, storeFile } from '../../core/paths.js';
-import { loadStore, corruptNote, listSnapshots, migrationNote, storePathInUse } from '../../core/store.js';
+import { loadStore, corruptNote, migrationNote, storePathInUse } from '../../core/store.js';
 import { vaultStatus } from '../../core/vault.js';
 import { FIELD_TYPES, FIELD_TYPE_LABELS, templateSummaries } from '../../core/fields.js';
 import { blocked } from '../../core/errors.js';
@@ -50,7 +50,6 @@ export async function bootstrapInfo() {
     fieldTypes: FIELD_TYPES,
     // 类型的中文名，只给面板下拉框用（渲染成「图文（可贴图）（md）」）
     fieldTypeLabels: FIELD_TYPE_LABELS,
-    snapshots: (await listSnapshots()).slice(0, 5),
     corrupt: corruptNote(),
     migration: migrationNote(),
     commands,

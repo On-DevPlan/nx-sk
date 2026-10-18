@@ -2,8 +2,8 @@
 // 所有模块都通过这里碰磁盘，不自己拼路径、不自己 JSON.parse。
 import fsp from 'node:fs/promises';
 import { join } from 'node:path';
-import { displayPath, snapshotDir, storeFile } from './paths.js';
-import { ensureDir, pathExists, writeAtomic, writeJsonAtomic } from './fsx.js';
+import { displayPath, migrationDir, storeFile } from './paths.js';
+import { ensureDir, pathExists, writeAtomic } from './fsx.js';
 import { instantiateTemplate, seedSections, syncSectionGroups } from './fields.js';
 import { normalizeFileRecord } from './attachments.js';
 import { nowIso, stamp } from './ids.js';
@@ -12,7 +12,6 @@ import { nowIso, stamp } from './ids.js';
  *  v3：栏目有了 `kv` 标记——KV 栏目是一张表（面板渲染成表格，key 命令默认作用在它上面），
  *      并去掉 `settings.kvSection` 这个冗余概念。 */
 export const STORE_VERSION = 3;
-export const MAX_SNAPSHOTS = 20;
 export const MAX_EXPORT_HISTORY = 30;
 
 export function defaultSettings() {
@@ -233,8 +232,8 @@ export async function loadStore(explicitPath) {
 
     if (!corrupt && oldVersion < STORE_VERSION && next._migration) {
       // 迁移前先把**原始文件**原样留一份（不是迁移后的），出问题能整份退回
-      const snapshot = join(snapshotDir(), `${stamp()}-migrate-v${oldVersion}-to-v${STORE_VERSION}.json`);
-      await ensureDir(snapshotDir());
+      const snapshot = join(migrationDir(), `${stamp()}-migrate-v${oldVersion}-to-v${STORE_VERSION}.json`);
+      await ensureDir(migrationDir());
       try { await fsp.copyFile(p, snapshot); } catch { /* 尽力 */ }
       cacheMigrationNote = {
         from: oldVersion,
@@ -286,41 +285,6 @@ export async function mutateStore(fn, explicitPath) {
   const result = fn(cur);
   await saveStore(cur, explicitPath);
   return result === undefined ? cur : result;
-}
-
-/** 破坏性写入前留一份可回滚快照。 */
-export async function snapshotStore(reason, explicitPath) {
-  const cur = await loadStore(explicitPath);
-  const dir = snapshotDir();
-  await ensureDir(dir);
-  const file = join(dir, `${stamp()}-${reason}.json`);
-  await writeJsonAtomic(file, cur);
-  await pruneSnapshots(dir);
-  return file;
-}
-
-async function pruneSnapshots(dir) {
-  try {
-    const items = (await fsp.readdir(dir)).filter((n) => n.endsWith('.json')).sort();
-    const extra = items.length - MAX_SNAPSHOTS;
-    for (let i = 0; i < extra; i++) await fsp.rm(join(dir, items[i]), { force: true });
-  } catch { /* 清理失败不影响主流程 */ }
-}
-
-export async function listSnapshots() {
-  const dir = snapshotDir();
-  try {
-    const items = (await fsp.readdir(dir)).filter((n) => n.endsWith('.json')).sort().reverse();
-    const out = [];
-    for (const name of items.slice(0, MAX_SNAPSHOTS)) {
-      const p = join(dir, name);
-      const st = await fsp.stat(p);
-      out.push({ name, path: p, bytes: st.size, at: st.mtime.toISOString() });
-    }
-    return out;
-  } catch {
-    return [];
-  }
 }
 
 export async function storeExists() {

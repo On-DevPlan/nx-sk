@@ -78,7 +78,7 @@ export default function KvTable({ sectionId, sectionTitle }) {
 
   const removeKey = guard(async (row) => {
     const ok = await dialog({
-      message: `删除「${row.name}」？删除前会自动留一份整库快照在 ~/nx-sk/backup。`,
+      message: `删除「${row.name}」？删除不可恢复（没有自动快照）——需要留底就先在「导出导入」页导一份。`,
       danger: true, confirmText: '删除',
     });
     if (!ok) return;

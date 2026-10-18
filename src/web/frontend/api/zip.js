@@ -21,17 +21,14 @@ export function checkZipFile(file) {
   return '';
 }
 
-// 加密信封的 magic（与 core/securezip.js 的 ENC_MAGIC 一致）。
-// 前端只需要「是不是加密包」这一个判断：是的话先问口令，再送去预览。
-const ENC_MAGIC = 'NXSKENC1';
-const ENC_HEADER = ENC_MAGIC.length + 16 + 12 + 16;
-
-/** 看头 8 字节判定加密包；数据不够长时按明文处理。 */
-export function isEncryptedZip(buffer) {
-  const b = buffer instanceof ArrayBuffer ? new Uint8Array(buffer) : new Uint8Array(buffer?.buffer || buffer || []);
-  if (b.length < ENC_HEADER) return false;
-  for (let i = 0; i < ENC_MAGIC.length; i += 1) {
-    if (b[i] !== ENC_MAGIC.charCodeAt(i)) return false;
-  }
-  return true;
+/**
+ * 这个错误是不是「包已加密、还缺口令」。
+ *
+ * 加密包的判定放在**服务端**（看 ZIP 里有没有 payload.enc），前端不解析 ZIP ——
+ * 少一份 zip 解析代码，也不会因为格式演进而两边不一致。流程因此是：
+ * 先按明文试一次预览，服务端说缺口令，再问用户要口令重试。
+ */
+export function isNeedPassphraseError(err) {
+  const msg = String((err && err.message) || err || '');
+  return /已加密|口令/.test(msg);
 }

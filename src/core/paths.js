@@ -55,8 +55,10 @@ export function filesDir() {
   return join(appHome(), 'files');
 }
 
-export function snapshotDir() {
-  return join(appHome(), 'backup');
+/** 迁移时的原始文件副本目录。**不是备份目录**——本地备份功能已移除，
+ *  这里只保留「store 版本升级前留一份原始文件」那一次性动作。 */
+export function migrationDir() {
+  return join(appHome(), 'migrate');
 }
 
 export function vaultKeyFile() {

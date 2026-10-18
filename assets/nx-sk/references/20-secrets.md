@@ -29,7 +29,7 @@ nx-sk key set OPENAI_KEY sk-xxxxxxxx            # 写入：不存在则新建，
 nx-sk key get OPENAI_KEY                        # 取值：默认就是原文
 nx-sk key get OPENAI_KEY --mask                  # 投屏/截图时才打码
 nx-sk key list                                  # 列出所有键（默认原文）
-nx-sk key remove OPENAI_KEY                     # 删除（删前自动留快照）
+nx-sk key remove OPENAI_KEY                     # 删除（不可撤销，删前先 transfer export）
 ```
 
 | 命令 | 接口 | 说明 |
@@ -37,7 +37,7 @@ nx-sk key remove OPENAI_KEY                     # 删除（删前自动留快照
 | `key list [--mask]` | `GET /api/keys[?mask=1]` | 全部键，按写入顺序 |
 | `key get <名称> [--mask]` | `GET /api/keys/:name[?mask=1]` | 单个键的值 |
 | `key set <名称> <值>` | `PUT /api/keys/:name` | **SET 语义**：存在即覆盖 |
-| `key remove <名称>` | `DELETE /api/keys/:name` | 不存在报 `NOT_FOUND`；写前留快照 |
+| `key remove <名称>` | `DELETE /api/keys/:name` | 不存在报 `NOT_FOUND`；不可撤销 |
 
 四条都接受 `--section <栏目>`（HTTP 侧是 `?section=` 或 body 里的 `section`），
 缺省作用在**标了 `kv` 的那个栏目**上。
@@ -45,7 +45,7 @@ nx-sk key remove OPENAI_KEY                     # 删除（删前自动留快照
 ### 与 `entry` 的关系（重要）
 
 `key *` **不是第二套实现**，是 `entry *` 的语法糖：它把「哪个栏目 + 哪个值字段」定好，
-再调同一批 service 函数。所以加解密、快照、`--dry-run` 只有一份实现，不可能分叉。
+再调同一批 service 函数。所以加解密、`--dry-run` 只有一份实现，不可能分叉。
 
 等价关系：
 
@@ -89,7 +89,7 @@ nx-sk section list                           # 列表里 KV 栏目带 [KV 表] �
 - **值以 `-` 开头时**用 `--value=<值>`（`key set K --value=--x`）——`--x` 会被当成 flag。
   显式 flag 覆盖位置参数，两种写法等价。
 - **重复写同一个值不会重写密文**：返回 `{ status: 'skipped', unchanged: true }`。
-  每次加密都用新 IV，无脑重写只会产生一堆无意义的新密文和新快照。
+  每次加密都用新 IV，无脑重写只会产生一堆无意义的新密文。
 
 ### 多行值：走 stdin 或 `@文件`（真实事故）
 
@@ -200,7 +200,7 @@ nx-sk key set OPENAI_KEY sk-xxxxxxxx
 | 症状 | 原因 | 处理 |
 | --- | --- | --- |
 | `BLOCKED 当前密钥与写入时的密钥不一致` | 换了口令，或删了 `.vaultkey` | 改回原来的来源（旧口令 / 恢复密钥文件） |
-| `BLOCKED 解密失败：密文已损坏，或密钥不正确` | store.json 被手工改过 / GCM 认证失败 | 用 `~/nx-sk/backup/` 里的快照恢复 |
+| `BLOCKED 解密失败：密文已损坏，或密钥不正确` | store.json 被手工改过 / GCM 认证失败 | 从之前 `transfer export` 出来的包重新导入 |
 | `.vaultkey` 不见了 | 被系统清理或误删 | 有口令模式的盐文件 `.vaultsalt` 与口令还能救；否则密文不可逆 |
 
 **密文不可逆是特性，不是缺陷** —— 代价是「忘记密钥 = 数据丢失」，

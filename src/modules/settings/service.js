@@ -1,6 +1,6 @@
 // settings 是**基础模块**：允许被其它模块单向只读依赖（见 eslint 互依禁列——它故意不在里面）。
 // 设置的唯一读写入口在这里，别绕过去直接改 store.settings。
-import { loadStore, mutateStore, snapshotStore } from '../../core/store.js';
+import { loadStore, mutateStore } from '../../core/store.js';
 import { findSection } from '../../core/fields.js';
 import { badInput, notFound } from '../../core/errors.js';
 
@@ -172,13 +172,12 @@ export async function updateSettings({ set, key, value, 'dry-run': dryRun } = {}
 
   if (dryRun) return { status: 'skipped', dryRun: true, wouldSet: resolved };
 
-  const snapshot = await snapshotStore('setting-set');
   const result = await mutateStore((s) => {
     const before = {};
     for (const [k, v] of Object.entries(resolved)) { before[k] = s.settings[k]; s.settings[k] = v; }
     return { before, after: { ...resolved } };
   });
-  return { status: 'ok', set: result.after, before: result.before, snapshot, path: '~/nx-sk/store.json' };
+  return { status: 'ok', set: result.after, before: result.before, path: '~/nx-sk/store.json' };
 }
 
 export function renderSettings(data) {
@@ -221,6 +220,5 @@ export function renderSettingSet(d) {
   if (d.status === 'skipped') return `试运行：将设置 ${JSON.stringify(d.wouldSet)}（未落盘）`;
   const lines = ['已更新设置：'];
   for (const [k, v] of Object.entries(d.set)) lines.push(`  ${k}: ${JSON.stringify(d.before[k])} -> ${JSON.stringify(v)}`);
-  if (d.snapshot) lines.push(`快照: ${d.snapshot}`);
   return lines.join('\n');
 }
