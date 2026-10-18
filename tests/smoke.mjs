@@ -161,6 +161,17 @@ step('bundle import --dry-run 汇总栏目数', bprev.status === 'preview' && bp
 const bimp = await cliJson(['transfer', 'bundle-import', '--file', bzip, '--on-conflict', 'skip']);
 step('bundle import 默认跳过冲突', bimp.totals.skipped >= 1 && bimp.totals.added === 0);
 
+// 口令加密：导出带口令 → 缺口令/错口令被拒 → 对口令才能进
+const encZip = join(home, 'bundle-enc.zip');
+const eexp = await cliJson(['transfer', 'bundle-export', '--sections', 'job', '--out', encZip, '--passphrase', 'S1cau!@#']);
+step('加密导出标记 encrypted', eexp.encrypted === true);
+const eno = await cli(['transfer', 'bundle-import', '--file', encZip, '--dry-run'], { expectFail: true });
+step('加密包缺口令被拒（exit!=0）', eno.code !== 0, JSON.stringify(eno.json || {}).slice(0, 90));
+const eprev = await cliJson(['transfer', 'bundle-import', '--file', encZip, '--dry-run', '--passphrase', 'S1cau!@#']);
+step('加密包对口令可预览', eprev.status === 'preview' && eprev.encrypted === true);
+const ebad = await cli(['transfer', 'bundle-import', '--file', encZip, '--dry-run', '--passphrase', 'wrong'], { expectFail: true });
+step('错口令被拒', ebad.code !== 0);
+
 const updated = await cliJson(['entry', 'update', '冒烟测试', '--set', '目标岗位=后端开发', '--set', '是否应届生=是', '--unset', '电话']);
 step('entry update 是 PATCH 语义', updated.changed.includes('targetPosition') && updated.changed.includes('-phone'));
 

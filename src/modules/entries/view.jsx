@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../web/frontend/api/client.js';
-import { checkZipFile, fmtBytes, postZip } from '../../web/frontend/api/zip.js';
+import { checkZipFile, fmtBytes, isEncryptedZip, postZip } from '../../web/frontend/api/zip.js';
 import { useStore } from '../../web/frontend/store.jsx';
 import { CliHints, Empty, Modal, Tag } from '../../web/frontend/components/ui.jsx';
 import { FieldGroup } from '../../web/frontend/components/fieldEditor.jsx';
@@ -28,6 +28,9 @@ export default function SectionView({ sectionId }) {
   const [quick, setQuick] = useState('');
   // 栏目 ZIP：zip = { fileName, buffer, preview }（buffer 用于确认时再 POST 一次，服务端不存状态）
   const [zip, setZip] = useState(null);
+  // 加密包先问口令：ask = { fileName, buffer }
+  const [ask, setAsk] = useState(null);
+  const [askPw, setAskPw] = useState('');
   const [conflict, setConflict] = useState('skip');
   const [importing, setImporting] = useState(false);
   const [dragDepth, setDragDepth] = useState(0);
@@ -178,32 +181,62 @@ export default function SectionView({ sectionId }) {
     toast(withSecrets ? '开始下载（含凭据，请妥善保管）' : '开始下载（凭据已打码）');
   };
 
+  // 加密包先问口令（与全局面板同一套交互）：别把「缺口令」报成「包坏了」
+  const openZip = async (fileName, buffer, passphrase) => {
+    setImporting(true);
+    try {
+      const qs = new URLSearchParams({ 'dry-run': '1' });
+      if (passphrase) qs.set('passphrase', passphrase);
+      const preview = await postZip(
+        `/api/sections/${encodeURIComponent(sectionId)}/import.zip?${qs}`, buffer, fileName,
+      );
+      setZip({ fileName, buffer, preview, passphrase: passphrase || '' });
+      setConflict('skip');
+      return true;
+    } catch (e) {
+      toast(e.message || String(e), 'bad');
+      return false;
+    } finally {
+      setImporting(false);
+    }
+  };
+
   const handleZip = guard(async (file) => {
     closeMore();
     if (!file) return;
     const bad = checkZipFile(file);
     if (bad) { toast(bad, 'bad'); return; }
-    setImporting(true);
+    let buffer;
     try {
-      const buffer = await file.arrayBuffer();
-      const preview = await postZip(
-        `/api/sections/${encodeURIComponent(sectionId)}/import.zip?dry-run=1`, buffer, file.name,
-      );
-      setZip({ fileName: file.name, buffer, preview });
-      setConflict('skip');
+      buffer = await file.arrayBuffer();
     } catch (e) {
-      toast(e.message || String(e), 'bad');
-    } finally {
-      setImporting(false);
+      toast(`读不到文件：${e.message}`, 'bad');
+      return;
     }
+    if (isEncryptedZip(buffer)) {
+      setAsk({ fileName: file.name, buffer });
+      setAskPw('');
+      return;
+    }
+    await openZip(file.name, buffer, '');
+  });
+
+  const submitAsk = guard(async () => {
+    if (!ask) return;
+    const pw = askPw.trim();
+    if (!pw) { toast('请输入口令', 'bad'); return; }
+    const ok = await openZip(ask.fileName, ask.buffer, pw);
+    if (ok) { setAsk(null); setAskPw(''); }
   });
 
   const applyZip = guard(async () => {
     if (!zip) return;
     setImporting(true);
     try {
+      const qs = new URLSearchParams({ 'on-conflict': conflict });
+      if (zip.passphrase) qs.set('passphrase', zip.passphrase);
       const r = await postZip(
-        `/api/sections/${encodeURIComponent(sectionId)}/import.zip?on-conflict=${encodeURIComponent(conflict)}`,
+        `/api/sections/${encodeURIComponent(sectionId)}/import.zip?${qs}`,
         zip.buffer, zip.fileName,
       );
       setZip(null);
@@ -387,6 +420,33 @@ export default function SectionView({ sectionId }) {
         <div className="drop-mask"><div>松开导入栏目 ZIP</div></div>
       ) : null}
 
+      {ask ? (
+        <Modal
+          title={`这个包已加密 · ${ask.fileName}`}
+          onClose={() => { if (!importing) { setAsk(null); setAskPw(''); } }}
+          footer={(
+            <>
+              <button className="btn ghost" onClick={() => setAsk(null)} disabled={importing}>取消</button>
+              <button className="btn" onClick={submitAsk} disabled={importing || !askPw.trim()}>
+                {importing ? '解密中…' : '打开预览'}
+              </button>
+            </>
+          )}
+        >
+          <div className="stack">
+            <div className="hint">导出时给这个包设了口令。输入同一口令才能预览与导入——口令不在文件里，错了只能重试。</div>
+            <input
+              type="password"
+              autoComplete="off"
+              value={askPw}
+              onChange={(e) => setAskPw(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') submitAsk(); }}
+              placeholder="导出时设置的口令"
+            />
+          </div>
+        </Modal>
+      ) : null}
+
       {zip ? (
         <Modal
           title={`导入预览 · ${zip.fileName}`}
@@ -407,7 +467,10 @@ export default function SectionView({ sectionId }) {
                   {' → '}目标：<strong>{p.section.title}</strong><span className="muted">（{p.section.targetId}）</span>
                   {p.section.willCreate ? <span className="bad">　将新建栏目</span> : null}
                 </div>
-                <div className="hint">导出时间 {p.exportedAt || '未知'}　·　{p.withSecrets ? '含凭据明文' : '凭据已打码'}</div>
+                <div className="hint">
+                  导出时间 {p.exportedAt || '未知'}　·　{p.withSecrets ? '含凭据明文' : '凭据已打码'}
+                  {p.encrypted ? '　·　已解密（口令已验证）' : ''}
+                </div>
                 <div className="rowgap">
                   <Tag>条目 {p.entries.total}</Tag>
                   <Tag>将新增 {p.entries.fresh}</Tag>
@@ -419,13 +482,18 @@ export default function SectionView({ sectionId }) {
                 ) : null}
                 {p.entries.conflicts.length ? (
                   <div className="block">
-                    <div>冲突条目：</div>
-                    <ul style={{ margin: '4px 0 0 18px' }}>
-                      {p.entries.conflicts.slice(0, 6).map((c) => (
-                        <li key={`${c.id}-${c.existingId}`}>{c.title}（{c.reason === 'id' ? '同 id' : '同名'}）</li>
+                    <div className="flabel"><span>冲突明细</span><span className="fkey">撞 = 本地已有同 id 或同标题的条目</span></div>
+                    <div className="conflict-list">
+                      {p.entries.conflicts.map((c) => (
+                        <div key={`${c.id}-${c.existingId}`} className="conflict-row">
+                          <span className="title">{c.title}</span>
+                          <span className="hint">
+                            {c.reason === 'id' ? `同 id 撞上「${c.existingTitle}」` : `同标题撞上「${c.existingTitle}」`}
+                          </span>
+                          {conflict === 'copy' ? <span className="hint ok">→ {c.copyTitle}</span> : null}
+                        </div>
                       ))}
-                      {p.entries.conflicts.length > 6 ? <li>… 共 {p.entries.conflicts.length} 条</li> : null}
-                    </ul>
+                    </div>
                   </div>
                 ) : null}
                 {p.entries.conflicts.length ? (

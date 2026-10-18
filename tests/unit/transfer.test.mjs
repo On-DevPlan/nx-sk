@@ -9,6 +9,7 @@ import { useTempHome } from '../helpers.mjs';
 await useTempHome();
 
 const { readZip } = await import('../../src/core/zip.js');
+const { isEncryptedPackage } = await import('../../src/core/securezip.js');
 const sections = await import('../../src/modules/sections/service.js');
 const entries = await import('../../src/modules/entries/service.js');
 const files = await import('../../src/modules/files/service.js');
@@ -203,4 +204,89 @@ test('bundle：多栏目 + 按条目选择，预览汇总、导入按策略聚�
   assert.equal(r.totals.copied, 2);
   assert.equal((await entries.listEntries({ section: 'g1' })).count, 3);
   assert.equal((await entries.listEntries({ section: 'g2' })).count, 2);
+});
+
+// —— 口令加密的导出 / 导入 ——
+// 口令只作用在最外层；导入同一个入口要吃明文与加密两种包。
+
+test('加密导出：单栏目包带 magic，缺口令 / 错口令都进不去', async () => {
+  const zip = await transfer.buildSectionZip(SRC, { passphrase: 'S1cau!@#' });
+  assert.equal(zip.stats.encrypted, true);
+  assert.equal(isEncryptedPackage(zip.buffer), true);
+  // 加密包不再是 zip：直接 readZip 应该失败（否则说明信封没生效）
+  assert.throws(() => readZip(zip.buffer));
+
+  await assert.rejects(
+    () => transfer.previewImport('encdst', zip.buffer, {}),
+    (e) => e.code === 'BLOCKED' && /口令/.test(e.message),
+  );
+  await assert.rejects(
+    () => transfer.previewImport('encdst', zip.buffer, { passphrase: 'wrong' }),
+    (e) => e.code === 'BLOCKED',
+  );
+
+  const ok = await transfer.previewImport('encdst', zip.buffer, { passphrase: 'S1cau!@#' });
+  assert.equal(ok.encrypted, true);
+  assert.equal(ok.entries.total, (await entries.listEntries({ section: SRC })).count);
+
+  const srcList = await entries.listEntries({ section: SRC });
+  const r = await transfer.applyImport('encdst', zip.buffer, { passphrase: 'S1cau!@#' });
+  assert.equal(r.encrypted, true);
+  assert.equal(r.entries.added, ok.entries.total);
+  const got = await entries.getEntry(srcList.entries[0].title, { section: 'encdst' });
+  assert.ok(got, '加密包导入后条目应可读');
+});
+
+test('明文包不受影响：不带口令时预览照旧，encrypted=false', async () => {
+  const zip = await transfer.buildSectionZip(SRC);
+  assert.equal(zip.stats.encrypted, false);
+  assert.equal(isEncryptedPackage(zip.buffer), false);
+  const p = await transfer.previewImport('plaindst', zip.buffer, {});
+  assert.equal(p.encrypted, false);
+});
+
+test('加密 bundle：外层加密、内层仍复用单栏目逻辑；导入后结构一致', async () => {
+  const { buffer, stats } = await transfer.buildBundleZip({ sections: [{ id: SRC }], passphrase: 'bundle-pw' });
+  assert.equal(stats.encrypted, true);
+  assert.equal(isEncryptedPackage(buffer), true);
+
+  await assert.rejects(() => transfer.previewBundle(buffer, {}), (e) => e.code === 'BLOCKED');
+  const p = await transfer.previewBundle(buffer, { passphrase: 'bundle-pw' });
+  assert.equal(p.encrypted, true);
+  assert.equal(p.totals.sections, 1);
+
+  const r = await transfer.applyBundle(buffer, { passphrase: 'bundle-pw', onConflict: 'skip' });
+  assert.equal(r.totals.sections, 1);
+});
+
+// —— 冲突明细 ——
+// 「有 3 处冲突」不够：用户要知道是哪条撞了哪条、按什么规则撞的、另存会变成什么名字。
+
+test('预览冲突明细：区分同 id / 同标题，并给出另存后的新标题', async () => {
+  await sections.addSection({ id: 'conf', title: '冲突栏目', groups: GROUPS, fields: FIELDS });
+  await entries.addEntry({ section: 'conf', title: '甲', set: { name: 'local' } });
+  await entries.addEntry({ section: 'conf', title: '乙', set: { name: 'local2' } });
+
+  const zip = await transfer.buildSectionZip('conf');
+  // 导入到同一个栏目 → 两条都撞（同 id）
+  const p = await transfer.previewImport('conf', zip.buffer, {});
+  assert.equal(p.entries.conflicts.length, 2);
+  for (const c of p.entries.conflicts) {
+    assert.equal(c.reason, 'id');
+    assert.equal(c.existingTitle, c.title, '同 id 时现有标题应与来源一致');
+    assert.match(c.copyTitle, /^甲（导入）$|^乙（导入）$/);
+  }
+
+  // 同名不同 id：靠标题判定（copyTitle 也要能算出来）
+  await entries.addEntry({ section: 'conf', title: '丙', set: { name: 'x' } });
+  const zip2 = await transfer.buildSectionZip('conf', { entryIds: ['丙'] });
+  const p2 = await transfer.previewImport('conf', zip2.buffer, {});
+  assert.equal(p2.entries.conflicts.length, 1);
+  assert.equal(p2.entries.conflicts[0].reason, 'id', '丙的 id 也在本地，按 id 撞');
+  assert.equal(p2.entries.conflicts[0].copyTitle, '丙（导入）');
+
+  // 导入到空栏目：一条冲突都没有
+  const p3 = await transfer.previewImport('conf-fresh', zip.buffer, {});
+  assert.equal(p3.entries.conflicts.length, 0);
+  assert.equal(p3.entries.fresh, p3.entries.total);
 });

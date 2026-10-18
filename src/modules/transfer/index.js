@@ -4,6 +4,8 @@ import * as service from './service.js';
 
 // 逗号分隔（中英文都认）——URL 与 CLI 都只传一个字符串，避免数组序列化两套
 const splitList = (v) => String(v || '').split(/[,，、]/).map((x) => x.trim()).filter(Boolean);
+// 口令从 flag 或环境变量取（CLI 上口令会出现在进程列表里，脚本/CI 里用 env 更稳）
+const pwOf = (ctx) => (ctx.passphrase || process.env.NX_SK_TRANSFER_PASSPHRASE || undefined);
 
 export default {
   id: 'transfer',
@@ -20,10 +22,11 @@ export default {
         out: { type: 'string', hint: '保存路径（CLI）；缺省写到 ~/nx-sk/export/' },
         'no-secrets': { type: 'boolean', hint: '凭据打码后再打包（要给别人的包用这个）' },
         entries: { type: 'string', hint: '只导出这些条目：id 或标题，逗号分隔（缺省全部）' },
+        passphrase: { type: 'string', hint: '加密口令（留空 = 明文包；也可用环境变量 NX_SK_TRANSFER_PASSPHRASE）' },
       },
       raw: true,
-      run: (ctx) => service.exportToFile(ctx.ref, { out: ctx.out, withSecrets: !ctx['no-secrets'], entryIds: splitList(ctx.entries) }),
-      serveRaw: (ctx, frame) => service.serveExportZip(ctx.ref, { ...frame, withSecrets: !ctx['no-secrets'], entryIds: splitList(ctx.entries) }),
+      run: (ctx) => service.exportToFile(ctx.ref, { out: ctx.out, withSecrets: !ctx['no-secrets'], entryIds: splitList(ctx.entries), passphrase: pwOf(ctx) }),
+      serveRaw: (ctx, frame) => service.serveExportZip(ctx.ref, { ...frame, withSecrets: !ctx['no-secrets'], entryIds: splitList(ctx.entries), passphrase: pwOf(ctx) }),
       render: (d) => service.renderExportZip(d),
     },
     {
@@ -36,10 +39,11 @@ export default {
         file: { type: 'string', hint: 'ZIP 路径（CLI）；浏览器上传走原始请求体' },
         'on-conflict': { type: 'string', enum: ['skip', 'copy', 'overwrite'], hint: 'skip 跳过 / copy 另存 / overwrite 覆盖' },
         'dry-run': { type: 'boolean', hint: '只预览，不写盘' },
+        passphrase: { type: 'string', hint: '加密口令（留空 = 明文包；也可用环境变量 NX_SK_TRANSFER_PASSPHRASE）' },
       },
       binaryBody: true,
       run: (ctx) => {
-        const opts = { onConflict: ctx['on-conflict'] || 'skip', dryRun: ctx['dry-run'] === true };
+        const opts = { onConflict: ctx['on-conflict'] || 'skip', dryRun: ctx['dry-run'] === true, passphrase: pwOf(ctx) };
         // HTTP：body 是原始 zip（不 base64、不 JSON），fileName 由 x-file-name 头带过来
         if (ctx.__body) {
           return service.importFromBuffer(ctx.ref, ctx.__body, { ...opts, fileName: ctx.__fileName || 'upload.zip' });
@@ -59,10 +63,11 @@ export default {
         out: { type: 'string', hint: '保存路径（CLI）；缺省 ~/nx-sk/export/' },
         'no-secrets': { type: 'boolean', hint: '凭据打码后再打包' },
         'dry-run': { type: 'boolean', hint: '只算体积与数量，不写盘' },
+        passphrase: { type: 'string', hint: '加密口令（留空 = 明文包；也可用环境变量 NX_SK_TRANSFER_PASSPHRASE）' },
       },
       raw: true,
-      run: (ctx) => service.exportBundleToFile({ sections: ctx.selection ?? ctx.sections, out: ctx.out, withSecrets: !ctx['no-secrets'], dryRun: ctx['dry-run'] === true }),
-      serveRaw: (ctx, frame) => service.serveBundleZip({ sections: ctx.selection ?? ctx.sections, res: frame.res, withSecrets: !ctx['no-secrets'] }),
+      run: (ctx) => service.exportBundleToFile({ sections: ctx.selection ?? ctx.sections, out: ctx.out, withSecrets: !ctx['no-secrets'], dryRun: ctx['dry-run'] === true, passphrase: pwOf(ctx) }),
+      serveRaw: (ctx, frame) => service.serveBundleZip({ sections: ctx.selection ?? ctx.sections, res: frame.res, withSecrets: !ctx['no-secrets'], passphrase: pwOf(ctx) }),
       render: (d) => service.renderBundleExport(d),
     },
     {
@@ -74,10 +79,11 @@ export default {
         file: { type: 'string', hint: 'ZIP 路径（CLI）；浏览器上传走原始请求体' },
         'on-conflict': { type: 'string', enum: ['skip', 'copy', 'overwrite'], hint: 'skip 跳过 / copy 另存 / overwrite 覆盖' },
         'dry-run': { type: 'boolean', hint: '只预览，不写盘' },
+        passphrase: { type: 'string', hint: '加密口令（留空 = 明文包；也可用环境变量 NX_SK_TRANSFER_PASSPHRASE）' },
       },
       binaryBody: true,
       run: (ctx) => {
-        const opts = { onConflict: ctx['on-conflict'] || 'skip', dryRun: ctx['dry-run'] === true };
+        const opts = { onConflict: ctx['on-conflict'] || 'skip', dryRun: ctx['dry-run'] === true, passphrase: pwOf(ctx) };
         if (ctx.__body) return service.importBundleFromBuffer(ctx.__body, { ...opts, fileName: ctx.__fileName || 'bundle.zip' });
         return service.importBundleFromFile({ ...opts, file: ctx.file });
       },
@@ -91,10 +97,11 @@ export default {
       flags: {
         file: { type: 'string', hint: 'ZIP 路径（CLI）；浏览器上传走原始请求体' },
         'dry-run': { type: 'boolean', hint: '只预览，不写盘' },
+        passphrase: { type: 'string', hint: '加密口令（留空 = 明文包；也可用环境变量 NX_SK_TRANSFER_PASSPHRASE）' },
       },
       binaryBody: true,
       run: (ctx) => {
-        const opts = { dryRun: ctx['dry-run'] === true };
+        const opts = { dryRun: ctx['dry-run'] === true, passphrase: pwOf(ctx) };
         if (ctx.__body) {
           return service.importFromBuffer(null, ctx.__body, { ...opts, fileName: ctx.__fileName || 'upload.zip' });
         }
