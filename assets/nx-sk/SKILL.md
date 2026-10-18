@@ -70,7 +70,7 @@ nx-sk key set OPENAI_KEY sk-xxxxxxxx     # 写入（存在即覆盖，返回 cre
 nx-sk key get OPENAI_KEY                 # 取值：默认就是原文
 nx-sk key get OPENAI_KEY --mask           # 投屏/截图时才打码
 nx-sk key list                            # 所有键（默认原文）
-nx-sk key remove OPENAI_KEY               # 删除，写前自动留快照
+nx-sk key remove OPENAI_KEY               # 删除，不可撤销 → 先 nx-sk transfer export
 ```
 
 `key *` 是 `entry *` 的**语法糖**（同模块、同一批 service 函数），缺省作用在标了 `kv` 的栏目上
@@ -124,7 +124,6 @@ nx-sk setting set --set 'navGroups=[]'   # 清空 = 全部栏目恢复平铺
 | `00-design` | 想搞清楚「为什么这么设计」、分层与依赖方向、错误码与 `{status}` 的分工时 |
 | `10-sections-entries` | **动手填/改信息时必读**——栏目与条目的完整命令、AI 补全个人信息的推荐流程、字段字典怎么扩、读命令与写命令的参数陷阱 |
 | `20-secrets` | 存/读大模型 key、密文机制、密钥来源（环境变量 vs 本机密钥文件）、什么时候会解不开 |
-| `30-export-backup` | 整体导出、只导出某个栏目、快照与回滚、明文密钥的取舍 |
 | `40-files` | **传/换简历头像成绩单等二进制原件时读**——附件库台账、导入（默认移动）与还原、`file` 字段怎么和条目建立链接、附件中心为什么由栏目驱动、看不到上传字段怎么办 |
 | `50-deploy` | **存/取 Dockerfile、docker-compose、k8s 清单时读**——一份配置一个条目的字段约定、`kind` 取值、复用流程（找 → 取正文 → 替换变量 → 落盘）、为什么明文密钥不写在这里 |
 | `60-transfer` | **搬栏目 / 分享栏目 / 局部迁移时读**——单栏目与全局 bundle 的 ZIP 结构、`transfer export/import/bundle-*` 怎么用、三种冲突策略、附件按 sha256 复用与引用重映射、凭据打码的边界 |
@@ -151,7 +150,8 @@ nx-sk skill get nx-sk --json                   # 四元 JSON：{skillName, ref, 
 
 ## 硬约束（动手前先记住）
 
-- 所有写命令都有 `--dry-run`，先试运行再落盘；删除类命令**自动留快照**在 `~/nx-sk/backup/`。
+- 所有写命令都有 `--dry-run`，先试运行再落盘；**删除不可撤销** —— 删栏目/条目/附件前先
+  `nx-sk transfer export`（或面板「导出导入」→ 选中范围 → 导出），这是唯一的回退手段。
 - 密文字段**落盘是密文，读出来默认是原文** —— 本机单人工具，自己看的东西不先拦一道。
   要打码形态（投屏 / 截图）显式加 `--mask`。
 - 把打码后的值（含 `******`）当新值写回去会被拒绝 —— 那通常意味着「不修改」，什么都不传即可。

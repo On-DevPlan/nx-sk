@@ -12,7 +12,6 @@ import { fileURLToPath } from 'node:url';
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const BIN = join(ROOT, 'bin', 'nx-sk.mjs');
 const NODE = process.execPath;
-const BACKUP_SERVICE = new URL('../src/modules/backup/service.js', import.meta.url).pathname;
 
 const home = await mkdtemp(join(tmpdir(), 'nx-sk-smoke-'));
 const env = { ...process.env, NX_SK_HOME: home, NX_SK_STORE: join(home, 'store.json') };
@@ -167,6 +166,9 @@ const eexp = await cliJson(['transfer', 'bundle-export', '--sections', 'job', '-
 step('加密导出标记 encrypted', eexp.encrypted === true);
 const eno = await cli(['transfer', 'bundle-import', '--file', encZip, '--dry-run'], { expectFail: true });
 step('加密包缺口令被拒（exit!=0）', eno.code !== 0, JSON.stringify(eno.json || {}).slice(0, 90));
+
+const encHead = await readFile(encZip);
+step('加密包外层仍是 ZIP（PK 头，系统压缩文件夹能打开）', encHead[0] === 0x50 && encHead[1] === 0x4b);
 const eprev = await cliJson(['transfer', 'bundle-import', '--file', encZip, '--dry-run', '--passphrase', 'S1cau!@#']);
 step('加密包对口令可预览', eprev.status === 'preview' && eprev.encrypted === true);
 const ebad = await cli(['transfer', 'bundle-import', '--file', encZip, '--dry-run', '--passphrase', 'wrong'], { expectFail: true });
@@ -314,26 +316,13 @@ step('export list 给出历史与目录内文件', exportList.history.length >= 
 
 // ── 加密备份 + 跨机器口令解开 ────────────────────────────────
 // 关键回归：A 机 export --password 出的 .nxskbak 在 B 机（换了 vaultkey）
-// 用口令导入后，secret 字段已用 B 机 vaultKey 重新加密、key get 能解出原文。
-const backupText = await (async () => {
-  const { code, out } = await cli(['backup', 'export', '--password', 'smoke-pw-123', '--out', join(home, 'backup')]);
-  assert.equal(code, 0, `backup export 失败: ${out}`);
-  const xs = await (await import('node:fs/promises')).readdir(join(home, 'backup'));
-  const name = xs.find((n) => n.endsWith('.nxskbak'));
-  return readFile(join(home, 'backup', name), 'utf8');
-})();
-const archiveJson = JSON.parse(backupText);
-step('加密备份文件包含归档头', archiveJson.kind === 'encrypted-backup' && archiveJson.app === 'nx-sk');
+// ─── 跨机器：ZIP 导入后密文用本机密钥重新落盘 ────────────────────────────
+// 关键回归：A 机导出的包（secret 已解成明文）在 B 机（换过 vaultkey）导入后，
+// 敏感字段必须用 **B 机** 的 vaultKey 重新加密——否则「密文落盘」这条不变量就漏了。
+const crossZip = join(home, 'cross-machine.zip');
+const xExp = await cliJson(['transfer', 'bundle-export', '--sections', 'secret', '--out', crossZip]);
+step('跨机导出：secret 栏目打进 ZIP', xExp.sections === 1 && xExp.entries >= 1);
 
-// 解码 archive 看 secret 是否已解开为明文
-const { decryptBackup } = await import(BACKUP_SERVICE);
-const decoded = decryptBackup(backupText, 'smoke-pw-123').payload;
-const secrets = decoded.entries.filter((e) => e.section === 'secret');
-step('导出时 secret 字段被解开为明文（不再带密文对象）',
-  secrets.length === 1 && typeof secrets[0].values.value === 'string');
-
-// 模拟「换机器」：先在 B 机器上跑一次解密让 .vaultkey 自动生成，
-// 立刻删掉它——后续所有解密都跑在「B 机用户从没见过 A 机旧 key」的状态下。
 const homeB = await mkdtemp(join(tmpdir(), 'nx-sk-smoke-B-'));
 const envB = { ...process.env, NX_SK_HOME: homeB, NX_SK_STORE: join(homeB, 'store.json') };
 delete envB.NX_SK_PASSPHRASE;
@@ -355,44 +344,24 @@ async function cliJsonB(args) {
   return JSON.parse(out);
 }
 
-// 触发 .vaultkey 生成
+// 触发 B 机 .vaultkey 生成，再删掉——模拟「B 机用户从没见过 A 机的旧 key」
 await cliB(['bootstrap']);
-// 删 .vaultkey → 模拟「新机器从未拥有 A 机的旧 key」
-const vaultKeyA = join(homeB, '.vaultkey');
-try { await rm(vaultKeyA); } catch { /* 不存在也行 */ }
+try { await rm(join(homeB, '.vaultkey')); } catch { /* 不存在也行 */ }
 
-const restoredB = await cliJsonB(['backup', 'import', '--password', 'smoke-pw-123', '--file',
-  (await (async () => {
-    const xs = await (await import('node:fs/promises')).readdir(join(home, 'backup'));
-    return join(home, 'backup', xs.find((n) => n.endsWith('.nxskbak')));
-  })())]);
-step('B 机缺省导入是「合并」：status=ok / mode=merge，resealed=1（用 B 机 vaultKey 重新加密）',
-  restoredB.status === 'ok' && restoredB.mode === 'merge' && restoredB.resealed === 1
-  && restoredB.addedEntriesTotal >= 1);
+// 零配置导入：B 机没有 secret 栏目，按包内结构新建
+const xImp = await cliJsonB(['transfer', 'import-new', '--file', crossZip]);
+step('B 机零配置导入成功（全局包）', xImp.status === 'ok' && xImp.totals.added >= 1, JSON.stringify(xImp.totals));
 
 const gotB = await cliJsonB(['key', 'get', 'SMOKE_KEY']);
-step('B 机恢复后 key get 默认能解出明文（原 vaultkey 完全无关）',
-  gotB.value === 'sk-smoke-NEW-0987654321fedcba');
+step('B 机导入后 key get 能解出明文（与原机密钥无关）',
+  gotB.value === 'sk-smoke-NEW-0987654321fedcba', String(gotB.value));
 
-// 落盘后 secret 应当**仍是密文对象**（落盘防护不丢），且 kid 指向 B 机
+// 落盘后必须**仍是密文对象**（落盘防护不丢），且解得开说明用的就是 B 机密钥
 const storeB = JSON.parse(await readFile(join(homeB, 'store.json'), 'utf8'));
 const entryB = storeB.entries.find((e) => e.section === 'secret');
 function isCipher(v) { return !!v && typeof v === 'object' && typeof v.ct === 'string' && typeof v.iv === 'string'; }
-step('导入后 secret 落盘仍是密文（已用 B 机 vaultKey 重新加密）',
+step('导入后 secret 落盘仍是密文（已用本机 vaultKey 重新加密）',
   !!entryB && isCipher(entryB.values.value));
-
-// --replace 保留旧的「整份替换」语义
-const replacedB = await cliJsonB(['backup', 'import', '--password', 'smoke-pw-123', '--replace', '--file',
-  join(home, 'backup', (await (await import('node:fs/promises')).readdir(join(home, 'backup'))).find((n) => n.endsWith('.nxskbak')))]);
-step('--replace 才整份替换：status=restored', replacedB.status === 'restored' && replacedB.mode === 'replace');
-const gotB2 = await cliJsonB(['key', 'get', 'SMOKE_KEY']);
-step('整份替换后 key get 仍能解出明文', gotB2.value === 'sk-smoke-NEW-0987654321fedcba');
-
-// 错误口令在 B 机也明确报错
-const wrongPw = await cliB(['backup', 'import', '--password', 'wrong-pw-12345', '--file',
-  join(home, 'backup', (await (await import('node:fs/promises')).readdir(join(home, 'backup'))).find((n) => n.endsWith('.nxskbak')))],
-  { expectFail: true });
-step('错误口令明确报错', /BLOCKED|解密失败/.test(wrongPw.out + wrongPw.err), wrongPw.out || wrongPw.err);
 
 const skillGet = await cliJson(['skill', 'get', 'nx-sk', '10-sections-entries', '--dry-run']);
 step('skill get --json 是四元', skillGet.skillName === 'nx-sk' && skillGet.ref === 'references/10-sections-entries.md'
@@ -530,10 +499,10 @@ serve.kill('SIGTERM');
 await new Promise((r) => setTimeout(r, 300));
 
 // ── 3. 收尾：真删（只删测试自己造的那条） ───────────────────
-process.stdout.write('\n[3] 真删与快照\n');
+process.stdout.write('\n[3] 真删\n');
 const removed = await cliJson(['entry', 'remove', '冒烟测试']);
 step('entry remove 成功', removed.removed.title === '冒烟测试');
-step('删除前留了可回滚快照', !!removed.snapshot && removed.snapshot.includes('backup'));
+step('entry remove 不再返回快照（本地备份已移除）', removed.snapshot === undefined);
 
 const gone = await cliError(['entry', 'get', '冒烟测试']);
 step('删除后 get 报 NOT_FOUND', gone.code === 'NOT_FOUND');

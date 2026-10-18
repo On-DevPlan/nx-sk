@@ -33,7 +33,7 @@
 
 - `file list --section <栏目>` 只看「被某栏目引用」的附件；`--section none` 只看**还没有任何条目引用**的。
 - `file content` 是浏览器链接：内联预览，加 `--download` 强制下载；CLI 侧打印物理路径与链接。
-- 所有写命令都支持 `--dry-run`；`file remove` 连物理原件一起删并自动留台账快照——
+- 所有写命令都支持 `--dry-run`；`file remove` 连物理原件一起删**不可撤销**——
   只想「拿出原件、库里留着」应该用 `file restore --copy`。
 
 ## 三、导入：默认移动，`--copy` 才复制
@@ -87,7 +87,7 @@ nx-sk file restore f_xxxx --to "D:\资料"          # Web 上传件没有原始�
 | `restore --copy` | 只**导出副本**到目标目录，库中原件与台账**都保留** |
 
 - Web 上传进来的附件没有「原始位置」，还原时必须给 `--to`。
-- 还原/删除都会先留快照（`~/nx-sk/backup/`），可回滚——见 `30-export-backup`。
+- 还原/删除都不留本地备份；删之前先 `transfer export` 导一份——见 `60-transfer`。
 
 ## 六、Web 面板
 

@@ -5,7 +5,7 @@
 // 写入分两趟：趟 A（异步，在草稿 section 上跑）解析字段、加密敏感值；
 // 趟 B（同步，在 mutateStore 事务里）只做赋值。这样加密只发生在事务外，
 // 事务里没有 await，也就没有「改了一半又抛错」的中间态。
-import { loadStore, mutateStore, snapshotStore } from '../../core/store.js';
+import { loadStore, mutateStore } from '../../core/store.js';
 import { assertFieldKey } from '../../core/paths.js';
 import { badInput, conflict, notFound } from '../../core/errors.js';
 import { BOOL_FALSE, BOOL_TRUE, findKvSection, findSection, isSensitiveField, sectionNames } from '../../core/fields.js';
@@ -323,7 +323,6 @@ export async function updateEntry(ref, patch = {}) {
     if (dup) throw conflict(`同栏目下已有叫「${patch.title}」的了（${dup.id}）；先合并或删掉那一条。`);
   }
 
-  const snapshot = await snapshotStore(`entry-update-${target.id}`);
   await mutateStore((s) => {
     const e = s.entries.find((x) => x.id === target.id);
     const section = s.sections.find((x) => x.id === e.section);
@@ -346,7 +345,7 @@ export async function updateEntry(ref, patch = {}) {
     // 报**解析后**的字段 key，而不是用户敲的中文标签——调用方/agent 拿它去对比字典
     changed: [...Object.keys(values), ...unsetKeys.map((k) => `-${k}`)],
     newFields: newFields.map((f) => f.key),
-    completeness: completeness(finalSec, finalEntry), snapshot,
+    completeness: completeness(finalSec, finalEntry),
   };
 }
 
@@ -356,9 +355,8 @@ export async function removeEntry(ref, { section, 'dry-run': dryRun } = {}) {
   if (dryRun) {
     return { status: 'skipped', dryRun: true, wouldRemove: { id: target.id, title: target.title, section: target.section } };
   }
-  const snapshot = await snapshotStore(`entry-remove-${target.id}`);
   await mutateStore((s) => { s.entries = s.entries.filter((e) => e.id !== target.id); });
-  return { status: 'ok', removed: { id: target.id, title: target.title, section: target.section }, snapshot };
+  return { status: 'ok', removed: { id: target.id, title: target.title, section: target.section } };
 }
 
 /** 字段字典：agent 在填之前必须先看这个，否则只能靠猜字段名。 */
@@ -486,7 +484,7 @@ export async function keySet(name, value, { section, 'dry-run': dryRun } = {}) {
     }
     const r = await updateEntry(existing.title, { set: { [valueKey]: raw }, section: sec.id, 'dry-run': dryRun });
     if (r.status === 'skipped') return { ...r, name: key, created: false, section: sec.id };
-    return { status: 'ok', created: false, replaced: true, name: key, section: sec.id, id: r.id, snapshot: r.snapshot };
+    return { status: 'ok', created: false, replaced: true, name: key, section: sec.id, id: r.id };
   }
 
   const r = await addEntry({ section: sec.id, title: key, set: { [valueKey]: raw }, 'dry-run': dryRun });
@@ -519,12 +517,12 @@ export function renderKeySet(d) {
   if (d.status === 'skipped' && d.unchanged) return `未改动：${d.name} 的值与现有值相同`;
   if (d.status === 'skipped') return `试运行（未落盘）：${JSON.stringify(d.wouldCreate || d.wouldChange)}`;
   return `${d.created ? '已新建' : '已覆盖'}密钥 ${d.name}（栏目 ${d.section}）`
-    + `${d.snapshot ? `\n快照: ${d.snapshot}` : ''}\n值已密文落盘；核对用 nx-sk key get ${d.name}`;
+    + `\n值已密文落盘；核对用 nx-sk key get ${d.name}`;
 }
 
 export function renderKeyRemove(d) {
   if (d.status === 'skipped') return `试运行（未落盘）：${JSON.stringify(d.wouldRemove)}`;
-  return `已删除密钥 ${d.removed.title}\n快照: ${d.snapshot}`;
+  return `已删除密钥 ${d.removed.title}`;
 }
 
 function maskAll(section, entry, decrypt, mask) {
@@ -605,14 +603,14 @@ export function renderEntryGet(d) {
 
 export function renderEntryChange(d) {
   if (d.status === 'skipped') return `试运行（未落盘）：${JSON.stringify(d.wouldCreate || d.wouldChange || d.wouldRemove)}`;
-  if (d.removed) return `已删除条目 ${d.removed.id}（${d.removed.title}）\n快照: ${d.snapshot}`;
+  if (d.removed) return `已删除条目 ${d.removed.id}（${d.removed.title}）`;
   const c = d.completeness;
   if (d.created) {
     return `已创建条目 ${d.title}（${d.id}）· 栏目 ${d.section} · 完整度 ${c.filled}/${c.total} = ${c.ratio}%`
       + (d.createdFields?.length ? `\n新增字段: ${d.createdFields.join(', ')}` : '');
   }
   const extra = d.newFields?.length ? `\n新增字段: ${d.newFields.join(', ')}` : '';
-  return `已更新条目 ${d.title}（${d.id}）· 改动 ${d.changed.join(', ')} · 完整度 ${c.filled}/${c.total} = ${c.ratio}%${extra}\n快照: ${d.snapshot}`;
+  return `已更新条目 ${d.title}（${d.id}）· 改动 ${d.changed.join(', ')} · 完整度 ${c.filled}/${c.total} = ${c.ratio}%${extra}`;
 }
 
 export function renderFields(d) {

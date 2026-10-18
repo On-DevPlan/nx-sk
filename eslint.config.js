@@ -31,7 +31,6 @@ const SIBLING_MODULES = [
   '../files/*',
   '../export/*',
   '../transfer/*',
-  '../backup/*',
   '../skill/*',
 ];
 

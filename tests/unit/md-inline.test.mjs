@@ -8,7 +8,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-const { tokenizeMd, imageRefs, linkCount, isHttpUrl } = await import('../../src/web/frontend/mdInline.js');
+const { tokenizeMd, imageRefs, linkCount, isHttpUrl, splitTail } = await import('../../src/web/frontend/mdInline.js');
+const { cleanHttpUrl, linkTextParts, cutAtCjkPunct, encodeUrl, decodeUrl } = await import('../../src/web/frontend/mdInline.js');
 
 const kinds = (text) => tokenizeMd(text).map((t) => t.type);
 
@@ -74,6 +75,57 @@ test('一行里多个链接按出现顺序切开', () => {
     'A ', 'https://a.com', ' B ', 'https://c.com', ' D',
   ]);
   assert.equal(linkCount('A https://a.com B [c](https://c.com) D'), 2);
+});
+
+// 渲染层（components/mdView.jsx）复用 splitTail：GFM 的自动链接会把句号一起算进
+// href（`https://a.com。` → `https://a.com%E3%80%82`），点开就是 404。
+// 所以这个函数不只是给本模块的 tokenizer 用的，改动前先看渲染层的调用点。
+test('splitTail 单独可用：给渲染层剥掉被吞进 href 的标点', () => {
+  assert.deepEqual(splitTail('https://a.com。'), { href: 'https://a.com', tail: '。' });
+  assert.deepEqual(splitTail('https://a.com/x）'), { href: 'https://a.com/x', tail: '）' });
+  assert.deepEqual(splitTail('https://a.com/x'), { href: 'https://a.com/x', tail: '' });
+  assert.deepEqual(
+    splitTail('https://en.wikipedia.org/wiki/Foo_(bar)'),
+    { href: 'https://en.wikipedia.org/wiki/Foo_(bar)', tail: '' },
+  );
+});
+
+// GFM 自动链接一直吃到空白为止，而中文句子不用空格：`见 https://a.com。另见`
+// 会被整段算进 href（解析器还会把它百分号编码），点开就是 404。
+// 渲染层（mdView.jsx）的 urlTransform 用 cleanHttpUrl 截断，显示文字用 linkTextParts 同步截断。
+test('cleanHttpUrl：中文标点处截断，且不重复编码', () => {
+  // 解析器交出来的是编码过的形态
+  assert.equal(cleanHttpUrl('https://a.com%E3%80%82%E5%8F%A6%E8%A7%81'), 'https://a.com');
+  assert.equal(cleanHttpUrl('https://a.com。另见'), 'https://a.com');
+  assert.equal(cleanHttpUrl('https://a.com/x。'), 'https://a.com/x');
+  // 合法的中文路径（编码形态）不能被误截
+  assert.equal(cleanHttpUrl('https://a.com/%E4%B8%AD%E6%96%87'), 'https://a.com/%E4%B8%AD%E6%96%87');
+  assert.equal(cleanHttpUrl('https://a.com/中文'), 'https://a.com/%E4%B8%AD%E6%96%87');
+  // 已有的转义序列原样保留（encodeURI 会把 % 再转义一次，这里必须还原）
+  assert.equal(cleanHttpUrl('https://a.com/x%20y'), 'https://a.com/x%20y');
+  // 维基式括号仍然是网址的一部分
+  assert.equal(cleanHttpUrl('https://en.wikipedia.org/wiki/Foo_(bar)'), 'https://en.wikipedia.org/wiki/Foo_(bar)');
+  // 非 http(s) 原样返回，交给上层决定要不要渲染成链接
+  assert.equal(cleanHttpUrl('f_abc123'), 'f_abc123');
+});
+
+test('linkTextParts：显示文字与 href 一起断，断下来的标点回到正文', () => {
+  assert.deepEqual(
+    linkTextParts('https://a.com。另见', 'https://a.com'),
+    { text: 'https://a.com', tail: '。另见' },
+  );
+  // markdown 链接的文字与地址无关，一个字都不能动
+  assert.deepEqual(linkTextParts('控制台', 'https://console.example.com/x'), { text: '控制台', tail: '' });
+  assert.deepEqual(linkTextParts('', 'https://a.com'), { text: '', tail: '' });
+});
+
+test('cutAtCjkPunct / encodeUrl / decodeUrl 的边界', () => {
+  assert.deepEqual(cutAtCjkPunct('https://a.com/x），后文'), { head: 'https://a.com/x', rest: '），后文' });
+  assert.deepEqual(cutAtCjkPunct('https://a.com/x'), { head: 'https://a.com/x', rest: '' });
+  assert.equal(encodeUrl('https://a.com/x%20y'), 'https://a.com/x%20y');
+  assert.equal(decodeUrl('https://a.com/%E4%B8%AD'), 'https://a.com/中');
+  // 坏编码不能让整段正文渲染不出来
+  assert.equal(decodeUrl('https://a.com/%E4'), 'https://a.com/%E4');
 });
 
 test('imageRefs：保留说明与 remote 标记，空正文返回空数组', () => {

@@ -1,16 +1,22 @@
 import { Component, Fragment, useEffect, useRef } from 'react';
 import { useStore } from '../store.jsx';
 
+/** 复制到剪贴板，返回是否成功。`Copyable` 与 md 正文里的 IP（点击即复制）共用一条实现。 */
+export async function copyText(value) {
+  try {
+    await navigator.clipboard.writeText(String(value ?? ''));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function Copyable({ text, children, className = '', title }) {
   const { toast } = useStore();
   const onClick = async () => {
-    const value = String(text ?? '');
-    try {
-      await navigator.clipboard.writeText(value);
-      toast('已复制');
-    } catch {
-      toast('复制失败：浏览器拒绝了剪贴板访问', 'bad');
-    }
+    const ok = await copyText(text);
+    if (ok) toast('已复制');
+    else toast('复制失败：浏览器拒绝了剪贴板访问', 'bad');
   };
   return (
     <span

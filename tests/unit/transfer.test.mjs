@@ -9,7 +9,7 @@ import { useTempHome } from '../helpers.mjs';
 await useTempHome();
 
 const { readZip, createZip } = await import('../../src/core/zip.js');
-const { isEncryptedPackage } = await import('../../src/core/securezip.js');
+const { needsPassphrase } = await import('../../src/modules/transfer/service.js');
 const sections = await import('../../src/modules/sections/service.js');
 const entries = await import('../../src/modules/entries/service.js');
 const files = await import('../../src/modules/files/service.js');
@@ -218,12 +218,15 @@ test('bundle：多栏目 + 按条目选择，预览汇总、导入按策略聚�
 // —— 口令加密的导出 / 导入 ——
 // 口令只作用在最外层；导入同一个入口要吃明文与加密两种包。
 
-test('加密导出：单栏目包带 magic，缺口令 / 错口令都进不去', async () => {
+test('加密导出：外层仍是合法 ZIP（系统压缩文件夹能打开），缺口令 / 错口令都进不去', async () => {
   const zip = await transfer.buildSectionZip(SRC, { passphrase: 'S1cau!@#' });
   assert.equal(zip.stats.encrypted, true);
-  assert.equal(isEncryptedPackage(zip.buffer), true);
-  // 加密包不再是 zip：直接 readZip 应该失败（否则说明信封没生效）
-  assert.throws(() => readZip(zip.buffer));
+  assert.equal(needsPassphrase(zip.buffer), true);
+  // 外层必须还是合法 ZIP：系统的「压缩文件夹」能打开（里面只有 payload.enc）
+  const outer = readZip(zip.buffer).map((f) => f.name).sort();
+  assert.deepEqual(outer, ['README.txt', 'payload.enc']);
+  // 而且 manifest 不能以明文出现在外层
+  assert.ok(!outer.includes('manifest.json'));
 
   await assert.rejects(
     () => transfer.previewImport('encdst', zip.buffer, {}),
@@ -249,7 +252,8 @@ test('加密导出：单栏目包带 magic，缺口令 / 错口令都进不去',
 test('明文包不受影响：不带口令时预览照旧，encrypted=false', async () => {
   const zip = await transfer.buildSectionZip(SRC);
   assert.equal(zip.stats.encrypted, false);
-  assert.equal(isEncryptedPackage(zip.buffer), false);
+  assert.equal(needsPassphrase(zip.buffer), false);
+  assert.ok(readZip(zip.buffer).some((f) => f.name === 'manifest.json'));
   const p = await transfer.previewImport('plaindst', zip.buffer, {});
   assert.equal(p.encrypted, false);
 });
@@ -257,7 +261,9 @@ test('明文包不受影响：不带口令时预览照旧，encrypted=false', as
 test('加密 bundle：外层加密、内层仍复用单栏目逻辑；导入后结构一致', async () => {
   const { buffer, stats } = await transfer.buildBundleZip({ sections: [{ id: SRC }], passphrase: 'bundle-pw' });
   assert.equal(stats.encrypted, true);
-  assert.equal(isEncryptedPackage(buffer), true);
+  assert.equal(needsPassphrase(buffer), true);
+  // 外层仍是合法 ZIP，且不泄露「里面有哪些栏目」
+  assert.deepEqual(readZip(buffer).map((f) => f.name).sort(), ['README.txt', 'payload.enc']);
 
   await assert.rejects(() => transfer.previewBundle(buffer, {}), (e) => e.code === 'BLOCKED');
   const p = await transfer.previewBundle(buffer, { passphrase: 'bundle-pw' });

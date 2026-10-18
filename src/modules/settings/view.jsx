@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../../web/frontend/api/client.js';
 import { useStore } from '../../web/frontend/store.jsx';
-import { CliHints, Copyable, Empty, Tag } from '../../web/frontend/components/ui.jsx';
+import { CliHints, Copyable, Tag } from '../../web/frontend/components/ui.jsx';
 import * as nav from '../../web/frontend/components/navModel.js';
 import NavManager from './navManager.jsx';
-import BackupPanel from '../backup/view.jsx';
+import ReadableExportPanel from '../../web/frontend/components/readableExport.jsx';
 
 export default function SettingsView() {
   const { boot, reload, toast, guard } = useStore();
@@ -202,29 +202,9 @@ export default function SettingsView() {
         </div>
       </div>
 
-      <div className="card">
-        <div className="colhead">自动快照<span className="right muted">{boot?.snapshots?.length ?? 0}</span></div>
-        <div className="colbody">
-          <div className="row">
-            <span className="desc">每次删除条目 / 栏目、修改设置前，都会在 ~/nx-sk/backup 留一份可回滚的整库快照。</span>
-          </div>
-          <div className="row">
-            <span className="desc">想自己留一份带走的：用下面的「本地备份」（口令加密，含设置与附件台账）。按栏目取数据在「导出与备份」页。</span>
-          </div>
-          {boot?.snapshots?.length ? boot.snapshots.map((s) => (
-            <div key={s.name} className="row">
-              <span className="mono name">{s.name}</span>
-              <span className="desc">{s.at}</span>
-              <span className="acts"><span className="tag">{Math.ceil(s.bytes / 1024)} KB</span></span>
-            </div>
-          )) : <Empty>还没有快照。</Empty>}
-        </div>
-      </div>
-
-      {/* 本地备份：整库 + 口令加密。放在设置里而不是导出页 ——
-          导出页的语义是「取数据」，这里的语义是「留后路」，混在一起会让人以为
-          不设口令也能导出（其实按栏目那个也能设口令，两个不是一回事）。 */}
-      <BackupPanel />
+      {/* 可读导出（JSON / Markdown）放设置里而不是导出页 ——
+          导出页（「导出导入」）的语义是「取数据」，这里是「留一份人能读的副本」。 */}
+      <ReadableExportPanel />
 
       {boot?.migration ? (
         <div className="card">

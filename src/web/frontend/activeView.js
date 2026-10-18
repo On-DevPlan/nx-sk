@@ -9,8 +9,8 @@
 // 解析顺序：显式选择（地址栏深链 / 本次会话点过的 tab）> settings.defaultSection > 第一个 tab。
 // 第三级即「设置 → 默认栏目」的落地点。
 
-// 旧书签与 localStorage 里的别名（加密备份已并入「导出与备份」页）
-export const LEGACY_VIEW = { backup: 'export' };
+// 旧书签与 localStorage 里的别名（加密备份模块已删除，原 #/backup 落到「设置」）
+export const LEGACY_VIEW = { backup: 'settings' };
 
 export function normalizeViewId(id) {
   return LEGACY_VIEW[id] || id || '';

@@ -6,7 +6,7 @@
 
 ```
 store.json（~/nx-sk/store.json 或 $NX_SK_STORE）
-├─ settings                 全局配置（见 30-export-backup）
+├─ settings                 全局配置（可读 JSON/Markdown 导出见 60-transfer）
 ├─ sections[]               栏目：id / title / order / template / titleField / groups[] / fields[]
 └─ entries[]                条目：id(e_xxx) / section / title / tags[] / values{字段key: 值} / 时间戳
 ```
@@ -40,7 +40,7 @@ store.json（~/nx-sk/store.json 或 $NX_SK_STORE）
 - **`sync` 按模板补齐字段**：栏目字段字典是**持久化数据**——实例化时深拷贝模板字段，此后独立演化，
   所以模板**后来**新增的分组与字段不会自动出现在老栏目里（典型症状：求职没显示附件上传框）。
   `section sync <id>` 把模板有、本栏目还缺的分组与字段补进来（**只增不改不删**，保持模板顺序；
-  已有字段含改过的 label / hint / fill 原样保留），带快照与 `--dry-run`；面板侧是「栏目 → 编辑 → 同步模板字段」。
+  已有字段含改过的 label / hint / fill 原样保留），带 `--dry-run`；面板侧是「栏目 → 编辑 → 同步模板字段」。
   - **它还会报告「漂移」**：同名字段在「栏目 vs 模板」之间哪些属性不同（`changedFields`，含 diff 属性名）。
     这是**只提示、不动手**——因为定义归栏目，你可能就是刻意改过。要换成模板的新定义得手动来：
     `section update <id> --fields '<整份字段数组>'`，或先 `--remove-field` 再 `--add-field`（`--add-field` 遇到同名会报冲突）。

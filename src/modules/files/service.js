@@ -1,7 +1,7 @@
 // 附件（file）：统一附件库的业务编排。物理文件操作在 core/attachments.js，
 // 台账（store.files）的读写走 store.js——和 entries 一样的「两趟」结构：
 // 先在事务外完成文件移动/复制，再在 mutateStore 事务里改台账。
-import { loadStore, mutateStore, snapshotStore } from '../../core/store.js';
+import { loadStore, mutateStore } from '../../core/store.js';
 import { displayPath, filesDir } from '../../core/paths.js';
 import { badInput, external, notFound } from '../../core/errors.js';
 import { nowIso } from '../../core/ids.js';
@@ -144,7 +144,6 @@ export async function updateFile(ref, patch = {}) {
     };
   }
 
-  const snapshot = await snapshotStore(`file-update-${target.id}`);
   // 物理文件先改（失败即抛，台账不动）
   const relocated = hasPhysicalChange
     ? await relocateFile(store, target, {
@@ -162,7 +161,7 @@ export async function updateFile(ref, patch = {}) {
     r.updatedAt = nowIso();
   });
   const after = await loadStore();
-  return { status: 'ok', id: target.id, ...describeFile(mustFind(after, target.id)), snapshot };
+  return { status: 'ok', id: target.id, ...describeFile(mustFind(after, target.id)) };
 }
 
 export async function removeFile(ref, patch = {}) {
@@ -172,11 +171,10 @@ export async function removeFile(ref, patch = {}) {
   if (dryRun) {
     return { status: 'skipped', dryRun: true, wouldRemove: { id: target.id, name: target.name, category: target.category } };
   }
-  const snapshot = await snapshotStore(`file-remove-${target.id}`);
   // 先删物理文件（Windows 上文件被占用会直接抛错，台账保持不变）
   await deletePhysical(target);
   await mutateStore((s) => { s.files = s.files.filter((x) => x.id !== target.id); });
-  return { status: 'ok', removed: { id: target.id, name: target.name, category: target.category }, snapshot };
+  return { status: 'ok', removed: { id: target.id, name: target.name, category: target.category } };
 }
 
 /** CLI 的 file content：给出物理路径与链接（不直接吐二进制，终端里没法看）。 */
@@ -206,14 +204,13 @@ export async function restoreFileAction(ref, patch = {}) {
       wouldRestore: { to: patch.to || (target.sourcePath ? displayPath(target.sourcePath) : ''), copy: exportCopy },
     };
   }
-  const snapshot = await snapshotStore(`file-restore-${target.id}`);
   const r = await restoreFile(store, target, { to: patch.to, copy: exportCopy });
   if (!exportCopy) {
     await mutateStore((s) => { s.files = s.files.filter((x) => x.id !== target.id); });
   }
   // restored 标记：renderFileChange 靠它区分「还原」与「更新」——
   // 两者的 payload 都带 path，只看 path 会把 update 误报成还原（旧 bug）。
-  return { status: 'ok', restored: true, exported: exportCopy, kept: r.kept, path: r.path, displayPath: r.displayPath, snapshot };
+  return { status: 'ok', restored: true, exported: exportCopy, kept: r.kept, path: r.path, displayPath: r.displayPath };
 }
 
 export async function openFileAction(ref) {
@@ -264,14 +261,14 @@ export function renderFileGet(d) {
 
 export function renderFileChange(d) {
   if (d.status === 'skipped') return `试运行（未落盘）：${JSON.stringify(d.wouldAdd || d.wouldChange || d.wouldRemove || d.wouldRestore)}`;
-  if (d.removed) return `已删除附件 ${d.removed.name}（${d.removed.id}）\n快照: ${d.snapshot}`;
+  if (d.removed) return `已删除附件 ${d.removed.name}（${d.removed.id}）`;
   if (d.duplicated) return `库中已有相同文件，未重复存储：${d.name}（${d.id}）`;
   if (d.created) {
     return `已导入附件 ${d.name}（${d.id}）· ${d.categoryLabel}${d.moved ? ' · 原件已移入（nx-sk file restore 可还原）' : ''}`;
   }
   if (d.restored && d.exported) return `已导出副本到 ${d.displayPath}（库中保留原件）`;
-  if (d.restored) return `已还原到 ${d.displayPath}（台账记录已撤销）${d.snapshot ? `\n快照: ${d.snapshot}` : ''}`;
-  return `已更新附件 ${d.name}（${d.id}）\n快照: ${d.snapshot}`;
+  if (d.restored) return `已还原到 ${d.displayPath}（台账记录已撤销）`;
+  return `已更新附件 ${d.name}（${d.id}）`;
 }
 
 export function renderContent(d) {

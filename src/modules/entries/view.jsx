@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../web/frontend/api/client.js';
-import { checkZipFile, fmtBytes, isEncryptedZip, postZip } from '../../web/frontend/api/zip.js';
+import { checkZipFile, fmtBytes, isNeedPassphraseError, postZip } from '../../web/frontend/api/zip.js';
 import { useStore } from '../../web/frontend/store.jsx';
 import { CliHints, Empty, Modal, Tag } from '../../web/frontend/components/ui.jsx';
 import { FieldGroup } from '../../web/frontend/components/fieldEditor.jsx';
@@ -143,7 +143,7 @@ export default function SectionView({ sectionId }) {
   const removeEntry = guard(async () => {
     if (!current) return;
     const ok = await dialog({
-      message: `删除条目「${current.title}」？删除前会自动留一份快照在 ~/nx-sk/backup。`,
+      message: `删除条目「${current.title}」？删除不可恢复（没有自动快照）——需要留底就先在「导出导入」页导一份。`,
       danger: true,
       confirmText: '删除',
     });
@@ -213,12 +213,17 @@ export default function SectionView({ sectionId }) {
       toast(`读不到文件：${e.message}`, 'bad');
       return;
     }
-    if (isEncryptedZip(buffer)) {
-      setAsk({ fileName: file.name, buffer });
-      setAskPw('');
-      return;
+    // 加密包由服务端识别（外层 ZIP 里有 payload.enc）：先按明文试，它说缺口令再问
+    try {
+      await openZip(file.name, buffer, '');
+    } catch (e) {
+      if (isNeedPassphraseError(e)) {
+        setAsk({ fileName: file.name, buffer });
+        setAskPw('');
+        return;
+      }
+      toast(e.message || String(e), 'bad');
     }
-    await openZip(file.name, buffer, '');
   });
 
   const submitAsk = guard(async () => {

@@ -1,6 +1,6 @@
 // 栏目（section）：一组同构条目的容器 + 一份字段字典。
 // 字典是**数据**不是代码分支，所以 agent 与面板看到的字段永远一致。
-import { loadStore, mutateStore, snapshotStore } from '../../core/store.js';
+import { loadStore, mutateStore } from '../../core/store.js';
 import { assertFieldKey, assertSafeId } from '../../core/paths.js';
 import { badInput, blocked, conflict, notFound } from '../../core/errors.js';
 import { FILL_POLICIES, FIELD_TYPES, findSection, getTemplate, groupFields, instantiateTemplate, mergeTemplate, sectionNames, syncSectionGroups, templateSummaries } from '../../core/fields.js';
@@ -124,9 +124,8 @@ export async function addSection({ id, title, template, description, order, fiel
 
   if (dryRun) return { status: 'skipped', dryRun: true, wouldCreate: summarize(store, draft) };
 
-  const snapshot = await snapshotStore('section-add');
   await mutateStore((s) => { s.sections.push(draft); s.sections.sort((a, b) => a.order - b.order); });
-  return { status: 'ok', created: true, section: summarize(store, draft), snapshot };
+  return { status: 'ok', created: true, section: summarize(store, draft) };
 }
 
 export async function updateSection(ref, patch = {}) {
@@ -177,7 +176,6 @@ export async function updateSection(ref, patch = {}) {
   // —— 填写策略：--fill 字段=normal|optional|avoid ——
   // 放在 add/remove 之后，这样同一次调用里新加的字段也能顺手设策略。
   // 注意必须**复制**再改：nextFields 里是与 store 共享同一批对象引用的，
-  // 就地改 def.fill 会在 snapshotStore() **之前**污染真实数据，快照就不再是「改动前」的了。
   const fillMap = patch.fill;
   const fillChanged = [];
   if (fillMap !== undefined && fillMap !== null) {
@@ -222,7 +220,6 @@ export async function updateSection(ref, patch = {}) {
 
   if (dryRun) return { status: 'skipped', dryRun: true, wouldChange: changes, added, removed, fillChanged };
 
-  const snapshot = await snapshotStore('section-update');
   await mutateStore((s) => {
     const t = mustFind(s, ref);
     Object.assign(t, changes);
@@ -230,7 +227,7 @@ export async function updateSection(ref, patch = {}) {
     s.sections.sort((a, b) => a.order - b.order);
   });
   const after = await loadStore();
-  return { status: 'ok', id: target.id, changed: Object.keys(changes), added, removed, fillChanged, section: summarize(after, mustFind(after, target.id)), snapshot };
+  return { status: 'ok', id: target.id, changed: Object.keys(changes), added, removed, fillChanged, section: summarize(after, mustFind(after, target.id)) };
 }
 
 /**
@@ -263,7 +260,6 @@ export async function syncSection(ref, { 'dry-run': dryRun } = {}) {
     return { status: 'skipped', dryRun: true, wouldSync: { groups: addedGroups, fields: addedFields }, changedFields };
   }
 
-  const snapshot = await snapshotStore(`section-sync-${target.id}`);
   await mutateStore((s) => {
     const t = mustFind(s, ref);
     t.groups = groups;
@@ -273,7 +269,7 @@ export async function syncSection(ref, { 'dry-run': dryRun } = {}) {
   const after = await loadStore();
   return {
     status: 'ok', id: target.id, addedGroups, addedFields, changedFields,
-    section: summarize(after, mustFind(after, target.id)), snapshot,
+    section: summarize(after, mustFind(after, target.id)),
   };
 }
 
@@ -293,12 +289,11 @@ export async function removeSection(ref, { force, 'dry-run': dryRun } = {}) {
     return { status: 'skipped', dryRun: true, wouldRemove: { id: target.id, title: target.title, entries: owned.length } };
   }
 
-  const snapshot = await snapshotStore(`section-remove-${target.id}`);
   await mutateStore((s) => {
     s.sections = s.sections.filter((x) => x.id !== target.id);
     s.entries = s.entries.filter((e) => e.section !== target.id);
   });
-  return { status: 'ok', removed: { id: target.id, title: target.title, entries: owned.length }, snapshot };
+  return { status: 'ok', removed: { id: target.id, title: target.title, entries: owned.length } };
 }
 
 /** 一个栏目的**全部信息**：字段字典 + 所有条目 + 未填清单。 */
@@ -397,24 +392,24 @@ export function renderSectionChange(d) {
   // 否则 `section update` 会打印「已删除栏目 undefined」，
   // 而 `.entries` 还会取到 Array.prototype.entries 变成 `function entries() { [native code] }`。
   if (d.removed && !Array.isArray(d.removed)) {
-    return `已删除栏目 ${d.removed.id}（连带 ${d.removed.entries} 条条目）\n快照: ${d.snapshot}`;
+    return `已删除栏目 ${d.removed.id}（连带 ${d.removed.entries} 条条目）`;
   }
   if (d.upToDate) {
     return `栏目 ${d.id} 已是最新：模板里没有需要补的分组或字段。${driftNote(d.changedFields)}`;
   }
-  if (d.created) return `已创建栏目 ${d.section.id} · ${d.section.title}（${d.section.fields} 字段）\n快照: ${d.snapshot}`;
+  if (d.created) return `已创建栏目 ${d.section.id} · ${d.section.title}（${d.section.fields} 字段）`;
   // sync：只增不改——把模板新增、栏目还缺的分组/字段补进来
   if (d.addedFields || d.addedGroups) {
     const bits = [
       d.addedGroups?.length ? `新增分组 ${d.addedGroups.join(', ')}` : '',
       d.addedFields?.length ? `新增字段 ${d.addedFields.join(', ')}` : '',
     ].filter(Boolean).join('；');
-    return `已同步栏目 ${d.id} 的模板字段：${bits}\n快照: ${d.snapshot}${driftNote(d.changedFields)}`;
+    return `已同步栏目 ${d.id} 的模板字段：${bits}${driftNote(d.changedFields)}`;
   }
   const extra = [
     d.added?.length ? `新增字段 ${d.added.join(', ')}` : '',
     d.removed?.length ? `删除字段 ${d.removed.join(', ')}` : '',
     d.fillChanged?.length ? `填写策略 ${d.fillChanged.join(', ')}` : '',
   ].filter(Boolean).join('；');
-  return `已更新栏目 ${d.id}：${d.changed.join(', ')}${extra ? `\n${extra}` : ''}\n快照: ${d.snapshot}`;
+  return `已更新栏目 ${d.id}：${d.changed.join(', ')}${extra ? `\n${extra}` : ''}`;
 }
