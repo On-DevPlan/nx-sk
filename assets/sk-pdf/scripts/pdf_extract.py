@@ -24,10 +24,10 @@ import argparse
 import os
 import sys
 
-try:
-    import pymupdf
-except ImportError:
-    sys.exit("需要 PyMuPDF：pip install pymupdf")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _deps import require_pymupdf
+
+pymupdf = require_pymupdf()
 
 # 低于这个尺寸的多半是页眉 logo / 分隔线 / 装饰，不该进 SOP
 MIN_IMG_W = 200

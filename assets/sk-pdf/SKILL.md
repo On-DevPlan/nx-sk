@@ -141,18 +141,61 @@ nx-sk serve --port 7866
 
 ## 工具
 
-`scripts/` 下两个零依赖脚本（本 skill 随 nx-sk 分发，也可单独拷走用）：
+`scripts/` 下两个脚本（**只依赖 PyMuPDF**，见下面的技术栈；本 skill 随 nx-sk 分发，也可单独拷走用）：
 
 | 脚本 | 作用 |
 | --- | --- |
 | `pdf_probe.py` | 探查：页数 / 每页图数 / 图片尺寸分布 / 页面尺寸 |
 | `pdf_extract.py` | 抽取：文字 + 图片占位的 md、图片导出、`--images-only` |
 
-依赖 PyMuPDF（本机 managed venv 已装）：
+## 技术栈（动手前先确认）
+
+**只用 PyMuPDF 一个第三方库**，其余全是 Python 标准库。
+
+| 依赖 | 用途 | 必需 |
+| --- | --- | --- |
+| **PyMuPDF**（`import pymupdf`） | 读页面、文字块、**图片矩形坐标**、导出图片 | 是 |
+| `argparse` / `os` / `sys` / `collections` | 标准库 | — |
+| Python | ≥ 3.9（脚本用 `:=` 需 3.8+） | ≥ 3.9 |
+
+**不用 Pillow、pdfplumber、pypdf** —— 实测都不需要：
+取文字块和图片矩形 PyMuPDF 一个库就够，装多余的库只会让「换台机器跑」更容易失败。
+
+**为什么是 PyMuPDF**：唯一能给出 `get_image_rects()`（图片在页面上的**摆放矩形**）。
+本流程的图文拼接靠的就是 y 坐标，没有它就只能按 xref 顺序瞎猜 → 图全配错步骤。
+别的库给不出位置，就都不适用。
+
+### 确认依赖在位
+
+```bash
+python -c "import pymupdf; print(pymupdf.__version__)"
+```
+
+本机（WorkBuddy managed venv，已装 PyMuPDF 1.28.2 / Pillow 13 / pypdf 6.21 / Python 3.13）：
 
 ```bash
 ~/.workbuddy/binaries/python/envs/default/Scripts/python.exe -c "import pymupdf; print(pymupdf.__version__)"
 ```
+
+### 缺依赖怎么办
+
+报 `ModuleNotFoundError: No module named 'pymupdf'` 就装。**装进当前解释器，别装全局**：
+
+```bash
+python -m pip install pymupdf        # 常规
+# 或用本机托管环境（WorkBuddy）
+~/.workbuddy/binaries/python/envs/default/Scripts/python.exe -m pip install pymupdf
+```
+
+**注意**：Windows 上 `python` 可能是 Microsoft Store 的占位符或指向另一个环境，
+装完仍报同样错误。改用上面那条完整路径的 `python.exe` 确认一遍。
+
+### OCR（扫描件才需要）
+
+本流程**不含 OCR**，也没装任何 OCR 库。扫描件（`pdf_probe.py` 报「无文字层的页」）要另行处理：
+装 OCR 工具（Tesseract / PaddleOCR 等）把 PDF 转成带文字层的，再走本流程。
+
+**不要对着纯图像页猜正文** —— 很容易编造出原文没有的内容，那比缺正文更糟。
 
 ## 参考
 

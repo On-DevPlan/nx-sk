@@ -10,13 +10,14 @@
 
 用法上先跑这个、再跑 pdf_extract.py：盲目抽图是最常见的浪费。
 """
+import os
 import sys
 from collections import Counter
 
-try:
-    import pymupdf
-except ImportError:
-    sys.exit("需要 PyMuPDF：pip install pymupdf")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _deps import require_pymupdf
+
+pymupdf = require_pymupdf()
 
 
 def probe(path):
