@@ -18,6 +18,7 @@ import { badInput } from './errors.js';
 import { displayPath, filesDir, isInside, toPosix } from './paths.js';
 import { ensureDir, hashFile } from './fsx.js';
 import { newId, nowIso } from './ids.js';
+import { mdImageIds } from './mdimages.js';
 
 // —— 分类 ——
 export const FILE_CATEGORIES = [
@@ -162,28 +163,51 @@ export function findFileRecord(store, ref) {
 }
 
 /**
- * 反向链接：哪些条目的 `file` 字段引用了这个附件。
- * 条目里 `file` 字段的值 = 附件 id（或唯一文件名）；一个字段可挂多个，
- * 所以这里按 `fileIdsOf` 逐个成员判断——列表里的**任一** id 都能反查到，
+ * 反向链接：哪些条目的**哪些字段**引用了这个附件。
+ *
+ * 两种引用方式都要认，否则附件中心会把「只在正文里贴过」的图片判成未引用：
+ *   1. `file` 字段 —— 值是附件 id（或唯一文件名），一个字段可挂多个，
+ *      按 `fileIdsOf` 逐个成员判断，**任一** id 命中即算。
+ *   2. `md` 字段  —— 正文里的 `![说明](f_xxx)`（见 mdimages.mdImageIds）。
+ *      图片是**内嵌在 markdown 里**的，和 file 字段一样是正式引用。
  * 同一个（条目, 字段）只出一条。附件中心据此显示「被哪些栏目 / 条目 / 字段用到」。
  */
 export function fileReferences(store, rec) {
   if (!rec) return [];
+  // 按 **id** 判定命中，不做对象引用比较（`===`）：调用方拿到的往往是
+  // listFiles 加工过的副本，引用比较会静默失配 —— 附件就被误判成「未引用」了。
+  // 正文里也可能是文件名而不是 id，所以两种解析结果都算命中。
+  const targetId = String(rec.id ?? '');
+  const targetName = String(rec.name ?? '');
+  const hits = (refs) => refs.some((ref) => {
+    if (targetId && ref === targetId) return true;
+    const found = findFileRecord(store, ref);
+    if (!found) return false;
+    return (targetId && found.id === targetId) || (targetName && found.name === targetName);
+  });
+
   const out = [];
   for (const sec of store.sections || []) {
+    // 一次栏目只扫一遍条目，别在字段循环里反复全表扫
+    const entries = (store.entries || []).filter((e) => e.section === sec.id);
+    if (!entries.length) continue;
     const fileFields = (sec.fields || []).filter((f) => f.type === 'file');
-    if (!fileFields.length) continue;
-    for (const e of store.entries || []) {
-      if (e.section !== sec.id) continue;
+    const mdFields = (sec.fields || []).filter((f) => f.type === 'md');
+    if (!fileFields.length && !mdFields.length) continue;
+
+    for (const e of entries) {
+      const push = (f) => out.push({
+        sectionId: sec.id, sectionTitle: sec.title,
+        entryId: e.id, entryTitle: e.title,
+        fieldKey: f.key, fieldLabel: f.label,
+      });
       for (const f of fileFields) {
         const ids = fileIdsOf(e.values?.[f.key]);
-        if (!ids.length) continue;
-        if (!ids.some((id) => findFileRecord(store, id) === rec)) continue;
-        out.push({
-          sectionId: sec.id, sectionTitle: sec.title,
-          entryId: e.id, entryTitle: e.title,
-          fieldKey: f.key, fieldLabel: f.label,
-        });
+        if (ids.length && hits(ids)) push(f);
+      }
+      for (const f of mdFields) {
+        const ids = mdImageIds(e.values?.[f.key]);
+        if (ids.length && hits(ids)) push(f);
       }
     }
   }
@@ -191,12 +215,13 @@ export function fileReferences(store, rec) {
 }
 
 /**
- * 附件中心的分组素材：哪些栏目带 `file` 字段。
+ * 附件中心的分组素材：哪些栏目**可能**引用附件。
  * 中心据此按栏目筛选 / 分组 —— 组织方式**完全由栏目驱动，不预定义任何分类或槽位**。
+ * 带 `file` 或 `md` 字段的栏目都算数：md 字段正文里贴的图也是正式引用。
  */
 export function collectFileSections(store) {
   return (store.sections || [])
-    .filter((s) => (s.fields || []).some((f) => f.type === 'file'))
+    .filter((s) => (s.fields || []).some((f) => f.type === 'file' || f.type === 'md'))
     .map((s) => ({ id: s.id, title: s.title }));
 }
 

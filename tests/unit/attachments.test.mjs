@@ -354,3 +354,72 @@ test('listFiles 分页：limit/offset 只切过滤后的列表，默认仍全量
   assert.equal(p2.files.length, 1);
   assert.equal(p2.page.hasMore, false);
 });
+
+// —— md 字段里的图片也是正式引用 ——
+// 真实问题：图片贴进 md 正文后，附件中心把它判成「未引用」，
+// 于是「未引用」筛选会把它捞出来，用户以为附件是孤儿。正文里的 `![…](f_xxx)`
+// 和 file 字段是一回事，必须同样反查到。
+test('md 正文里的图片算已引用（不再显示未引用）', async () => {
+  const sections = await import('../../src/modules/sections/service.js');
+  const store = await import('../../src/core/store.js');
+  const src = await makeSource('md-src', '正文图片.png', `md-body-image-${Date.now()}-${Math.random()}`);
+  const pic = await svc.addFile({ path: src, copy: true });
+
+  const sid = 'mdsect';
+  await sections.addSection({ id: sid, title: '图文栏目', fields: [{ key: 'sop', label: '正文', type: 'md' }] });
+  const e = await entries.addEntry({ section: sid, title: '带图的条目', set: { sop: `步骤一\n\n![截图](${pic.id})\n\n步骤二` } });
+
+  const rec = (await svc.listFiles({ q: '正文图片' })).files[0];
+  const refs = core.fileReferences(await store.loadStore(), rec);
+  const hit = refs.find((r) => r.entryId === e.id);
+  assert.ok(hit, 'md 正文里的图片应能反查到');
+  assert.equal(hit.fieldKey, 'sop');
+  assert.equal(hit.sectionId, sid);
+
+  // 更重要的一层：不然它就会进「未引用」筛选，用户以为附件是孤儿
+  const orphan = await svc.listFiles({ section: 'none' });
+  assert.equal(orphan.files.some((f) => f.id === pic.id), false, 'md 引用过的图片不应出现在未引用列表');
+});
+
+test('外链图片不算引用（本来就不在附件库里）', async () => {
+  const sections = await import('../../src/modules/sections/service.js');
+  // 内容必须与上一个用例不同：附件按 sha256 去重，写一样会复用同一个 id，测的就不是这个了
+  const src = await makeSource('md-src', '纯外链.png', `md-external-only-${Date.now()}-${Math.random()}`);
+  const pic = await svc.addFile({ path: src, copy: true });
+
+  const sid = 'mdsect2';
+  await sections.addSection({ id: sid, title: '外链栏目', fields: [{ key: 'sop', label: '正文', type: 'md' }] });
+  await entries.addEntry({ section: sid, title: '只有外链', set: { sop: '![网图](https://example.com/a.png)' } });
+
+  const orphan = await svc.listFiles({ section: 'none' });
+  assert.equal(orphan.files.some((f) => f.id === pic.id), true, '没被真正引用就该留在未引用列表');
+});
+
+test('collectFileSections 把只有 md 字段的栏目也算进去', async () => {
+  const store = await import('../../src/core/store.js');
+  const ids = core.collectFileSections(await store.loadStore()).map((s) => s.id);
+  assert.ok(ids.includes('mdsect'), '只有 md 字段的栏目也该出现在附件中心的栏目筛选里');
+  assert.ok(ids.includes('mdsect2'));
+});
+
+test('fileReferences 传加工过的副本也能命中（不靠对象引用比较）', async () => {
+  // 真实坑：早先的判定是 `findFileRecord(store, id) === rec`（对象引用相等）。
+  // 而调用方拿到的通常是 listFiles 加工过的**副本**，引用不同 → 静默判成「未引用」。
+  // 这里显式传一份结构相同的新对象，必须照样反查到。
+  const sections = await import('../../src/modules/sections/service.js');
+  const store = await import('../../src/core/store.js');
+  const src = await makeSource('md-src', '副本传参.png', `copy-semantics-${Math.random()}`);
+  const pic = await svc.addFile({ path: src, copy: true });
+
+  const sid = 'copysect';
+  await sections.addSection({ id: sid, title: '副本栏目', fields: [{ key: 'docs', label: '资料', type: 'file' }] });
+  const e = await entries.addEntry({ section: sid, title: '被引用条目', set: { docs: pic.id } });
+
+  const st = await store.loadStore();
+  const copy = { ...st.files.find((f) => f.id === pic.id) }; // 全新对象，不是 store 里那个
+  assert.notEqual(copy, st.files.find((f) => f.id === pic.id), '确实是另一个对象');
+
+  const refs = core.fileReferences(st, copy);
+  assert.equal(refs.length, 1, '副本传参也要能反查到');
+  assert.equal(refs[0].entryId, e.id);
+});
