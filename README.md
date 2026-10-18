@@ -132,7 +132,7 @@ CLI 与 API 同源，skill 驱动 agent**。落到具体功能上：
 | `nx-sk file open <id>` | 用系统默认程序打开原件 |
 | `nx-sk export run [--format json\|md\|both] [--section id] [--with-secrets] [--out DIR] [--dry-run]` | 整体导出 |
 | `nx-sk export list` | 历次导出与目录内文件 |
-| `nx-sk transfer export <栏目> [--entries 条目,条目] [--out 文件] [--no-secrets]` | 栏目/选中条目 + 引用附件打成 ZIP（栏目页「更多」里同源下载） |
+| `nx-sk transfer export <栏目> [--entries 条目,条目] [--passphrase 口令] [--out 文件] [--no-secrets]` | 栏目/选中条目 + 引用附件打成 ZIP，可设口令加密（栏目页「更多」里同源下载） |
 | `nx-sk transfer import <栏目> [--file ZIP] [--on-conflict skip\|copy\|overwrite] [--dry-run]` | 预览/导入到指定栏目；附件按 sha256 复用 |
 | `nx-sk transfer import-new [--file ZIP] [--dry-run]` | **零配置**：按包内结构新建栏目（id 冲突加序号） |
 | `nx-sk backup export [--password 口令] [--out DIR] [--with-files] [--dry-run]` | 口令对称加密整库，导出单个 `.nxskbak`（口令不落盘；`--with-files` 连附件原件） |
@@ -269,6 +269,7 @@ nx-sk transfer bundle-import --file all.zip --on-conflict copy
 nx-sk transfer export deploy --out D:/tmp/deploy.zip            # 含凭据明文
 nx-sk transfer export deploy --out D:/tmp/share.zip --no-secrets # 打码，给别人
 nx-sk transfer export deploy --entries "k8s-deployment,compose" --out D:/tmp/part.zip  # 只导选中条目
+nx-sk transfer bundle-export --sections job,deploy --passphrase 口令 --out D:/tmp/enc.zip # 整包加密
 nx-sk transfer import deploy2 --file D:/tmp/deploy.zip --dry-run # 先预览：新增/冲突/补字段/附件
 nx-sk transfer import deploy2 --file D:/tmp/deploy.zip           # 栏目不存在就新建
 nx-sk transfer import deploy2 --file D:/tmp/deploy.zip --on-conflict copy      # 另存

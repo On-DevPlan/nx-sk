@@ -20,3 +20,18 @@ export function checkZipFile(file) {
   if (file.size > 64 * 1024 * 1024) return 'ZIP 超过 64MB，请改用 CLI 导入';
   return '';
 }
+
+// 加密信封的 magic（与 core/securezip.js 的 ENC_MAGIC 一致）。
+// 前端只需要「是不是加密包」这一个判断：是的话先问口令，再送去预览。
+const ENC_MAGIC = 'NXSKENC1';
+const ENC_HEADER = ENC_MAGIC.length + 16 + 12 + 16;
+
+/** 看头 8 字节判定加密包；数据不够长时按明文处理。 */
+export function isEncryptedZip(buffer) {
+  const b = buffer instanceof ArrayBuffer ? new Uint8Array(buffer) : new Uint8Array(buffer?.buffer || buffer || []);
+  if (b.length < ENC_HEADER) return false;
+  for (let i = 0; i < ENC_MAGIC.length; i += 1) {
+    if (b[i] !== ENC_MAGIC.charCodeAt(i)) return false;
+  }
+  return true;
+}

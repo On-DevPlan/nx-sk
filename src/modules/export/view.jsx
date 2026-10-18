@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from 'react';
 import { api } from '../../web/frontend/api/client.js';
 import { useStore } from '../../web/frontend/store.jsx';
 import { CliHints, Copyable, Empty, Modal, Tag } from '../../web/frontend/components/ui.jsx';
-import BackupPanel from '../backup/view.jsx';
 import TransferPanel from '../../web/frontend/components/transferPanel.jsx';
 
 // 「导出与备份」合并页：明文导出（带走可读文件）与口令加密备份（整份可还原）
@@ -67,13 +66,13 @@ export default function ExportView() {
     <>
       <div className="toolbar rowgap pad">
         <strong>导出与备份</strong>
-        <span className="muted">明文导出走可读文件（JSON / Markdown），加密备份走口令保护的 .nxskbak（整份可还原）；都只在本机落盘</span>
+        <span className="muted">按栏目 = ZIP（可勾选条目、可设口令）；整库备份 = 口令保护的 .nxskbak（含设置与附件台账）。同一个「倒出去 / 倒回来」</span>
       </div>
 
       <TransferPanel />
 
-      <div className="card">
-        <div className="colhead">另外：导出为可读 JSON / Markdown</div>
+      <details className="card adv">
+        <summary className="colhead">高级：导出为可读 JSON / Markdown（落到本机目录，不是浏览器下载）</summary>
         <div className="pad">
           <div className="grid">
             <div className="field">
@@ -116,9 +115,7 @@ export default function ExportView() {
             <button className="btn ghost" onClick={() => run(true)}>试运行（不写盘）</button>
           </div>
         </div>
-      </div>
-
-      <BackupPanel />
+      </details>
 
       <div className="card">
         <div className="colhead">历次导出<span className="right muted">{history?.count ?? 0}</span></div>

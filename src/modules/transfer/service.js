@@ -15,6 +15,7 @@ import fsp from 'node:fs/promises';
 import { basename, dirname, extname, join, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 import { createZip, readZip } from '../../core/zip.js';
+import { isEncryptedPackage, openPackage, sealPackage } from '../../core/securezip.js';
 import { loadStore, mutateStore, snapshotStore } from '../../core/store.js';
 import { displayPath, exportDir, VERSION } from '../../core/paths.js';
 import { findSection, isSensitiveField, sectionNames } from '../../core/fields.js';
@@ -92,7 +93,7 @@ const extensionOf = (rec) => rec.ext || extname(rec.name || '').toLowerCase();
 /**
  * 生成栏目 ZIP（内存里）。返回 { buffer, fileName, stats }。
  */
-export async function buildSectionZip(ref, { withSecrets = true, entryIds } = {}) {
+export async function buildSectionZip(ref, { withSecrets = true, entryIds, passphrase } = {}) {
   const store = await loadStore();
   const section = findSection(store, ref);
   if (!section) throw notFound(`找不到栏目: ${ref} —— 现有: ${sectionNames(store)}`);
@@ -174,11 +175,14 @@ export async function buildSectionZip(ref, { withSecrets = true, entryIds } = {}
     'manifest.json 是数据本体；attachments/ 是附件原件。',
   ].join('\n');
 
-  const buffer = createZip([
+  const plain = createZip([
     { name: 'manifest.json', data: JSON.stringify(manifest, null, 2) + '\n' },
     { name: 'README.txt', data: readme },
     ...zipEntries,
   ]);
+  // 口令只作用在**最外层**：附件与 manifest 一起被加密，包里任何文件名都不泄露。
+  const encrypted = !!String(passphrase ?? '');
+  const buffer = encrypted ? sealPackage(plain, passphrase) : plain;
 
   return {
     buffer,
@@ -186,13 +190,14 @@ export async function buildSectionZip(ref, { withSecrets = true, entryIds } = {}
     stats: {
       section: section.id, sectionTitle: section.title, entries: entries.length,
       available: all.length, files: fileRecords.length, bytes: buffer.length, missingFiles, withSecrets,
+      encrypted,
     },
   };
 }
 
 /** CLI：写到磁盘（缺省 ~/nx-sk/export）。 */
-export async function exportToFile(ref, { out, withSecrets = true, entryIds } = {}) {
-  const { buffer, fileName, stats } = await buildSectionZip(ref, { withSecrets, entryIds });
+export async function exportToFile(ref, { out, withSecrets = true, entryIds, passphrase } = {}) {
+  const { buffer, fileName, stats } = await buildSectionZip(ref, { withSecrets, entryIds, passphrase });
   let target = out ? resolve(out) : join(exportDir(), fileName);
   // --out 指向已存在的目录时自动拼文件名；否则按文件路径处理
   try {
@@ -205,8 +210,8 @@ export async function exportToFile(ref, { out, withSecrets = true, entryIds } = 
 }
 
 /** HTTP raw：直接回 zip 流。 */
-export async function serveExportZip(ref, { res, withSecrets = true, entryIds } = {}) {
-  const { buffer, fileName, stats } = await buildSectionZip(ref, { withSecrets, entryIds });
+export async function serveExportZip(ref, { res, withSecrets = true, entryIds, passphrase } = {}) {
+  const { buffer, fileName, stats } = await buildSectionZip(ref, { withSecrets, entryIds, passphrase });
   res.writeHead(200, {
     'content-type': 'application/zip',
     'content-length': buffer.length,
@@ -221,12 +226,17 @@ export async function serveExportZip(ref, { res, withSecrets = true, entryIds } 
 // 避免几百 MB 的包被解两遍。
 const bundleCache = new WeakMap();
 
-function parseBundle(buffer, fileName) {
-  const hit = bundleCache.get(buffer);
+function parseBundle(buffer, fileName, passphrase) {
+  const encrypted = isEncryptedPackage(buffer);
+  // 先解信封：明文包原样返回，加密包在这里校验口令（错了就抛，不会走到后面的解析）。
+  const plain = openPackage(buffer, passphrase);
+  // 缓存只在**明文包**上用。密文包的解析结果依赖口令，按 buffer 缓存会让后续
+  // 「没给口令」的调用命中别人解出来的结果——等于把口令检查绕过去了。
+  const hit = encrypted ? null : bundleCache.get(buffer);
   if (hit) return hit;
   let files;
   try {
-    files = readZip(buffer);
+    files = readZip(plain);
   } catch (e) {
     throw badInput(`ZIP 解析失败：${e.message}`);
   }
@@ -246,8 +256,8 @@ function parseBundle(buffer, fileName) {
   if (!manifest.section || !Array.isArray(manifest.entries) || !Array.isArray(manifest.files)) {
     throw badInput('manifest.json 结构不完整（缺 section / entries / files）');
   }
-  const parsed = { manifest, map, fileName: fileName || 'upload.zip' };
-  bundleCache.set(buffer, parsed);
+  const parsed = { manifest, map, fileName: fileName || 'upload.zip', encrypted };
+  if (!encrypted) bundleCache.set(buffer, parsed);
   return parsed;
 }
 
@@ -265,8 +275,8 @@ const entryTitleIndex = (entries) => {
  * 预览导入：**不落盘**，只回答「会变成什么」。
  * 冲突、字段缺口、附件去重、打码凭据都在这里算清楚，UI 直接展示。
  */
-export async function previewImport(ref, buffer, { fileName } = {}) {
-  const { manifest, map } = parseBundle(buffer, fileName);
+export async function previewImport(ref, buffer, { fileName, passphrase } = {}) {
+  const { manifest, map, encrypted } = parseBundle(buffer, fileName, passphrase);
   const store = await loadStore();
   const target = ref ? findSection(store, ref) : null;
   // 目标解析：显式 ref 优先；**不传 ref = 零配置** —— 按包内 id 新建，
@@ -303,6 +313,14 @@ export async function previewImport(ref, buffer, { fileName } = {}) {
       });
     }
   }
+  // 「另存」时会变成什么标题，提前算给 UI。否则用户只能等导完才知道重名被改成什么样。
+  if (conflicts.length) {
+    const taken = new Set(targetEntries.map((x) => x.title));
+    for (const c of conflicts) {
+      c.copyTitle = uniqueTitle(c.title || '（无名）', taken);
+      taken.add(c.copyTitle);
+    }
+  }
 
   let zipBytes = 0;
   let newFiles = 0;
@@ -337,6 +355,7 @@ export async function previewImport(ref, buffer, { fileName } = {}) {
   return {
     status: 'preview',
     fileName,
+    encrypted: !!encrypted,
     exportedAt: manifest.exportedAt,
     appVersion: manifest.appVersion,
     withSecrets: !!manifest.withSecrets,
@@ -405,12 +424,15 @@ async function storeAttachment({ data, name, category }) {
 /**
  * 真正导入。先跑一次 preview（拿同一份 store 视图），再落盘。
  */
-export async function applyImport(ref, buffer, { fileName, onConflict = 'skip' } = {}) {
+export async function applyImport(ref, buffer, { fileName, onConflict = 'skip', passphrase } = {}) {
   if (!CONFLICT_POLICIES.includes(onConflict)) {
     throw badInput(`冲突策略只能是 ${CONFLICT_POLICIES.join(' / ')}，收到 ${JSON.stringify(onConflict)}`);
   }
-  const preview = await previewImport(ref, buffer, { fileName });
-  const { manifest, map } = parseBundle(buffer, fileName);
+  // 解密只做一次：预览与随后的落盘都吃这份明文，否则同一个大包会被 GCM 解两遍。
+  const plain = openPackage(buffer, passphrase);
+  const encrypted = isEncryptedPackage(buffer);
+  const preview = await previewImport(ref, plain, { fileName });
+  const { manifest, map } = parseBundle(plain, fileName);
   const targetId = preview.section.targetId;
   const snapshot = await snapshotStore('section-import');
 
@@ -478,10 +500,12 @@ export async function applyImport(ref, buffer, { fileName, onConflict = 'skip' }
         overwritten += 1;
         continue;
       }
-      // copy：另存为新条目，标题去重（标题是 CLI 的定位键，不能重名）
+      // copy：另存为新条目，标题去重（标题是 CLI 的定位键，不能重名）。
+      // 基准用**原标题**而不是「标题（导入）」—— 否则二次重名会变成「A（导入）（导入）」，
+      // 与预览里算给用户看的 copyTitle 也对不上。
     }
     const title = hit
-      ? uniqueTitle(`${src.title}（导入）`, takenTitles)
+      ? uniqueTitle(src.title, takenTitles)
       : uniqueTitle(src.title, takenTitles);
     const created = await addEntry({ section: targetId, title, set: values, tags: src.tags });
     takenTitles.add(created.title);
@@ -491,6 +515,7 @@ export async function applyImport(ref, buffer, { fileName, onConflict = 'skip' }
 
   return {
     status: 'ok',
+    encrypted,
     section: { id: targetId, title: section.title, created: sectionCreated },
     entries: { added, copied, overwritten, skipped, total: manifest.entries.length },
     files: { added: filesAdded, reused: filesReused, bytes: filesBytes },
@@ -503,7 +528,7 @@ export async function applyImport(ref, buffer, { fileName, onConflict = 'skip' }
 
 
 /** CLI：从文件导入（预览 or 应用）。 */
-export async function importFromFile(ref, { file, onConflict = 'skip', dryRun = false } = {}) {
+export async function importFromFile(ref, { file, onConflict = 'skip', dryRun = false, passphrase } = {}) {
   if (!file) throw badInput('缺少 --file <zip 路径>');
   let buffer;
   try {
@@ -513,15 +538,15 @@ export async function importFromFile(ref, { file, onConflict = 'skip', dryRun = 
   }
   const fileName = basename(file);
   return dryRun
-    ? previewImport(ref, buffer, { fileName })
-    : applyImport(ref, buffer, { fileName, onConflict });
+    ? previewImport(ref, buffer, { fileName, passphrase })
+    : applyImport(ref, buffer, { fileName, onConflict, passphrase });
 }
 
 /** HTTP：二进制 body（跳过 JSON 解析），直接交给 preview / apply。 */
-export function importFromBuffer(ref, buffer, { fileName, onConflict, dryRun }) {
+export function importFromBuffer(ref, buffer, { fileName, onConflict, dryRun, passphrase }) {
   return dryRun
-    ? previewImport(ref, buffer, { fileName })
-    : applyImport(ref, buffer, { fileName, onConflict });
+    ? previewImport(ref, buffer, { fileName, passphrase })
+    : applyImport(ref, buffer, { fileName, onConflict, passphrase });
 }
 
 
@@ -545,7 +570,7 @@ function normalizeSelection(input) {
   return out;
 }
 
-export async function buildBundleZip({ sections, withSecrets = true } = {}) {
+export async function buildBundleZip({ sections, withSecrets = true, passphrase } = {}) {
   const sel = normalizeSelection(sections);
   const parts = [];
   const index = [];
@@ -579,20 +604,27 @@ export async function buildBundleZip({ sections, withSecrets = true } = {}) {
     '导入：面板「导出与备份 → 导出导入」，或',
     '  nx-sk transfer bundle-import --file <本文件> --dry-run',
   ].join('\n');
-  const buffer = createZip([
+  const plain = createZip([
     { name: 'bundle.json', data: JSON.stringify(manifest, null, 2) + '\n' },
     { name: 'README.txt', data: readme },
     ...parts,
   ]);
+  // 外层整体加密：内层各栏目 zip 不再单独加密（同一个口令没必要解 N 遍），
+  // 同时把「里面有哪些栏目」也一并藏起来。
+  const encrypted = !!String(passphrase ?? '');
+  const buffer = encrypted ? sealPackage(plain, passphrase) : plain;
   return {
     buffer,
     fileName: `nx-sk-bundle-${stamp()}.zip`,
-    stats: { sections: index.length, entries: manifest.counts.entries, files: manifest.counts.files, bytes: buffer.length, withSecrets },
+    stats: {
+      sections: index.length, entries: manifest.counts.entries, files: manifest.counts.files,
+      bytes: buffer.length, withSecrets, encrypted,
+    },
   };
 }
 
-export async function exportBundleToFile({ sections, out, withSecrets = true, dryRun = false } = {}) {
-  const { buffer, fileName, stats } = await buildBundleZip({ sections, withSecrets });
+export async function exportBundleToFile({ sections, out, withSecrets = true, dryRun = false, passphrase } = {}) {
+  const { buffer, fileName, stats } = await buildBundleZip({ sections, withSecrets, passphrase });
   if (dryRun) {
     return { status: 'skipped', dryRun: true, wouldWrite: { fileName, ...stats } };
   }
@@ -606,10 +638,11 @@ export async function exportBundleToFile({ sections, out, withSecrets = true, dr
   return { status: 'ok', path: displayPath(target), pathRaw: target, bytes: await fileSize(target), ...stats };
 }
 
-export async function serveBundleZip({ sections, res, withSecrets = true } = {}) {
-  const { buffer, fileName } = await buildBundleZip({ sections, withSecrets });
+export async function serveBundleZip({ sections, res, withSecrets = true, passphrase } = {}) {
+  const { buffer, fileName, stats } = await buildBundleZip({ sections, withSecrets, passphrase });
   res.writeHead(200, {
-    'content-type': 'application/zip',
+    // 加密包不是 zip：给 octet-stream，别让浏览器 / 代理按 zip 去嗅探
+    'content-type': stats.encrypted ? 'application/octet-stream' : 'application/zip',
     'content-length': buffer.length,
     'content-disposition': `attachment; filename="nx-sk-bundle.zip"; filename*=UTF-8''${encodeURIComponent(fileName)}`,
     'cache-control': 'no-store',
@@ -617,9 +650,10 @@ export async function serveBundleZip({ sections, res, withSecrets = true } = {})
   res.end(buffer);
 }
 
-function parseGlobalBundle(buffer) {
+function parseGlobalBundle(buffer, passphrase) {
+  const plain = openPackage(buffer, passphrase);
   let files;
-  try { files = readZip(buffer); } catch (e) { throw badInput(`ZIP 解析失败：${e.message}`); }
+  try { files = readZip(plain); } catch (e) { throw badInput(`ZIP 解析失败：${e.message}`); }
   const map = new Map(files.map((f) => [f.name, f.data]));
   const raw = map.get('bundle.json');
   if (!raw) throw badInput('不是全局导出包：缺少 bundle.json');
@@ -636,8 +670,8 @@ function parseGlobalBundle(buffer) {
   return { manifest, items };
 }
 
-export async function previewBundle(buffer, { fileName } = {}) {
-  const { manifest, items } = parseGlobalBundle(buffer);
+export async function previewBundle(buffer, { fileName, passphrase } = {}) {
+  const { manifest, items } = parseGlobalBundle(buffer, passphrase);
   const list = [];
   const warnings = [];
   for (const it of items) {
@@ -664,13 +698,15 @@ export async function previewBundle(buffer, { fileName } = {}) {
     bytes: acc.bytes + x.files.bytes,
   }), { sections: 0, newSections: 0, entries: 0, fresh: 0, conflicts: 0, filesNew: 0, filesReused: 0, bytes: 0 });
   return {
-    status: 'preview', fileName, exportedAt: manifest.exportedAt,
+    status: 'preview', fileName,
+    encrypted: isEncryptedPackage(buffer),
+    exportedAt: manifest.exportedAt,
     withSecrets: !!manifest.withSecrets, sections: list, totals, warnings,
   };
 }
 
-export async function applyBundle(buffer, { fileName, onConflict = 'skip' } = {}) {
-  const { manifest, items } = parseGlobalBundle(buffer);
+export async function applyBundle(buffer, { fileName, onConflict = 'skip', passphrase } = {}) {
+  const { manifest, items } = parseGlobalBundle(buffer, passphrase);
   const sections = [];
   for (const it of items) {
     const r = await applyImport(it.section.id, it.buffer, { fileName, onConflict });
@@ -692,16 +728,20 @@ export async function applyBundle(buffer, { fileName, onConflict = 'skip' } = {}
   return { status: 'ok', fileName, exportedAt: manifest.exportedAt, sections, totals };
 }
 
-export async function importBundleFromFile({ file, onConflict = 'skip', dryRun = false } = {}) {
+export async function importBundleFromFile({ file, onConflict = 'skip', dryRun = false, passphrase } = {}) {
   if (!file) throw badInput('缺少 --file <zip 路径>');
   let buffer;
   try { buffer = await fsp.readFile(resolve(file)); } catch (e) { throw badInput(`读不到 ZIP: ${file}（${e.code || e.message}）`); }
   const fileName = basename(file);
-  return dryRun ? previewBundle(buffer, { fileName }) : applyBundle(buffer, { fileName, onConflict });
+  return dryRun
+    ? previewBundle(buffer, { fileName, passphrase })
+    : applyBundle(buffer, { fileName, onConflict, passphrase });
 }
 
-export function importBundleFromBuffer(buffer, { fileName, onConflict, dryRun } = {}) {
-  return dryRun ? previewBundle(buffer, { fileName }) : applyBundle(buffer, { fileName, onConflict });
+export function importBundleFromBuffer(buffer, { fileName, onConflict, dryRun, passphrase } = {}) {
+  return dryRun
+    ? previewBundle(buffer, { fileName, passphrase })
+    : applyBundle(buffer, { fileName, onConflict, passphrase });
 }
 
 // ─── 人读渲染 ────────────────────────────────────────────────────
@@ -709,7 +749,7 @@ export function importBundleFromBuffer(buffer, { fileName, onConflict, dryRun } 
 export function renderExportZip(d) {
   return [
     `已导出栏目 ${d.sectionTitle}（${d.section}）→ ${d.path}`,
-    `条目 ${d.entries}${d.available !== undefined && d.entries !== d.available ? ` / 共 ${d.available}` : ''} · 附件 ${d.files} · ${(d.bytes / 1024).toFixed(1)}KB · 凭据 ${d.withSecrets ? '含明文' : '已打码'}`,
+    `条目 ${d.entries}${d.available !== undefined && d.entries !== d.available ? ` / 共 ${d.available}` : ''} · 附件 ${d.files} · ${(d.bytes / 1024).toFixed(1)}KB · 凭据 ${d.withSecrets ? '含明文' : '已打码'}${d.encrypted ? ' · 已用口令加密' : ''}`,
     d.missingFiles ? `注意：${d.missingFiles} 个附件在磁盘上找不到，未打包` : '',
   ].filter(Boolean).join('\n');
 }
@@ -750,7 +790,7 @@ export function renderBundleExport(d) {
   }
   return [
     `已导出 ${d.sections} 个栏目 / ${d.entries} 条条目 / ${d.files} 个附件 → ${d.path}`,
-    `${(d.bytes / 1024 / 1024).toFixed(1)}MB · 凭据 ${d.withSecrets ? '含明文' : '已打码'}`,
+    `${(d.bytes / 1024 / 1024).toFixed(1)}MB · 凭据 ${d.withSecrets ? '含明文' : '已打码'}${d.encrypted ? ' · 已用口令加密' : ''}`,
   ].join('\n');
 }
 
@@ -759,7 +799,7 @@ export function renderBundlePreview(d) {
   const lines = [
     `全局包: ${d.fileName}（${d.exportedAt || '未知时间'}）`,
     `栏目 ${t.sections}（将新建 ${t.newSections}）· 条目 ${t.entries}（新增 ${t.fresh} / 冲突 ${t.conflicts}）`,
-    `附件 新增 ${t.filesNew} / 复用 ${t.filesReused}（${(t.bytes / 1024).toFixed(1)}KB）· 凭据 ${d.withSecrets ? '含明文' : '已打码'}`,
+    `附件 新增 ${t.filesNew} / 复用 ${t.filesReused}（${(t.bytes / 1024).toFixed(1)}KB）· 凭据 ${d.withSecrets ? '含明文' : '已打码'}${d.encrypted ? ' · 口令已验证' : ''}`,
   ];
   for (const s of d.sections) {
     lines.push(`  · ${s.title}（${s.id}）${s.willCreate ? ' 新建' : ''}：条目 ${s.entries.total}，冲突 ${s.entries.conflicts.length}，补字段 ${s.fieldsToAdd.length}`);
