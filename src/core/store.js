@@ -12,13 +12,9 @@ import { nowIso, stamp } from './ids.js';
  *  v3：栏目有了 `kv` 标记——KV 栏目是一张表（面板渲染成表格，key 命令默认作用在它上面），
  *      并去掉 `settings.kvSection` 这个冗余概念。 */
 export const STORE_VERSION = 3;
-export const MAX_EXPORT_HISTORY = 30;
 
 export function defaultSettings() {
   return {
-    exportDir: '', // 空 = ~/nx-sk/export
-    exportFormat: 'both', // json | md | both
-    includeSecretsInExport: true, // 默认含明文：本机单人工具，自己看不拦自己
     defaultSection: 'job',
     // 头部导航分组：[{ title, sections: [栏目 id…] }]，数组顺序 = 显示顺序。
     // 缺省空数组 = 全部栏目平铺（保持老行为）；栏目建得多了再在设置页收拢。
@@ -36,7 +32,6 @@ function emptyStore(seed) {
     sections: seed ? seedSections(at) : [],
     entries: [],
     files: [],
-    exports: [],
   };
 }
 
@@ -181,7 +176,6 @@ export function normalize(data) {
   base.sections = (Array.isArray(data.sections) ? data.sections : []).map(normalizeSection).filter(Boolean);
   base.entries = (Array.isArray(data.entries) ? data.entries : []).map(normalizeEntry).filter(Boolean);
   base.files = (Array.isArray(data.files) ? data.files : []).map(normalizeFileRecord).filter(Boolean);
-  base.exports = Array.isArray(data.exports) ? data.exports.slice(0, MAX_EXPORT_HISTORY) : [];
   if (oldVersion < 2) base._migration = migrateSecretToKv(base);
   if (oldVersion < 3) {
     const m = migrateKvToTable(base, rawSettings);

@@ -4,7 +4,6 @@ import { useStore } from '../../web/frontend/store.jsx';
 import { CliHints, Copyable, Tag } from '../../web/frontend/components/ui.jsx';
 import * as nav from '../../web/frontend/components/navModel.js';
 import NavManager from './navManager.jsx';
-import ReadableExportPanel from '../../web/frontend/components/readableExport.jsx';
 
 export default function SettingsView() {
   const { boot, reload, toast, guard } = useStore();
@@ -47,9 +46,6 @@ export default function SettingsView() {
       method: 'PATCH',
       body: {
         set: {
-          exportDir: form.exportDir,
-          exportFormat: form.exportFormat,
-          includeSecretsInExport: !!form.includeSecretsInExport,
           defaultSection: form.defaultSection,
           ...nav.configToPayload(navCfg),
         },
@@ -116,20 +112,6 @@ export default function SettingsView() {
         <div className="pad">
           <div className="grid">
             <div className="field">
-              <div className="flabel"><span>默认导出格式</span></div>
-              <div className="fctrl">
-                <select value={form.exportFormat} onChange={(e) => setForm({ ...form, exportFormat: e.target.value })}>
-                  <option value="both">JSON + Markdown</option>
-                  <option value="json">仅 JSON</option>
-                  <option value="md">仅 Markdown</option>
-                </select>
-              </div>
-            </div>
-            <div className="field">
-              <div className="flabel"><span>默认导出目录</span><span className="fkey">留空 = ~/nx-sk/export</span></div>
-              <div className="fctrl"><input value={form.exportDir} onChange={(e) => setForm({ ...form, exportDir: e.target.value })} /></div>
-            </div>
-            <div className="field">
               <div className="flabel"><span>默认栏目</span><span className="fkey">打开面板时落在哪</span></div>
               <div className="fctrl">
                 <select value={form.defaultSection || ''} onChange={(e) => setForm({ ...form, defaultSection: e.target.value })}>
@@ -143,15 +125,6 @@ export default function SettingsView() {
                 </select>
               </div>
               <div className="hint">地址里带 <code>#/栏目id</code> 时以地址为准；改完下次打开生效。</div>
-            </div>
-            <div className="field">
-              <div className="flabel"><span>导出默认带明文密钥</span><span className="fkey">默认开；要分享出去时关掉</span></div>
-              <div className="fctrl">
-                <label className="inline">
-                  <input type="checkbox" checked={!!form.includeSecretsInExport} onChange={(e) => setForm({ ...form, includeSecretsInExport: e.target.checked })} />
-                  <span className={form.includeSecretsInExport ? 'muted' : 'bad'}>{form.includeSecretsInExport ? '开（导出文件含真实凭据，注意别外发）' : '关（凭据打码后再导出）'}</span>
-                </label>
-              </div>
             </div>
           </div>
         </div>
@@ -201,10 +174,6 @@ export default function SettingsView() {
           </div>
         </div>
       </div>
-
-      {/* 可读导出（JSON / Markdown）放设置里而不是导出页 ——
-          导出页（「导出导入」）的语义是「取数据」，这里是「留一份人能读的副本」。 */}
-      <ReadableExportPanel />
 
       {boot?.migration ? (
         <div className="card">
