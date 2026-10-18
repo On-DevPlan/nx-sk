@@ -8,7 +8,7 @@ import { useTempHome } from '../helpers.mjs';
 
 await useTempHome();
 
-const { readZip } = await import('../../src/core/zip.js');
+const { readZip, createZip } = await import('../../src/core/zip.js');
 const { isEncryptedPackage } = await import('../../src/core/securezip.js');
 const sections = await import('../../src/modules/sections/service.js');
 const entries = await import('../../src/modules/entries/service.js');
@@ -88,14 +88,24 @@ test('冲突策略：skip 不重复、copy 另存、overwrite 覆盖', async () 
   assert.equal(restored.values.name, '部署教程');
 });
 
-test('打码导出：密码不进包；导入时跳过而不是把 ****** 当新密码', async () => {
-  const zip = await transfer.buildSectionZip(SRC, { withSecrets: false });
+test('包里恒为明文：不再有打码选项，保护靠口令', async () => {
+  const zip = await transfer.buildSectionZip(SRC);
   const man = manifestOf(zip.buffer);
-  assert.equal(man.withSecrets, false);
-  assert.ok(!JSON.stringify(man).includes('S3cret!'), '打码导出不能出现明文密码');
-  assert.ok(man.entries[0].values.token.includes('******'));
+  assert.equal(man.withSecrets, true, '写出的包固定标记为含明文');
+  assert.ok(JSON.stringify(man).includes('S3cret!'), '口令加密之前，包内就是明文');
+});
 
-  const r = await transfer.applyImport('maskdst', zip.buffer, { onConflict: 'skip' });
+test('旧版打码包仍被正确跳过：不会把 ****** 当新密码', async () => {
+  // 0.11.0 及更早可以导出打码包；那条读取侧兼容要一直有效
+  const zip = await transfer.buildSectionZip(SRC);
+  const man = JSON.parse(readZip(zip.buffer).find((f) => f.name === 'manifest.json').data.toString('utf8'));
+  man.withSecrets = false;
+  man.entries[0].values.token = '******';
+  const old = createZip([
+    { name: 'manifest.json', data: JSON.stringify(man) },
+    { name: 'README.txt', data: 'legacy' },
+  ]);
+  const r = await transfer.applyImport('maskdst', old, { onConflict: 'skip' });
   assert.equal(r.section.created, true);
   assert.ok(r.maskedSkipped >= 1, '打码字段应被跳过并计数');
   const got = await entries.getEntry('部署教程', { section: 'maskdst' });
@@ -188,7 +198,6 @@ test('bundle：多栏目 + 按条目选择，预览汇总、导入按策略聚�
 
   const { buffer } = await transfer.buildBundleZip({
     sections: [{ id: 'g1', entries: [a.id] }, { id: 'g2' }],
-    withSecrets: false,
   });
   const names = readZip(buffer).map((f) => f.name);
   assert.ok(names.includes('bundle.json'));

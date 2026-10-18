@@ -642,51 +642,49 @@ a.file-name:hover { text-decoration: underline; }
 .colhead .pickall { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
 .colhead .right { display: inline-flex; align-items: center; gap: 8px; }
 
-/* ── 全局导出/导入面板 ── */
-.transfer-panel .tree { border: var(--border); border-radius: var(--radius-btn); max-height: 360px; overflow: auto; }
-.tree-sec { border-bottom: 1px solid var(--soft-2); }
-.tree-sec:last-child { border-bottom: 0; }
-.tree-row { display: flex; align-items: center; gap: 8px; padding: 6px 10px; }
-.tree-row .name { font-weight: 600; }
-.tree-items { padding: 2px 10px 8px 34px; display: flex; flex-direction: column; gap: 2px; }
-.tree-item { display: flex; align-items: center; gap: 8px; padding: 3px 4px; border-radius: 6px; cursor: pointer; }
-.tree-item:hover { background: var(--soft); }
-.tree-item .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.drop-box {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  padding: 18px 14px;
-  border: 1px dashed var(--soft-2);
-  border-radius: var(--radius-btn);
-  background: var(--soft);
-  cursor: pointer;
-  text-align: center;
+/* ── 加密导出 / 解密导入（一个面板，左右两栏） ── */
+/* 头部右侧：计数 + 口令 + 主操作。常驻不滚走——条目再多也不用翻页找按钮 */
+.tp-headacts { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.tp-headacts .pw { width: 132px; }
+@media (max-width: 720px) {
+  .tp-headacts { width: 100%; justify-content: flex-start; }
+  .tp-headacts .pw { width: 100%; }
 }
-.drop-box:hover, .drop-box.over { border-color: var(--mid); background: var(--soft-2); }
-.transfer-sec-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; border-bottom: 1px dashed var(--soft-2); }
-.transfer-sec-row:last-child { border-bottom: 0; }
-/* ── 全局导出/导入面板 ── */
-.tabs { display: inline-flex; gap: 2px; margin-left: 12px; vertical-align: middle; }
-.tabs .tab {
-  padding: 3px 12px;
-  border: var(--border);
-  border-radius: 999px;
-  background: transparent;
-  color: var(--mid);
-  font: inherit;
-  font-size: 12px;
-  cursor: pointer;
-}
-.tabs .tab.on { background: var(--soft-2); color: var(--ink); border-color: var(--mid); }
+.tp-tip { margin: 2px 0 0; line-height: 1.7; }
 
-/* 栏目横向排：一眼看完有哪些、各选了几个 */
+.tp-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+  gap: 0;
+}
+.tp-col { padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.tp-col + .tp-col { border-left: 1px solid var(--soft-2); }
+.tp-colhead { display: flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 600; }
+/* 步骤号：用字重与底色的对比，不用彩色 —— 单色 + 语义红是本项目的基调 */
+.tp-step {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 17px;
+  height: 17px;
+  border-radius: 999px;
+  background: var(--soft-2);
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 700;
+}
+@media (max-width: 900px) {
+  .tp-grid { grid-template-columns: 1fr; }
+  .tp-col + .tp-col { border-left: 0; border-top: 1px solid var(--soft-2); }
+}
+
+/* 栏目横向排：一眼看完有哪些、各选了几个；一律换行，不裁切 */
 .sec-strip { display: flex; flex-wrap: wrap; gap: 6px; }
 .sec-chip {
   display: inline-flex;
   align-items: baseline;
   gap: 6px;
+  max-width: 100%;
   padding: 5px 11px;
   border: var(--border);
   border-radius: 999px;
@@ -695,15 +693,20 @@ a.file-name:hover { text-decoration: underline; }
   font: inherit;
   font-size: 12.5px;
   cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease;
 }
 .sec-chip:hover { border-color: var(--mid); }
 /* 当前栏目：深色描边；已选：字重加粗。两件事分开表示 —— 混在一起就分不清
    「我在看哪个栏目」和「我选了哪些栏目」 */
 .sec-chip.on { background: var(--soft-2); color: var(--ink); border-color: var(--ink); }
-.sec-chip.picked .chip-name { font-weight: 600; }
 .sec-chip.picked { color: var(--ink); }
-.sec-chip.picked .chip-meta { color: var(--ink); font-weight: 600; }
-.sec-chip .chip-meta { font-size: 11.5px; color: var(--mid); }
+.sec-chip.picked .chip-name { font-weight: 600; }
+.sec-chip.picked .chip-meta { font-weight: 600; }
+.sec-chip .chip-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sec-chip .chip-meta { flex: 0 0 auto; font-size: 11.5px; }
+@media (prefers-reduced-motion: reduce) {
+  .sec-chip { transition: none; }
+}
 
 /* 条目纵向展开在当前栏目下 */
 .entry-panel { border: var(--border); border-radius: var(--radius-btn); overflow: hidden; }
@@ -718,41 +721,28 @@ a.file-name:hover { text-decoration: underline; }
 }
 .entry-head .pickall { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
 .entry-list { max-height: 260px; overflow: auto; padding: 4px 0; }
-.entry-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 10px;
-  cursor: pointer;
-}
+.entry-row { display: flex; align-items: center; gap: 8px; padding: 4px 10px; cursor: pointer; }
 .entry-row:hover { background: var(--soft); }
 .entry-row .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .entry-row .hint { margin-left: auto; }
 
-/* 导出选项：凭据分段 + 口令 */
+/* 导出选项：只剩口令（包里恒为明文，保护靠口令） */
 .export-opts {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px 22px;
+  gap: 8px 14px;
   align-items: center;
   padding: 8px 10px;
   border: 1px dashed var(--soft-2);
   border-radius: var(--radius-btn);
 }
-.opt-group { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.opt-label { font-size: 12.5px; color: var(--mid); }
-.opt-group .pill {
-  padding: 3px 12px;
-  border: var(--border);
-  border-radius: 999px;
-  font-size: 12.5px;
-  color: var(--mid);
-  cursor: pointer;
-}
-.opt-group .pill.on { background: var(--soft-2); color: var(--ink); border-color: var(--mid); }
-.opt-group .pill input { margin-right: 4px; }
-.opt-group .pw { width: 150px; }
+.export-opts .opt-group { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.export-opts .pw { width: 148px; }
 .export-opts .hint { flex-basis: 100%; }
+
+/* 右栏说明 */
+.tp-note { display: flex; flex-direction: column; gap: 4px; }
+.tp-list { margin: 0; padding-left: 18px; color: var(--mid); font-size: 12px; line-height: 1.7; }
 
 /* 冲突明细 */
 .conflict-list { max-height: 220px; overflow: auto; }
@@ -769,31 +759,19 @@ a.file-name:hover { text-decoration: underline; }
 .conflict-row .title { font-weight: 600; }
 .conflict-row .ok { color: var(--ink); }
 
-/* 高级：可读导出折叠起来，默认不占地方 */
-details.card.adv > summary { list-style: none; cursor: pointer; }
-details.card.adv > summary::-webkit-details-marker { display: none; }
-
-/* 拖入 ZIP：整页遮罩 + 一句提示；pointer-events:none 让 drop 落到下面容器 */
-.drop-mask {
-  position: fixed;
-  inset: 0;
-  z-index: 55;
+/* drop-box + preview row: shared by both columns */
+.drop-box {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
-  background: rgba(20, 22, 26, .38);
-  pointer-events: none;
+  gap: 4px;
+  padding: 18px 14px;
+  border: 1px dashed var(--soft-2);
+  border-radius: var(--radius-btn);
+  background: var(--soft);
+  cursor: pointer;
+  text-align: center;
 }
-.drop-mask > div {
-  padding: 18px 28px;
-  border-radius: 12px;
-  background: var(--paper);
-  border: var(--border);
-  font-size: 14px;
-}
-
-/* ── 条目多选（精确导出） ── */
-.row .pick { flex: 0 0 auto; margin: 0 2px 0 0; cursor: pointer; }
-.colhead .pickall { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
-.colhead .right { display: inline-flex; align-items: center; gap: 8px; }
-
+.drop-box:hover, .drop-box.over { border-color: var(--mid); background: var(--soft-2); }
+.transfer-sec-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; border-bottom: 1px dashed var(--soft-2); }
+.transfer-sec-row:last-child { border-bottom: 0; }
