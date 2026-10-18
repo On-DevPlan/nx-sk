@@ -74,6 +74,23 @@ ln -s "$(pwd)/assets/nx-sk" "$HOME/.workbuddy/skills/nx-sk"
 > nx-sk skill install --force                   # 改了 assets/nx-sk/ 之后必须重装，否则是旧版
 > nx-sk skill get nx-sk --json                  # 外部 agent 一键拿全上下文（四元：skillName/ref/content/contentBytes/install）
 
+## 从 0.11.x 升级
+
+**0.12.0 有不兼容变更：备份模块已删除。**
+
+| 原来 | 现在 |
+| --- | --- |
+| `nx-sk backup export --password 口令` | `nx-sk transfer export <栏目> --passphrase 口令 --out x.zip` |
+| `nx-sk backup import --file x.nxskbak` | `nx-sk transfer import-new --file x.zip` |
+| 面板「导出与备份」 | 面板「导出导入」（栏目全选即整库） |
+
+- **旧的 `.nxskbak` 文件不再可导入。** 升级前请先在 0.11.x 下导出一份
+  （`nx-sk transfer bundle-export --out x.zip`），升级后用 `transfer import-new --file x.zip` 导回。
+- 破坏性删除（删栏目 / 条目 / 附件）**不再自动留快照** —— 删之前先导一份。
+- `transfer export --no-secrets` 移除：包里恒为明文，保护只靠 `--passphrase`。
+- 加密包格式变了（外层是合法 ZIP、内含 `payload.enc`），旧包仍可导入；
+  但 Windows 上不再报「压缩文件夹错误」了。
+
 ## 它是什么
 
 一个「本机工具类」项目的标准骨架实现（server-cli-web）：**serve 驱动 CLI 与 Web，
