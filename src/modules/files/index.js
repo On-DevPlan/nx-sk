@@ -17,6 +17,8 @@ export default {
         section: { type: 'string', hint: '只看某栏目引用的附件（none = 只列没有任何条目引用的）' },
         category: { type: 'string', enum: ['resume', 'avatar', 'transcript', 'certificate', 'document', 'other'], hint: '按磁盘分类过滤（内部属性，一般不用）' },
         q: { type: 'string', hint: '关键字（名称 / 备注 / 标签 / 引用它的栏目条目）' },
+        limit: { type: 'number', hint: '每页数量（缺省 0 = 全部；面板用 24 避免一次渲染全部图片）' },
+        offset: { type: 'number', hint: '从第几条开始（分页用）' },
       },
       run: (ctx) => service.listFiles(ctx),
       render: (d) => service.renderFileList(d),

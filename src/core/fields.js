@@ -3,7 +3,27 @@
 //
 // type 取值：text | textarea | number | date | month | bool | select | tags | secret | file
 
-export const FIELD_TYPES = ['text', 'textarea', 'number', 'date', 'month', 'bool', 'select', 'tags', 'secret', 'file'];
+export const FIELD_TYPES = ['text', 'textarea', 'number', 'date', 'month', 'bool', 'select', 'tags', 'secret', 'file', 'md'];
+
+/**
+ * 类型的人读标签 —— 只用于**面板下拉框**。
+ *
+ * 下拉框此前直接渲染 `md` / `tags` 这种内部 id，选类型的人得先知道内部分类。
+ * 这里给中文名，渲染成「图文（可贴图）（md）」：既看得懂，也不丢 id（排查时用得上）。
+ */
+export const FIELD_TYPE_LABELS = {
+  text: '单行文本',
+  textarea: '多行文本',
+  number: '数字',
+  date: '日期',
+  month: '月份',
+  bool: '是/否',
+  select: '单选',
+  tags: '多值标签',
+  secret: '密文',
+  file: '附件',
+  md: '图文（可贴图）',
+};
 
 /**
  * 字段的**填写策略**——回答「这个字段值不值得填」，与 type 正交。
@@ -176,6 +196,45 @@ const CAMPUS_FIELDS = [
   f('duties', '职责描述', 'textarea', 'main'),
 ];
 
+// —— 部署配置（Docker / K8s）——
+//
+// 一个条目 = **一份可复用的配置文件**。设计目标不是"存文件"（附件就能存），
+// 而是"下次能在别的项目里照着用"：所以除了正文，还要有「放哪」「哪些值要替换」
+// 「什么场景用」。缺了后三项，正文就只是一段没有上下文的 YAML。
+//
+// 明文密钥不进这里：`content` 里只写 `${VAR}` 占位，真值放「密钥」栏目
+// （那里是密文落盘）。这条写进字段 hint，而不是靠人自觉 —— 配置文件是最容易
+// 被整份复制粘贴分享出去的东西。
+const DEPLOY_FIELDS = [
+  f('name', '资源名', 'text', 'main', { hint: '一眼能看出是什么，如「node-web 多阶段 Dockerfile」' }),
+  f('kind', '资源类型', 'select', 'main', {
+    options: [
+      'Dockerfile', 'docker-compose', 'dockerignore',
+      'k8s-deployment', 'k8s-service', 'k8s-ingress', 'k8s-configmap', 'k8s-secret', 'k8s-kustomization',
+      'helm', '其他',
+    ],
+  }),
+  f('stack', '适用技术栈', 'text', 'main', { fill: 'optional', hint: 'node / go / python / 任意' }),
+  f('path', '建议落盘路径', 'text', 'main', { fill: 'optional', hint: '如 deploy/Dockerfile、deploy/k8s/base/deployment.yaml' }),
+  f('tags', '标签', 'tags', 'main', { fill: 'optional', hint: '如 prod、多阶段、健康检查、SSE' }),
+  f('content', '文件正文', 'textarea', 'body', {
+    hint: '整份文件原文。密钥一律写 ${VAR} 占位，真值放「密钥」栏目，别写明文',
+  }),
+  f('vars', '需替换的变量', 'textarea', 'body', {
+    fill: 'optional',
+    hint: '每行一个「变量 = 说明」。复用前先替换这些，别指望正文里的值直接能用',
+  }),
+  f('usage', '何时用 / 关键取舍', 'textarea', 'use', {
+    fill: 'optional',
+    hint: '为什么这么写、坑在哪（例如 ingress 关 buffering 才能保住 SSE）',
+  }),
+  f('sop', '操作步骤（图文）', 'md', 'use', {
+    fill: 'optional',
+    hint: '截屏 + 说明混排：直接 Ctrl+V 粘图，图片会统一列在下方，点开可放大看细节',
+  }),
+  f('files', '原件附件', 'file', 'use', { fill: 'optional', hint: '要连真实文件一起留档时挂这里（可选）' }),
+];
+
 const TEMPLATES = {
   job: {
     id: 'job',
@@ -237,6 +296,21 @@ const TEMPLATES = {
     groups: [{ id: 'main', title: '职务信息' }],
     fields: CAMPUS_FIELDS,
   },
+  deploy: {
+    id: 'deploy',
+    label: '部署配置（Docker / K8s）',
+    description:
+      '一份配置文件一个条目：正文即文件原文，配「放哪」「哪些值要替换」「什么场景用」，' +
+      '好让它在别的项目里能照着用。明文密钥不放这里（用 ${VAR} 占位，真值进「密钥」栏目）。',
+    titleField: 'name',
+    titleLabel: '资源名',
+    groups: [
+      { id: 'main', title: '基本信息' },
+      { id: 'body', title: '文件内容' },
+      { id: 'use', title: '使用说明' },
+    ],
+    fields: DEPLOY_FIELDS,
+  },
 };
 
 export function templateIds() {
@@ -286,6 +360,7 @@ export function seedSections(stamp) {
     { ...instantiateTemplate('internships', { id: 'internships', title: '实习/工作经历', order: 12 }), createdAt: stamp, updatedAt: stamp },
     { ...instantiateTemplate('campus', { id: 'campus', title: '校内职务/实践', order: 13 }), createdAt: stamp, updatedAt: stamp },
     { ...instantiateTemplate('secret', { id: 'secret', title: '密钥', order: 20 }), createdAt: stamp, updatedAt: stamp },
+    { ...instantiateTemplate('deploy', { id: 'deploy', title: '部署配置', order: 30 }), createdAt: stamp, updatedAt: stamp },
   ];
 }
 
@@ -321,6 +396,34 @@ export function syncSectionGroups(groups, fields) {
 }
 
 /**
+ * 同一 key 的字段在「栏目 vs 模板」之间哪些属性不同；空数组 = 定义一致。
+ *
+ * 比较前先**归一**：`fill` 缺省就是 `normal`（`validateFieldDef` 只在非 normal 时落盘），
+ * `options`/`maxItems` 缺失与空数组/空值等价。不归一的话，一份「模板里没写 fill、
+ * 栏目里写了 fill:normal」的等价定义会被报成漂移，噪音会淹没真正的差异。
+ */
+const FIELD_CMP_KEYS = ['label', 'type', 'group', 'hint', 'options', 'maxItems', 'sensitive', 'fill'];
+
+function normalizedFieldDef(f) {
+  return {
+    label: String(f?.label ?? f?.key ?? ''),
+    type: f?.type || 'text',
+    group: f?.group || 'other',
+    hint: f?.hint ? String(f.hint) : '',
+    options: Array.isArray(f?.options) ? f.options.map(String) : [],
+    maxItems: Number.isFinite(f?.maxItems) ? f.maxItems : null,
+    sensitive: f?.sensitive === true,
+    fill: f?.fill || 'normal',
+  };
+}
+
+export function fieldDrift(sectionField, templateField) {
+  const a = normalizedFieldDef(sectionField);
+  const b = normalizedFieldDef(templateField);
+  return FIELD_CMP_KEYS.filter((k) => JSON.stringify(a[k]) !== JSON.stringify(b[k]));
+}
+
+/**
  * 模板增量合并：把模板里**尚未出现在栏目**的分组与字段补进去（只增，绝不改/删）。
  *
  * 为什么需要它：栏目实例化时字段字典是**深拷贝**（见 instantiateTemplate），
@@ -333,12 +436,17 @@ export function syncSectionGroups(groups, fields) {
  *     模板没有的自定义分组原顺序附在后面。
  *   - 字段：栏目已有的字段原样保留（含用户改过的 label/hint/fill）；缺的模板字段
  *     插到「模板顺序里它前一个字段」之后，未在模板中的自定义字段保持原位。
+ *
+ * 另外回传 `changedFields`：**同名字段定义已分叉**的清单（只报告，绝不自动改）。
+ * 光有「只增不改」的话，模板改了默认 label/hint 是**完全无声**的 ——
+ * 用户会以为「同步过了 = 跟模板一致」，实际不一致。把差异摆出来，改不改由人定。
  */
 export function mergeTemplate(section, template) {
   const existingGroups = section?.groups || [];
   const existingFields = section?.fields || [];
   const groupById = new Map(existingGroups.map((g) => [g.id, g]));
   const fieldKeys = new Set(existingFields.map((f) => f.key));
+  const fieldByKey = new Map(existingFields.map((f) => [f.key, f]));
 
   const groups = [];
   const seenGroup = new Set();
@@ -352,8 +460,14 @@ export function mergeTemplate(section, template) {
   const tplOrder = new Map((template?.fields || []).map((f, i) => [f.key, i]));
   const fields = [...existingFields];
   const addedFields = [];
+  const changedFields = [];
   for (const tf of template?.fields || []) {
-    if (fieldKeys.has(tf.key)) continue;
+    if (fieldKeys.has(tf.key)) {
+      // 同名 = 定义归栏目；只算差异用于提示
+      const diff = fieldDrift(fieldByKey.get(tf.key), tf);
+      if (diff.length) changedFields.push({ key: tf.key, diff });
+      continue;
+    }
     // 插到第一个「模板序更靠后」的既有字段之前；找不到就追加到末尾
     const ti = tplOrder.get(tf.key);
     let insertAt = fields.length;
@@ -366,7 +480,7 @@ export function mergeTemplate(section, template) {
     addedFields.push(tf.key);
   }
 
-  return { groups, fields, addedGroups, addedFields };
+  return { groups, fields, addedGroups, addedFields, changedFields };
 }
 
 export function fieldByKey(section, key) {

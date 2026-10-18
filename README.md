@@ -82,9 +82,17 @@ CLI 与 API 同源，skill 驱动 agent**。落到具体功能上：
 | 栏目 | id | 内容 |
 | --- | --- | --- |
 | 求职 | `job` | 求职用的个人信息档案：9 个分组 / 75 个字段（姓名、学历、联系方式、求职意向、紧急联系人…）。模板只是**建议清单**，`--set 任意键=值` 直接写 |
+| 项目经历 | `projects` | 一个项目一个条目：名称 / 角色 / 时间 / 技术栈 / 职责与亮点 |
+| 实习/工作经历 | `internships` | 一段经历一个条目：公司 / 岗位 / 时间 / 职责 |
+| 校内职务/实践 | `campus` | 一条职务或实践一个条目：职务 / 组织 / 时间 / 职责 |
 | 密钥 | `secret` | **一张 KV 表**（`kv: true`）：面板上就是两列表格（名称 / 值），一行一个键。落盘是 **AES-256-GCM** 密文，读出来默认是原文（`--mask` 才打码） |
+| 部署配置 | `deploy` | **一份配置文件一个条目**（Dockerfile / docker-compose / k8s 清单）：正文即文件原文，外加「放哪 / 哪些值要替换 / 何时用」，好让它在别的项目里照着用 |
 
-栏目不是写死的：字段字典是**数据**，加字段、加栏目都不用改代码。
+上表是**首次运行从 6 个内置模板播种出来的默认值，不是固定清单**：栏目不是写死的——
+字段字典是**数据**，加字段（`section update --add-field`，或 `entry update --set 任意键=值` 自动登记）、
+加栏目（`section add`，不给模板就是空栏目全自定义）、删栏目都不用改代码。
+模板在实例化时被**深拷贝**，此后各栏目独立演化；模板后来的新增用 `section sync` 补（只增不改不删，
+有差异时会把「模板已改、栏目保留原值」的字段列出来提示）。
 
 ## 三条核心不变量
 
@@ -112,7 +120,7 @@ CLI 与 API 同源，skill 驱动 agent**。落到具体功能上：
 | `nx-sk routes [--module M] [--http "POST /api/entries"]` | 命令 ↔ 路由双向对照 |
 | `nx-sk section list \| get \| add \| update \| remove` | 栏目 CRUD |
 | `nx-sk section dump <id> [--mask]` | **一个栏目的全部信息**：字段台账 + 全部条目 + 每个条目的未填清单 |
-| `nx-sk section templates` | 内置模板（job / secret） |
+| `nx-sk section templates` | 内置模板（job / secret / projects / internships / campus / deploy） |
 | `nx-sk section sync <id> [--dry-run]` | 按模板**补齐**本栏目缺的分组与字段（只增不改不删）——模板演进后让老栏目追上 |
 | `nx-sk entry list \| get \| add \| update \| remove` | 条目 CRUD（PATCH 语义） |
 | `nx-sk entry fields [--section job]` | 字段字典 —— 填之前先看这个，别猜字段名 |
@@ -124,6 +132,9 @@ CLI 与 API 同源，skill 驱动 agent**。落到具体功能上：
 | `nx-sk file open <id>` | 用系统默认程序打开原件 |
 | `nx-sk export run [--format json\|md\|both] [--section id] [--with-secrets] [--out DIR] [--dry-run]` | 整体导出 |
 | `nx-sk export list` | 历次导出与目录内文件 |
+| `nx-sk transfer export <栏目> [--entries 条目,条目] [--out 文件] [--no-secrets]` | 栏目/选中条目 + 引用附件打成 ZIP（栏目页「更多」里同源下载） |
+| `nx-sk transfer import <栏目> [--file ZIP] [--on-conflict skip\|copy\|overwrite] [--dry-run]` | 预览/导入到指定栏目；附件按 sha256 复用 |
+| `nx-sk transfer import-new [--file ZIP] [--dry-run]` | **零配置**：按包内结构新建栏目（id 冲突加序号） |
 | `nx-sk backup export [--password 口令] [--out DIR] [--with-files] [--dry-run]` | 口令对称加密整库，导出单个 `.nxskbak`（口令不落盘；`--with-files` 连附件原件） |
 | `nx-sk backup import --file <备份> [--password 口令] [--replace] [--dry-run]` | 解密导入：缺省「合并」（只增补、不覆盖已有值，冲突列清单），`--replace` 整份替换；动手前自动留安全快照 |
 | `nx-sk setting get \| set` | 全局设置 |
@@ -236,6 +247,42 @@ nx-sk backup import --file ~/nx-sk/backup/xxx.nxskbak --password '你的备份�
 
 Web 面板的「导出与备份」页同样支持：导出在浏览器下载 `.nxskbak`（可勾选连附件一起打包），
 导入选择文件并输入口令、报告以弹窗呈现；口令错误或文件损坏会明确报错、不改动当前数据。
+
+### 全局导出 / 导入（多栏目）
+
+「导出与备份」页顶部：栏目树可勾选栏目，展开后能只选部分条目；点「导出选中的 ZIP」下载。
+把 ZIP 拖进下方框即预览（栏目、条目新增/冲突、附件新增/复用、凭据），选冲突策略后确认。
+全局包 `bundle.json + sections/<id>.zip`，与单栏目包同构；导入时逐栏目复用同一套逻辑。
+
+```bash
+nx-sk transfer bundle-export --sections job,projects --out all.zip
+nx-sk transfer bundle-import --file all.zip --dry-run
+nx-sk transfer bundle-import --file all.zip --on-conflict copy
+```
+
+
+### 只搬一个栏目：ZIP 导出 / 导入
+
+整库备份之外，栏目可以单独打包（含条目、栏目定义、实际引用到的附件）：
+
+```bash
+nx-sk transfer export deploy --out D:/tmp/deploy.zip            # 含凭据明文
+nx-sk transfer export deploy --out D:/tmp/share.zip --no-secrets # 打码，给别人
+nx-sk transfer export deploy --entries "k8s-deployment,compose" --out D:/tmp/part.zip  # 只导选中条目
+nx-sk transfer import deploy2 --file D:/tmp/deploy.zip --dry-run # 先预览：新增/冲突/补字段/附件
+nx-sk transfer import deploy2 --file D:/tmp/deploy.zip           # 栏目不存在就新建
+nx-sk transfer import deploy2 --file D:/tmp/deploy.zip --on-conflict copy      # 另存
+nx-sk transfer import deploy2 --file D:/tmp/deploy.zip --on-conflict overwrite # 覆盖字段
+nx-sk transfer import-new --file D:/tmp/deploy.zip               # 零配置：按包内结构新建
+```
+
+面板里是栏目页右上角「更多」：导出 ZIP（含凭据 / 打码）、导入 ZIP…；
+条目列表可勾选（表头全选/清空），选中后导出**只带这些条目及其附件**。
+把 zip **拖到栏目页任意位置**会导入当前栏目；拖到「栏目」tab 则**零配置新建一个栏目**。
+预览会显示来源栏目、目标栏目、条目冲突、将补的字段、附件新增/复用与凭据是否打码，
+选好冲突策略再确认。
+
+附件按 sha256 去重（本机已有就复用）；`file` 字段与 `md` 图文里的旧 id 会自动重映射。
 
 ## 数据与安全
 

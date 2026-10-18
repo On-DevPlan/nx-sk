@@ -4,7 +4,7 @@ import { constants } from 'node:fs';
 import { APP_LABEL, APP_NAME, ENV_HOME, ENV_PASSPHRASE, ENV_STORE, VERSION, appHome, displayPath, storeFile } from '../../core/paths.js';
 import { loadStore, corruptNote, listSnapshots, migrationNote, storePathInUse } from '../../core/store.js';
 import { vaultStatus } from '../../core/vault.js';
-import { templateSummaries } from '../../core/fields.js';
+import { FIELD_TYPES, FIELD_TYPE_LABELS, templateSummaries } from '../../core/fields.js';
 import { blocked } from '../../core/errors.js';
 import { compileRoute, usageOf } from '../../runtime/spec.js';
 
@@ -44,6 +44,12 @@ export async function bootstrapInfo() {
     counts: { sections: store.sections.length, entries: store.entries.length, commands: commands.length },
     vault: await vaultStatus(),
     templates: templateSummaries(),
+    // 字段类型是**封闭枚举**（面板要按类型渲染控件，不能随便加）。这里下发唯一一份，
+    // 面板的「新增字段」下拉框据此渲染 —— 面板自己再抄一份清单的话，
+    // 「后端加了一种类型、下拉框里永远看不到」这种错没人会发现。
+    fieldTypes: FIELD_TYPES,
+    // 类型的中文名，只给面板下拉框用（渲染成「图文（可贴图）（md）」）
+    fieldTypeLabels: FIELD_TYPE_LABELS,
     snapshots: (await listSnapshots()).slice(0, 5),
     corrupt: corruptNote(),
     migration: migrationNote(),

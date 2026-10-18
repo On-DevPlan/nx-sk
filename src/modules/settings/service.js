@@ -10,7 +10,13 @@ const SCHEMA = {
   exportDir: { type: 'string', hint: '导出目录，留空 = ~/nx-sk/export' },
   exportFormat: { type: 'string', enum: ['json', 'md', 'both'], hint: '整体导出默认格式' },
   includeSecretsInExport: { type: 'boolean', hint: '整体导出是否默认带密钥明文（默认否）' },
-  defaultSection: { type: 'string', hint: '默认栏目 id' },
+  defaultSection: {
+    type: 'string',
+    hint: '打开面板时落地的栏目 id（空 = 第一个栏目；地址里带 #/栏目 时以地址为准）',
+    coerce: coerceDefaultSection,
+    // 标量项，但带校验器 —— 渲染时不要把它当成「结构化项」跳过
+    listed: true,
+  },
   navGroups: { type: 'json', hint: '头部导航分组：[{title, sections:[栏目id…]}]，数组顺序 = 显示顺序', coerce: coerceNavGroups },
   navHidden: { type: 'json', hint: '头部隐藏的栏目 id（入口不显示，`#/栏目` 直达仍可用）', coerce: coerceNavHidden },
   navOrder: { type: 'json', hint: '平铺区的显示顺序（栏目 id 数组；没列进去的按栏目自身顺序跟在后面）', coerce: coerceNavOrder },
@@ -116,6 +122,23 @@ function coerceNavOrder(value, store) {
   return coerceSectionIdList(value, store, '平铺顺序');
 }
 
+/**
+ * 默认栏目必须指向**真实存在**的栏目（空 = 交给面板取第一个）。
+ *
+ * 不校验的后果是配置静默失效：删掉某栏目之后 defaultSection 还指着它，
+ * 于是「打开面板落在哪」这种问题变得无从解释。宁可写入时报错，并列出可选项。
+ */
+function coerceDefaultSection(value, store) {
+  const ref = String(value ?? '').trim();
+  if (!ref) return '';
+  const sec = findSection(store, ref);
+  if (!sec) {
+    const have = store.sections.map((s) => `${s.id}（${s.title}）`).join('、') || '（还没有栏目）';
+    throw badInput(`默认栏目不存在: ${ref} —— 现有: ${have}`);
+  }
+  return sec.id;
+}
+
 function coerceSetting(key, value, store) {
   const s = SCHEMA[key];
   if (!s) throw notFound(`未知设置项: ${key}（可用: ${SETTING_KEYS.join(', ')}）`);
@@ -161,7 +184,9 @@ export async function updateSettings({ set, key, value, 'dry-run': dryRun } = {}
 export function renderSettings(data) {
   const lines = ['当前设置（改：nx-sk setting set --set k=v）'];
   for (const s of data.schema) {
-    if (s.coerce) continue; // 结构化项（导航分组 / 隐藏）单独可读地列在下面
+    // 结构化项（导航分组 / 隐藏 / 顺序）在这里跳过，下面单独以可读形式列出；
+    // 带校验器的标量项（defaultSection）用 listed 标记留下
+    if (s.coerce && !s.listed) continue;
     const v = data.settings[s.key];
     const shown = s.type === 'boolean' ? (v ? '是' : '否')
       : (v === '' || v === undefined ? '（空）' : String(v));

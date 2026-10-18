@@ -129,3 +129,23 @@ test('validateFieldDef：normal 不落盘（它是缺省，写上去只是噪音
 test('validateFieldDef：非法策略报错，不静默忽略', () => {
   assert.throws(() => validateFieldDef({ key: 'e', fill: 'nope' }), /fill 非法/);
 });
+
+// —— 渲染层：「不填」不等于「空着」 ——
+// `excluded` 是**策略标记**：字段被标成 optional/avoid，就永远是 excluded。
+// 但它可能已经被填上值。渲染时若照单全列，一份填满的资料会被报成
+// 「另有 7 项已标不填」，自相矛盾（这个 bug 是「容器平台」条目暴露的）。
+const { renderEntryGet, renderEntryList } = await import('../../src/modules/entries/service.js');
+
+test('渲染：「不填」只列真的空着的可选字段', () => {
+  const s = mkSection();
+  const blank = serializeEntry(s, mkEntry({ name: '张三' }));
+  const filled = serializeEntry(s, mkEntry({ name: '张三', lastCompany: '某公司', hobbies: '象棋' }));
+
+  assert.match(renderEntryGet(blank), /不填（2）/);
+  const filledGet = renderEntryGet(filled);
+  assert.ok(!filledGet.includes('不填'), filledGet);
+  assert.ok(!filledGet.includes('另有'), filledGet);
+
+  const filledList = renderEntryList({ count: 1, total: 1, entries: [filled] });
+  assert.ok(!filledList.includes('不填'), filledList);
+});

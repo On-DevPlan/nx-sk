@@ -335,3 +335,22 @@ test('file update 改名不带扩展名时，物理文件自动接回原扩展�
   assert.equal(r2.rel, 'avatar/证件照-最终版.png');
   await fsp.access(join(filesDir(), ...r2.rel.split('/')));
 });
+
+// 附件库分页：面板一次只渲染 24 张卡片，避免把整库图片都拉进内存。
+// limit=0（CLI 默认）仍是全量，不能因为加参数改变旧行为。
+test('listFiles 分页：limit/offset 只切过滤后的列表，默认仍全量', async () => {
+  for (let i = 1; i <= 3; i += 1) {
+    await svc.addFile({ content: Buffer.from(`page-${i}`).toString('base64'), name: `分页-${i}.txt` });
+  }
+  const all = await svc.listFiles({ q: '分页-' });
+  assert.equal(all.count, 3);
+  assert.equal(all.files.length, 3, '不传 limit 时保持全量（CLI 行为不变）');
+
+  const p1 = await svc.listFiles({ q: '分页-', limit: 2 });
+  assert.equal(p1.files.length, 2);
+  assert.deepEqual(p1.page, { limit: 2, offset: 0, count: 2, total: 3, hasMore: true });
+
+  const p2 = await svc.listFiles({ q: '分页-', limit: 2, offset: 2 });
+  assert.equal(p2.files.length, 1);
+  assert.equal(p2.page.hasMore, false);
+});

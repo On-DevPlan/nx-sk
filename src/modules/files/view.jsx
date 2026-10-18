@@ -12,6 +12,10 @@ function fmtBytes(n) {
 
 const refText = (u) => `${u.sectionTitle} / ${u.entryTitle || '（无名）'} / ${u.fieldLabel}`;
 
+// 附件库可能上千个文件：一次渲染全部卡片会把所有图片拉进内存（OOM）。
+// 面板每页 24 个；CLI 不传 limit，仍是全量。
+const PAGE_SIZE = 24;
+
 /**
  * 附件工作台：统一**展示与库存管理**（上传 / 本机路径导入、预览、下载、编辑、还原、删除）。
  *
@@ -25,6 +29,7 @@ export default function FilesView() {
   const [filter, setFilter] = useState(''); // '' 全部 | 'none' 未引用 | <栏目 id>
   const [q, setQ] = useState('');
   const [dragOver, setDragOver] = useState(false);
+  const [page, setPage] = useState(0);
   const [modal, setModal] = useState(null);
   const pickerRef = useRef(null);
   const dragDepth = useRef(0);
@@ -34,6 +39,8 @@ export default function FilesView() {
       const params = new URLSearchParams();
       if (filter) params.set('section', filter);
       if (q) params.set('q', q);
+      params.set('limit', String(PAGE_SIZE));
+      params.set('offset', String(page * PAGE_SIZE));
       const qs = params.toString();
       const d = await api(`/api/files${qs ? `?${qs}` : ''}`);
       setData(d);
@@ -42,7 +49,16 @@ export default function FilesView() {
       setErr(e.message);
       setData(null);
     }
-  }, [filter, q]);
+  }, [filter, q, page]);
+
+  // 换筛选/搜索时回到第一页，否则会停在一个不存在的页码上
+  useEffect(() => { setPage(0); }, [filter, q]);
+  // 删到当前页空了：退回最后一页，而不是显示「还没有附件」
+  useEffect(() => {
+    if (data?.page && page > 0 && data.files.length === 0 && data.page.total > 0) {
+      setPage(Math.max(0, Math.ceil(data.page.total / PAGE_SIZE) - 1));
+    }
+  }, [data, page]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -261,6 +277,16 @@ export default function FilesView() {
           <div className="hint pad">CLI：nx-sk file add --path "D:\简历\张三-简历.pdf"（默认移动；--copy 仅复制）</div>
         </div>
       )}
+
+      {data.page && data.page.total > PAGE_SIZE ? (
+        <div className="rowgap pad">
+          <button className="btn small ghost" disabled={page === 0} onClick={() => setPage((p) => Math.max(0, p - 1))}>上一页</button>
+          <span className="hint">
+            第 {page + 1} / {Math.ceil(data.page.total / PAGE_SIZE)} 页 · 共 {data.page.total} 个（每页 {PAGE_SIZE}）
+          </span>
+          <button className="btn small ghost" disabled={!data.page.hasMore} onClick={() => setPage((p) => p + 1)}>下一页</button>
+        </div>
+      ) : null}
 
       <CliHints module="files" />
 

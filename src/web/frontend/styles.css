@@ -476,3 +476,194 @@ a.file-name:hover { text-decoration: underline; }
 /* 「隐藏」与分组同构，只是语气更弱：它是"不显示"的容器 */
 .nav-hidden .colhead { color: var(--mid); }
 .nav-hidden .row .name { color: var(--mid); }
+
+/* ── 图文字段（md）：正文 + 图片 ──
+ * 输入区与预览区都是「一块可填的浅底」，不加边框与投影；
+ * 拖拽悬停用 dashed outline 表示"可以往这里放"，与附件的 file-picker 同一手感。 */
+.md-field { display: flex; flex-direction: column; gap: 8px; border-radius: var(--radius-btn); }
+.md-field.drag { outline: 1px dashed var(--mid); outline-offset: 4px; }
+.md-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.md-tools select { max-width: 220px; }
+.md-tools .hint code { background: var(--soft-2); border-radius: 4px; padding: 0 4px; }
+.md-preview {
+  padding: 10px 12px;
+  background: var(--soft);
+  border-radius: var(--radius-btn);
+  max-height: 340px;
+  overflow: auto;
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+/* 阅读态（没展开输入框）：给正文更多高度——这时候看的就是它，不该只有 340px */
+.md-preview.reading { max-height: 560px; }
+.md-plain { white-space: pre-wrap; }
+.md-inline {
+  display: block;
+  max-width: 100%;
+  max-height: 260px;
+  margin: 6px 0;
+  border-radius: 6px;
+  cursor: zoom-in;
+}
+.md-missing { color: var(--danger); font-size: 12px; }
+/* 正文里的链接：全站唯一允许的彩色是语义红，所以这里不引入蓝色 ——
+ * 用「实下划线 + 悬停加深」表达可点，和 .file-name 同一套观感。 */
+.md-link {
+  color: var(--ink);
+  text-decoration: underline;
+  text-decoration-color: var(--mid);
+  text-underline-offset: 2px;
+  border-radius: 3px;
+  cursor: pointer;
+  word-break: break-all;
+}
+.md-link:hover {
+  text-decoration-color: var(--ink);
+  background: var(--soft-2);
+}
+.md-link:focus-visible { outline: 1px solid var(--mid); outline-offset: 1px; }
+.md-gallery { display: flex; flex-direction: column; gap: 6px; }
+.md-gallery-head { display: flex; align-items: baseline; gap: 8px; font-size: 12px; }
+.md-thumbs { display: flex; gap: 8px; flex-wrap: wrap; }
+.md-thumb {
+  width: 104px;
+  padding: 0;
+  border: var(--border);
+  border-radius: var(--radius-btn);
+  background: var(--paper);
+  overflow: hidden;
+  cursor: zoom-in;
+  display: flex;
+  flex-direction: column;
+  text-align: left;
+}
+.md-thumb:hover { border-color: var(--mid); }
+.md-thumb img { width: 100%; height: 66px; object-fit: cover; display: block; background: var(--soft); }
+.md-thumb-name {
+  padding: 3px 6px;
+  font-size: 11px;
+  color: var(--mid);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.md-thumb.missing {
+  width: 44px;
+  height: 44px;
+  align-items: center;
+  justify-content: center;
+  color: var(--danger);
+  cursor: default;
+  font-size: 12px;
+}
+
+/* ── 图片放大：滚轮缩放 / 拖动看细节 / Esc 关闭 ──
+ * 层级要压过 .mask(50)：它是弹窗里"再弹一层"的唯一场景。 */
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(20, 22, 26, .88);
+  display: flex;
+  flex-direction: column;
+  padding: 10px 14px 6px;
+}
+.lightbox-bar { display: flex; align-items: center; gap: 8px; color: var(--paper); font-size: 12px; padding-bottom: 8px; }
+.lightbox-bar .grow { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.lightbox-bar .btn.ghost { background: rgba(255, 255, 255, .16); color: var(--paper); }
+.lightbox-bar .btn.ghost:hover { background: rgba(255, 255, 255, .24); }
+.lightbox-bar .muted { color: rgba(255, 255, 255, .6); }
+.lightbox-stage {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+}
+.lightbox-stage:active { cursor: grabbing; }
+.lightbox-stage img { max-width: 100%; max-height: 100%; transform-origin: center center; user-select: none; }
+.lightbox-tip { color: rgba(255, 255, 255, .55); font-size: 11.5px; text-align: center; padding: 8px 0 4px; }
+
+/* ── 栏目「更多」菜单（导出 / 导入 ZIP） ── */
+.more { position: relative; display: inline-block; }
+.more > summary { list-style: none; }
+.more > summary::-webkit-details-marker { display: none; }
+.more[open] > summary { background: var(--soft-2); }
+.more-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 45;
+  min-width: 208px;
+  padding: 4px;
+  background: var(--paper);
+  border: var(--border);
+  border-radius: var(--radius-btn);
+  box-shadow: 0 6px 20px rgba(20, 22, 26, .12);
+}
+.more-menu button {
+  display: block;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.more-menu button:hover { background: var(--soft); }
+
+/* 拖入 ZIP：整页遮罩 + 一句提示；pointer-events:none 让 drop 落到下面容器 */
+.drop-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 55;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(20, 22, 26, .38);
+  pointer-events: none;
+}
+.drop-mask > div {
+  padding: 18px 28px;
+  border-radius: 12px;
+  background: var(--paper);
+  border: var(--border);
+  font-size: 14px;
+}
+
+/* ── 条目多选（精确导出） ── */
+.row .pick { flex: 0 0 auto; margin: 0 2px 0 0; cursor: pointer; }
+.colhead .pickall { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.colhead .right { display: inline-flex; align-items: center; gap: 8px; }
+
+/* ── 全局导出/导入面板 ── */
+.transfer-panel .tree { border: var(--border); border-radius: var(--radius-btn); max-height: 360px; overflow: auto; }
+.tree-sec { border-bottom: 1px solid var(--soft-2); }
+.tree-sec:last-child { border-bottom: 0; }
+.tree-row { display: flex; align-items: center; gap: 8px; padding: 6px 10px; }
+.tree-row .name { font-weight: 600; }
+.tree-items { padding: 2px 10px 8px 34px; display: flex; flex-direction: column; gap: 2px; }
+.tree-item { display: flex; align-items: center; gap: 8px; padding: 3px 4px; border-radius: 6px; cursor: pointer; }
+.tree-item:hover { background: var(--soft); }
+.tree-item .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.drop-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 18px 14px;
+  border: 1px dashed var(--soft-2);
+  border-radius: var(--radius-btn);
+  background: var(--soft);
+  cursor: pointer;
+  text-align: center;
+}
+.drop-box:hover, .drop-box.over { border-color: var(--mid); background: var(--soft-2); }
+.transfer-sec-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; border-bottom: 1px dashed var(--soft-2); }
+.transfer-sec-row:last-child { border-bottom: 0; }

@@ -41,8 +41,11 @@ store.json（~/nx-sk/store.json 或 $NX_SK_STORE）
   所以模板**后来**新增的分组与字段不会自动出现在老栏目里（典型症状：求职没显示附件上传框）。
   `section sync <id>` 把模板有、本栏目还缺的分组与字段补进来（**只增不改不删**，保持模板顺序；
   已有字段含改过的 label / hint / fill 原样保留），带快照与 `--dry-run`；面板侧是「栏目 → 编辑 → 同步模板字段」。
+  - **它还会报告「漂移」**：同名字段在「栏目 vs 模板」之间哪些属性不同（`changedFields`，含 diff 属性名）。
+    这是**只提示、不动手**——因为定义归栏目，你可能就是刻意改过。要换成模板的新定义得手动来：
+    `section update <id> --fields '<整份字段数组>'`，或先 `--remove-field` 再 `--add-field`（`--add-field` 遇到同名会报冲突）。
 
-内置模板 5 个：`job`（求职 / 个人信息，79 字段 / 10 分组——含「附件资料」组：简历附件 / 头像图片 / 成绩单 / 证书扫描件）、`projects`（项目经历）、`internships`（实习/工作经历）、`campus`（校内职务/实践）、`secret`（密钥，**单字段 KV**——细节见 `20-secrets`）。三类经历栏目（projects / internships / campus）**一个项目 / 一段经历 = 一个条目**，角色、时间、技术栈都是独立字段——不要往 job 栏目里塞经历。
+内置模板 6 个：`job`（求职 / 个人信息，79 字段 / 10 分组——含「附件资料」组：简历附件 / 头像图片 / 成绩单 / 证书扫描件）、`projects`（项目经历）、`internships`（实习/工作经历）、`campus`（校内职务/实践）、`secret`（密钥，**单字段 KV**——细节见 `20-secrets`）、`deploy`（部署配置：Dockerfile / compose / k8s 清单，**一份文件一个条目**——细节见 `50-deploy`）。三类经历栏目（projects / internships / campus）**一个项目 / 一段经历 = 一个条目**，角色、时间、技术栈都是独立字段——不要往 job 栏目里塞经历。
 
 ## 三、条目命令
 
@@ -121,12 +124,19 @@ nx-sk section update job --remove-field blog
 nx-sk section update job --fields @fields.json
 ```
 
-字段定义支持：`key`（字母开头）、`label`、`type`（`text|textarea|number|date|month|bool|select|tags|secret|file`）、
+字段定义支持：`key`（字母开头）、`label`、`type`（`text|textarea|number|date|month|bool|select|tags|secret|file|md`）、
 `group`、`hint`、`options`（候选项）、`sensitive`（true 则密文落盘）、`maxItems`（tags / file 上限）、
 `fill`（填写策略，见下）。
 
 > `type: 'file'` 是**附件字段**：值 = 附件 id 的**列表**（一个字段可挂多个；不是路径），
 > 导入原件、附件库台账、以及「文件统一放 `~/nx-sk/files/`」的完整口径见 `40-files`。
+>
+> `type: 'md'` 是**图文字段**：值是一段 markdown 正文，里面用 `![说明](f_xxx)` 引用附件库里的图片。
+> 面板里可以直接 Ctrl+V 粘截图 / 拖入 / 从库里选，图片统一列在正文下方、点开可缩放拖动看细节；
+> 正文里的 `http(s)` 网址（裸网址或 `[文字](https://…)`）在预览里会变成**可直接点开的链接**
+> （新标签页打开），便于把控制台、文档地址嵌进 SOP；`![说明](https://…)` 这样的外链图片也会直接显示
+> （不进附件库，需要联网）。`entry get` 会把本地图片引用还原成「[图片: 说明] 本地路径」，
+> 外链图片则给「[外链图片: 说明] 地址」。写部署 SOP 这类「说明 + 截屏」的内容用它，口径见 `50-deploy`。
 
 > `select` 的 `options` 是**候选项不是白名单**：真实值（如某个少数民族）不在候选里也允许写入。
 

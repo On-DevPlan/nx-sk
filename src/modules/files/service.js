@@ -30,7 +30,7 @@ function assertCategory(cat) {
  * 列附件。组织方式**完全由栏目驱动**：`sections` 给出「哪些栏目在引用附件」，
  * `section` 参数按栏目过滤（`none` = 只列没有任何条目引用的）。不预定义分类/槽位。
  */
-export async function listFiles({ category, q, section } = {}) {
+export async function listFiles({ category, q, section, limit = 0, offset = 0 } = {}) {
   const store = await loadStore();
   assertCategory(category);
   const withRefs = store.files.map((rec) => ({ rec, usedBy: fileReferences(store, rec) }));
@@ -51,6 +51,12 @@ export async function listFiles({ category, q, section } = {}) {
     ].join('\n').toLowerCase().includes(needle));
   }
   list = list.slice().sort((a, b) => String(b.rec.createdAt || '').localeCompare(String(a.rec.createdAt || '')));
+  // 分页只切「过滤后的列表」；total 仍是全库数量（面板顶部的「全部」用它）。
+  // limit=0 表示不分页（CLI / 测试沿用旧行为，避免一次拉全库进浏览器导致 OOM）。
+  const filtered = list.length;
+  const size = Number(limit) > 0 ? Number(limit) : filtered;
+  const start = Math.max(0, Number(offset) || 0);
+  const pageList = size > 0 ? list.slice(start, start + size) : [];
   let totalBytes = 0;
   for (const r of store.files) totalBytes += r.bytes;
   // 分组素材：带 file 字段的栏目（栏目驱动）及其引用数
@@ -58,14 +64,15 @@ export async function listFiles({ category, q, section } = {}) {
     ...s, count: withRefs.filter((x) => x.usedBy.some((u) => u.sectionId === s.id)).length,
   }));
   return {
-    count: list.length,
+    count: filtered,
     total: store.files.length,
     totalBytes,
     unlinked: withRefs.filter((x) => !x.usedBy.length).length,
     root: displayPath(filesDir()),
     rootRaw: filesDir(),
     sections,
-    files: list.map((x) => describeFile(x.rec, store)),
+    page: { limit: size, offset: start, count: pageList.length, total: filtered, hasMore: start + pageList.length < filtered },
+    files: pageList.map((x) => describeFile(x.rec, store)),
   };
 }
 
