@@ -295,24 +295,19 @@ step('第二个附件也反查到「被引用」', mf2Detail.usedBy.some((u) => 
 const bySecond = await cliJson(['entry', 'list', '--section', 'job', '--q', 'r2.pdf']);
 step('按第二个附件的名字也能搜到条目', bySecond.entries.some((e) => e.title === '冒烟测试'));
 
-const dryExport = await cliJson(['export', 'run', '--dry-run']);
-step('export --dry-run 只报计划', dryExport.status === 'skipped' && dryExport.wouldWrite.files.length === 2);
+// 可读导出（JSON / Markdown）已删除：备份与它都是「往本机目录留副本」，
+// 与 transfer 的 ZIP 导出重复。这里钉住**命令确实没了**，别哪天又被加回来。
+const goneExport = await cliError(['export', 'run']);
+step('export run 已删除（导出只剩 transfer 一条路径）', /未知命令/.test(goneExport.error || ''), goneExport.error);
+const goneList = await cliError(['export', 'list']);
+step('export list 已删除', /未知命令/.test(goneList.error || ''), goneList.error);
+const goneBackup = await cliError(['backup', 'export']);
+step('backup export 已删除', /未知命令/.test(goneBackup.error || ''), goneBackup.error);
 
-const exported = await cliJson(['export', 'run', '--out', join(home, 'out')]);
-step('export 真写了文件', exported.files.length === 2 && exported.withSecrets === true, '默认含明文');
-const mdPath = exported.files.find((f) => f.kind === 'md').pathRaw;
-const jsonPath = exported.files.find((f) => f.kind === 'json').pathRaw;
-const md = await readFile(mdPath, 'utf8');
-step('导出默认含密钥明文（自己用，不拦）', md.includes('sk-smoke-NEW-0987654321fedcba') && md.includes('冒烟测试'));
-step('JSON 导出标了 withSecrets', JSON.parse(await readFile(jsonPath, 'utf8')).withSecrets === true);
-
-const maskedExport = await cliJson(['export', 'run', '--out', join(home, 'out-masked'), '--no-secrets']);
-step('--no-secrets 导出时凭据打码', maskedExport.withSecrets === false);
-const mdMasked = await readFile(maskedExport.files.find((f) => f.kind === 'md').pathRaw, 'utf8');
-step('打码版导出里读不到明文', !mdMasked.includes('sk-smoke-NEW'));
-
-const exportList = await cliJson(['export', 'list']);
-step('export list 给出历史与目录内文件', exportList.history.length >= 2 && exportList.disk.length >= 2);
+// 导出导入页仍挂在导航里，且 transfer 五条命令都在
+const tRoutes = await cliJson(['routes']);
+step('transfer 五条命令都还在', ['transfer export', 'transfer import', 'transfer bundle-export', 'transfer bundle-import', 'transfer import-new']
+  .every((c) => tRoutes.entries.some((r) => r.command === `nx-sk ${c}`)));
 
 // ── 加密备份 + 跨机器口令解开 ────────────────────────────────
 // 关键回归：A 机 export --password 出的 .nxskbak 在 B 机（换了 vaultkey）

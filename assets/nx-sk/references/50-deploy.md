@@ -72,11 +72,13 @@ nx-sk entry get "node-web 多阶段 Dockerfile" --json
 
 **别跳过第 3 步**：正文里的值（端口、镜像名、副本数）是上一份场景的取值，直接抄走就会带着别人的假设。
 
-整栏导出成一份可读文档（分享/归档用）：
+整栏打包成 ZIP（分享 / 归档 / 迁移都用它）：
 
 ```bash
-nx-sk export run --section deploy --format md
+nx-sk transfer export deploy --out deploy.zip
 ```
+
+可读的 Markdown / JSON 导出已删除 —— 项目里只有 ZIP 这一条导出路径。
 
 ## 五、写操作步骤（`sop` 字段：图文 + 截屏）
 

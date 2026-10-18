@@ -4,6 +4,25 @@
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-10-18
+
+> **BREAKING**：`nx-sk export run` / `export list`（可读导出 JSON / Markdown）已移除。
+> 导出现在**只有 `nx-sk transfer` 一条路径**（`export` / `import` / `bundle-export` /
+> `bundle-import` / `import-new`）。详见 [Removed](#removed)。
+
+### Removed
+
+- **可读导出（JSON / Markdown）整体删除**：`nx-sk export run` / `export list`、
+  `POST /api/export`、`GET /api/exports`、`components/readableExport.jsx`、
+  `store.exports`（历次导出历史）与 `MAX_EXPORT_HISTORY` 全部移除。
+  它和备份是同一类东西 —— 「往本机目录再写一份副本」，而 ZIP 导出已经把这件事做完了，
+  两套口径并存只会漂移（谁也不知道该看哪一份）。
+  - 设置页移除：可读导出面板（格式 / 输出目录 / 凭据开关 / 历次导出 / 目录内文件），
+    以及「默认导出格式」「默认导出目录」「导出默认带明文密钥」三项设置；
+    `SETTING_KEYS` 里的 `exportDir` / `exportFormat` / `includeSecretsInExport` 一并去掉。
+  - 栏目页「更多」里的「导出 JSON / Markdown」菜单项移除（ZIP 导出 / 导入不动）。
+  - **「导出导入」页与 transfer 五条命令完全不动** —— 那是本项目唯一的导出路径。
+
 ## [0.12.0] - 2026-10-18
 
 > **BREAKING**：`nx-sk backup *` 命令与 `.nxskbak` 格式已移除。改用 `nx-sk transfer export` /
@@ -92,7 +111,6 @@
     出来的包就是唯一回退手段。
   - 跨机敏感字段的重新加密逻辑迁到 `transfer`：导入后用**本机 vaultKey** 重加密落盘，
     与手填字段没有区别。
-  - 面板里可读的 JSON / Markdown 导出移到**设置**页（人读副本，不参与导入）。
   - 导航名由「导出与备份」改为「导出导入」；旧书签 `#/backup` 自动落到「设置」。
   - 旧命令 `nx-sk backup export|import` 报「未知命令」，请改用 `transfer export` /
     `transfer import-new`（旧 `.nxskbak` 文件不再可导入）。

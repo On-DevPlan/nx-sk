@@ -4,12 +4,9 @@ import { loadStore, mutateStore } from '../../core/store.js';
 import { findSection } from '../../core/fields.js';
 import { badInput, notFound } from '../../core/errors.js';
 
-export const SETTING_KEYS = ['exportDir', 'exportFormat', 'includeSecretsInExport', 'defaultSection', 'navGroups', 'navHidden', 'navOrder'];
+export const SETTING_KEYS = ['defaultSection', 'navGroups', 'navHidden', 'navOrder'];
 
 const SCHEMA = {
-  exportDir: { type: 'string', hint: '导出目录，留空 = ~/nx-sk/export' },
-  exportFormat: { type: 'string', enum: ['json', 'md', 'both'], hint: '整体导出默认格式' },
-  includeSecretsInExport: { type: 'boolean', hint: '整体导出是否默认带密钥明文（默认否）' },
   defaultSection: {
     type: 'string',
     hint: '打开面板时落地的栏目 id（空 = 第一个栏目；地址里带 #/栏目 时以地址为准）',

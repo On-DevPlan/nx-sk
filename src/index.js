@@ -3,8 +3,7 @@ export * as system from './modules/system/service.js';
 export * as settings from './modules/settings/service.js';
 export * as sections from './modules/sections/service.js';
 export * as entries from './modules/entries/service.js';
-// `export` 是保留字，不能直接当绑定名，用别名导出
-export * as exportApi from './modules/export/service.js';
+export * as transfer from './modules/transfer/service.js';
 export * as skill from './modules/skill/service.js';
 
 export { CODES, AppError } from './core/errors.js';

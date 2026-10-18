@@ -154,14 +154,6 @@ export default function SectionView({ sectionId }) {
     await reload();
   });
 
-  const exportSection = guard(async () => {
-    const r = await api('/api/export', { method: 'POST', body: { section: sectionId, format: 'both' } });
-    setModal({
-      title: '导出结果',
-      body: <pre className="block">{`目录: ${r.dir}\n格式: ${r.format}\n条目: ${r.entries}\n凭据: ${r.withSecrets ? '含明文' : '已打码'}\n\n${r.files.map((f) => `${f.path}  ${f.bytes} 字节`).join('\n')}`}</pre>,
-    });
-  });
-
   const closeMore = () => { if (moreRef.current) moreRef.current.open = false; };
 
   /** 浏览器下载：让 <a download> 去接，前端不碰 zip 内容；含凭据与否由菜单项决定。 */
@@ -310,7 +302,6 @@ export default function SectionView({ sectionId }) {
               {selected.size ? `导出选中 ${selected.size} 条（打码）` : '导出 ZIP（打码）'}
             </button>
             <button type="button" onClick={() => { closeMore(); zipInput.current?.click(); }}>导入 ZIP…</button>
-            <button type="button" onClick={() => { closeMore(); exportSection(); }}>导出 JSON / Markdown</button>
           </div>
         </details>
         <input

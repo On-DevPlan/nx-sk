@@ -76,13 +76,19 @@ ln -s "$(pwd)/assets/nx-sk" "$HOME/.workbuddy/skills/nx-sk"
 
 ## 从 0.11.x 升级
 
-**0.12.0 有不兼容变更：备份模块已删除。**
+**导出只剩 `nx-sk transfer` 一条路径。** 备份（0.12.0 删）与可读导出 JSON / Markdown
+（0.13.0 删）都是「往本机目录再写一份副本」，而 ZIP 导出已经覆盖了这两件事。
 
 | 原来 | 现在 |
 | --- | --- |
 | `nx-sk backup export --password 口令` | `nx-sk transfer export <栏目> --passphrase 口令 --out x.zip` |
 | `nx-sk backup import --file x.nxskbak` | `nx-sk transfer import-new --file x.zip` |
+| `nx-sk export run --format both --out DIR` | `nx-sk transfer bundle-export --out x.zip`（ZIP，不是可读副本） |
+| `nx-sk export list` | ——（已删；文件由你放到哪就在哪） |
 | 面板「导出与备份」 | 面板「导出导入」（栏目全选即整库） |
+
+仍然可用的命令：`transfer export` / `transfer import` / `transfer bundle-export` /
+`transfer bundle-import` / `transfer import-new`。
 
 - **旧的 `.nxskbak` 文件不再可导入。** 升级前请先在 0.11.x 下导出一份
   （`nx-sk transfer bundle-export --out x.zip`），升级后用 `transfer import-new --file x.zip` 导回。
@@ -147,8 +153,6 @@ CLI 与 API 同源，skill 驱动 agent**。落到具体功能上：
 | `nx-sk file restore <id> [--to DIR] [--copy]` | **可逆**：移回原始位置并撤销台账；`--copy` 只导出副本 |
 | `nx-sk file content <id>` | 浏览器链接（内联预览 / `?download=1` 下载）；CLI 打印物理路径 |
 | `nx-sk file open <id>` | 用系统默认程序打开原件 |
-| `nx-sk export run [--format json\|md\|both] [--section id] [--with-secrets] [--out DIR] [--dry-run]` | 整体导出 |
-| `nx-sk export list` | 历次导出与目录内文件 |
 | `nx-sk transfer export <栏目> [--entries 条目,条目] [--passphrase 口令] [--out 文件]` | 栏目/选中条目 + 引用附件打成 ZIP，可设口令加密（栏目页「更多」里同源下载） |
 | `nx-sk transfer import <栏目> [--file ZIP] [--on-conflict skip\|copy\|overwrite] [--dry-run]` | 预览/导入到指定栏目；附件按 sha256 复用 |
 | `nx-sk transfer import-new [--file ZIP] [--dry-run]` | **零配置**：按包内结构新建栏目（id 冲突加序号） |
@@ -239,13 +243,6 @@ nx-sk setting set --set 'navGroups=[]'   # 清空 = 全部栏目恢复平铺
 ```
 
 分组只是**显示配置**（存在 `settings.navGroups`）：不动栏目与条目的数据，删掉栏目时头部自动略过。
-
-整体导出（落到本机目录的**人可读副本**，凭据默认含明文）：
-
-```bash
-nx-sk export run --format both --out D:/备份/nx-sk
-nx-sk export list
-```
 
 ### 全局导出 / 导入（多栏目）
 

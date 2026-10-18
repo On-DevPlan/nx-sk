@@ -149,7 +149,13 @@ Git Bash 下裸参数已经能用，但脚本里要可移植的话，仍然推�
 ```bash
 nx-sk key get OPENAI_KEY --mask      # sk-x******xxxx
 nx-sk key list --mask
-nx-sk export run --no-secrets        # 导出文件里也打码
+```
+
+**导出包恒为明文，没有打码选项**（0.12.0 起 `--no-secrets` 已移除）——
+要防「包被别人拿走」，用口令而不是打码：
+
+```bash
+nx-sk transfer export secret --passphrase 口令 --out secret.zip
 ```
 
 打码规则：长度 ≤ 10 全部打码；否则前 4 + `******` + 后 4。
