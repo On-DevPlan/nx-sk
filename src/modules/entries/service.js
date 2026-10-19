@@ -103,6 +103,23 @@ function normalizeValue(def, raw) {
     }
     return list;
   }
+  if (type === 'entrylist') {
+    // 结构清单：值 = 行对象的数组，列在字段定义的 fields 里声明。
+    // CLI 两种入口：--data 直接给 JSON 数组；--set 给 JSON 串（解析失败就报，别静默吞）。
+    let list = raw;
+    if (typeof raw === 'string') {
+      if (!raw.trim()) return null; // 「--set 字段=」（空值）= 清空，与其它类型同一约定
+      try { list = JSON.parse(raw); } catch { list = null; }
+      if (!Array.isArray(list)) {
+        throw badInput(`字段「${def.label}」是结构清单（entrylist），值要是行数组的 JSON，`
+          + `例如 '[{"名称":"主控台","链接":"https://…"}]'`);
+      }
+    }
+    if (!Array.isArray(list)) {
+      throw badInput(`字段「${def.label}」是结构清单（entrylist），值要是行数组（JSON），收到 ${JSON.stringify(raw).slice(0, 80)}`);
+    }
+    return normalizeRows(def, list);
+  }
   if (type === 'file') {
     // 值 = 附件 id（或唯一文件名）的**列表**：一个字段可以挂多个附件（简历传多个版本、
     // 头像多张）。id 全局唯一，天然做到「各条目附件互不串台」；同一份原件被多条条目引用
@@ -120,7 +137,85 @@ function normalizeValue(def, raw) {
   return s.trim() === '' ? null : s;
 }
 
+/**
+ * 结构清单的行归一：只留声明过的子字段（键写错当场报，不静默丢数据）；
+ * 空格子剔除、全空行丢弃。列没声明时（写入自动登记的字段）从行键**推断**清单列——
+ * 「直接写就登记」的手感在结构清单上也成立。
+ */
+function normalizeRows(def, list) {
+  if (!def.fields || !def.fields.length) {
+    const keys = [];
+    for (const row of list) {
+      if (!isPlainRow(row)) continue;
+      for (const k of Object.keys(row)) if (!keys.includes(k)) keys.push(k);
+    }
+    if (keys.length) def.fields = keys.map((k) => ({ key: k, label: k }));
+  }
+  const subs = def.fields || [];
+  const rows = [];
+  for (const item of list) {
+    if (!isPlainRow(item)) {
+      throw badInput(`字段「${def.label}」的每行都要是对象（{"子字段": "值"}），收到 ${JSON.stringify(item).slice(0, 80)}`);
+    }
+    const row = {};
+    for (const [k, v] of Object.entries(item)) {
+      const sub = subs.find((s) => s.key === k);
+      if (!sub) {
+        throw badInput(`字段「${def.label}」没有子字段「${k}」（清单列: ${subs.map((s) => s.label).join('、') || '无'}）。`
+          + `清单列在字段定义里，要改用 section update <栏目> --fields '<整份字段数组>'`);
+      }
+      const text = String(v ?? '').trim();
+      if (text !== '') row[k] = text;
+    }
+    if (Object.keys(row).length) rows.push(row);
+  }
+  if (def.maxItems && rows.length > def.maxItems) {
+    throw badInput(`字段「${def.label}」最多 ${def.maxItems} 行，收到 ${rows.length} 行`);
+  }
+  return rows.length ? rows : null;
+}
+
+function isPlainRow(x) {
+  return !!x && typeof x === 'object' && !Array.isArray(x);
+}
+
+/**
+ * 结构清单的写入：normalize 之后，敏感子值与顶层敏感字段同一条边界——
+ * 密文落盘；面板把打码占位原样回传时保留原密文（不把掩码当新密码存进去）。
+ * 打码占位与现有密文对不上时必须报错：那多半是「想改密码但只拷了打码值」。
+ */
+async function prepareEntryList(def, raw, current) {
+  const rows = normalizeValue(def, raw);
+  if (!rows) return null;
+  const subs = (def.fields || []).filter((s) => s.sensitive);
+  if (!subs.length) return rows;
+  const curRows = Array.isArray(current) ? current : [];
+  const out = [];
+  for (let i = 0; i < rows.length; i += 1) {
+    const row = { ...rows[i] };
+    for (const s of subs) {
+      const text = row[s.key];
+      if (text === undefined) continue;
+      if (String(text).includes('******')) {
+        const cur = curRows[i]?.[s.key];
+        if (isCipherBlob(cur)) {
+          try {
+            const { key } = await resolveVaultKey();
+            if (maskValue(decryptValue(key, cur)) === String(text)) { row[s.key] = cur; continue; }
+          } catch { /* 解不开就按新值走，下面照常报错 */ }
+        }
+        throw badInput(`字段「${def.label}」第 ${i + 1} 行的「${s.label}」收到的是打码占位而非明文。给完整值，或把这一格清掉重填。`);
+      }
+      const { key } = await resolveVaultKey();
+      row[s.key] = encryptValue(key, String(text));
+    }
+    out.push(row);
+  }
+  return out;
+}
+
 async function prepareValue(section, def, raw, current) {
+  if (def.type === 'entrylist') return prepareEntryList(def, raw, current);
   if (!isSensitiveField(section, def.key)) return normalizeValue(def, raw);
   if (raw === null || raw === undefined || String(raw).trim() === '') return null;
   const text = String(raw);
@@ -147,10 +242,13 @@ async function prepareValue(section, def, raw, current) {
 // `--set 简历附件=f_abc` / `--set 简历附件=f_a,f_b` 应当登记成**附件字段**，
 // 而不是一个普通文本字段或 tags。
 const looksLikeFileId = (x) => typeof x === 'string' && /^f_[0-9a-z]+$/i.test(x.trim());
+const looksLikeRow = (x) => !!x && typeof x === 'object' && !Array.isArray(x);
 
 function inferFieldType(raw) {
   if (Array.isArray(raw)) {
     if (raw.length && raw.every(looksLikeFileId)) return 'file';
+    // 行对象数组登记成结构清单——`--data '{"账号清单":[{…},{…}]}'` 自动建出能渲染的字段
+    if (raw.length && raw.every(looksLikeRow)) return 'entrylist';
     return 'tags';
   }
   if (looksLikeFileId(raw)) return 'file';
@@ -210,13 +308,20 @@ export async function listEntries({ section, q } = {}) {
         .flatMap((f) => att.fileIdsOf(e.values?.[f.key])
           .map((id) => att.findFileRecord(store, id)?.name || ''));
       const hay = [item.title, sec.title, ...fileNames,
-        ...Object.values(item.values).map((v) => (v === null ? '' : Array.isArray(v) ? v.join(',') : String(v)))]
+        ...Object.values(item.values).map(hayText)]
         .join('\n').toLowerCase();
       if (!hay.includes(String(q).toLowerCase())) continue;
     }
     out.push({ ...item, sectionTitle: sec.title });
   }
   return { count: out.length, total: store.entries.length, entries: out };
+}
+
+/** 搜索文本：行对象（entrylist）摊成 JSON 才能按里面的账号/链接搜到条目。 */
+function hayText(v) {
+  if (v === null || v === undefined) return '';
+  if (Array.isArray(v)) return v.map((x) => (isPlainRow(x) ? JSON.stringify(x) : String(x))).join(',');
+  return String(v);
 }
 
 export async function getEntry(ref, { mask, section } = {}) {
@@ -246,10 +351,17 @@ export async function getEntry(ref, { mask, section } = {}) {
   for (const f of sec.fields.filter((x) => x.type === 'md')) {
     for (const id of mdImageIds(serialized.values[f.key])) putFile(id);
   }
-  // 字段类型随读出来：CLI 渲染要知道哪个值是「图文」，才能把 f_xxx 换成文件名/路径
+  // 字段类型随读出来：CLI 渲染要知道哪个值是「图文」，才能把 f_xxx 换成文件名/路径；
+  // 结构清单还要带**列定义**（entryFields），渲染行时才知道每个键的人读标签
   const fieldTypes = {};
-  for (const f of sec.fields) fieldTypes[f.key] = f.type;
-  return { ...serialized, sectionTitle: sec.title, mask: !!mask, files, fieldTypes };
+  const entryFields = {};
+  for (const f of sec.fields) {
+    fieldTypes[f.key] = f.type;
+    if (f.type === 'entrylist') {
+      entryFields[f.key] = (f.fields || []).map((s) => ({ key: s.key, label: s.label, sensitive: s.sensitive === true }));
+    }
+  }
+  return { ...serialized, sectionTitle: sec.title, mask: !!mask, files, fieldTypes, entryFields };
 }
 
 export async function addEntry({ section, title, set, data, tags, 'dry-run': dryRun } = {}) {
@@ -275,7 +387,17 @@ export async function addEntry({ section, title, set, data, tags, 'dry-run': dry
   if (dryRun) {
     return { status: 'skipped', dryRun: true, wouldCreate: { ...entry, values: maskAll(sec, entry) }, createdFields: newFields.map((f) => f.key) };
   }
-  await mutateStore((s) => { s.entries.push(entry); });
+  await mutateStore((s) => {
+    // 自动登记的字段必须跟条目一起落盘：只有 addEntry 报了 createdFields 却不写
+    // 字典，面板/`entry get` 都按 section.fields 序列化——那些值会当场「隐身」。
+    // updateEntry 一直是写的（见下方同名逻辑），这里对齐成同一份行为。
+    const section = s.sections.find((x) => x.id === sec.id);
+    for (const f of newFields) {
+      if (!section.fields.some((x) => x.key === f.key)) section.fields.push(f);
+    }
+    if (newFields.length) section.updatedAt = nowIso();
+    s.entries.push(entry);
+  });
   return {
     status: 'ok', created: true, id: entry.id, title: entry.title, section: sec.id,
     completeness: completeness(sec, entry), createdFields: newFields.map((f) => f.key),
@@ -371,6 +493,8 @@ export async function fieldDictionary({ section } = {}) {
     fields: sec.fields.map((x) => ({
       key: x.key, label: x.label, type: x.type, group: x.group,
       kind: x.kind || '',
+      // 结构清单的列跟着字典出去：agent 写行之前得知道行里允许哪些键
+      fields: x.fields || null,
       hint: x.hint || '', options: x.options || null, sensitive: isSensitiveField(sec, x.key),
     })),
   });
@@ -554,13 +678,23 @@ export function renderEntryList(d) {
 /**
  * 一个字段值渲染成几行文本。
  * - 附件（`file` 字段，值可能是 id 列表）：解析成「附件名　物理路径」，**几个占几行**
+ * - 结构清单（entrylist）：**一行一条**，`列名=值 · 列名=值`——清单本来就是拿来看的
  * - 其它数组（tags 之类）：仍旧一行、顿号连接——不要顺手把它们也拆成多行
  */
-function valueLines(d, v, type) {
+function valueLines(d, v, key) {
+  const type = d.fieldTypes?.[key];
   const asFile = (x) => (d.files && d.files[x] ? `${d.files[x].name}　${d.files[x].path}` : null);
   if (Array.isArray(v) && v.length && v.every((x) => asFile(x))) return v.map(asFile);
   const one = asFile(v);
   if (one) return [one];
+  if (Array.isArray(v) && v.length && v.every(isPlainRow)) {
+    const subs = d.entryFields?.[key] || [];
+    const labelOf = (k) => subs.find((s) => s.key === k)?.label || k;
+    return v.map((row, i) => Object.entries(row)
+      .filter(([, x]) => !isBlank(x))
+      .map(([k2, x]) => `${labelOf(k2)}=${x}`)
+      .join(' · ') || `第 ${i + 1} 行（空）`);
+  }
   if (Array.isArray(v)) return [v.join('、')];
   if (typeof v === 'boolean') return [v ? '是' : '否'];
   // 图文字段：`![说明](f_x)` → `[图片: 说明] 本地路径`。不换的话 CLI 只会吐一串 id，
@@ -585,7 +719,7 @@ export function renderEntryGet(d) {
   ];
   for (const [k, v] of Object.entries(d.values)) {
     if (v === null) continue;
-    const rendered = valueLines(d, v, d.fieldTypes?.[k]);
+    const rendered = valueLines(d, v, k);
     lines.push(`  ${k.padEnd(24)} ${rendered[0]}`);
     for (const extra of rendered.slice(1)) lines.push(`  ${' '.repeat(24)} ${extra}`);
   }
@@ -623,6 +757,72 @@ export function renderFields(d) {
         lines.push(`    ${x.key.padEnd(22)} ${x.label}${x.sensitive ? '  [密文]' : ''}${x.options ? `  可选: ${x.options.join(' / ')}` : ''}${x.hint ? `　${x.hint}` : ''}`);
       }
     }
+  }
+  return lines.join('\n');
+}
+
+// ---------- 关键 key 台账（链接 / 账号 / 密码 / 镜像 的跨栏目统一列表） ----------
+//
+// 需求：散在各栏目条目里的「关键 key」（控制台链接、账号、密码、镜像名…）要有一张
+// 统一清单，方便一眼拿到、也方便交给 agent 定位修改。
+// 匹配规则：字段 key/label 命中启发式 **或** 字段类型是 secret/标记 sensitive。
+// 值策略：链接类明文（地址是要点击使用的）；账号/密码/token 类一律打码（短值全 *）；
+// 其余长文本前 4+尾 4。--reveal 才出原文（密文走解密）。
+const KEY_URL_RE = /(url|link|链接|console|入口|registry|仓库|image|镜像)/i;
+const KEY_SECRET_RE = /(account|user(?!id)|账号|帐号|password|密码|passwd|pwd|token|secret|apikey|api_key|密钥|身份证|idcard|phone|电话|bank)/i;
+const KEY_FIELD_RE = new RegExp(`${KEY_URL_RE.source}|${KEY_SECRET_RE.source}`, 'i');
+
+export async function keysLedger({ section, q, reveal } = {}) {
+  const store = await loadStore();
+  let sections = store.sections;
+  if (section) sections = [mustFindSection(store, section)];
+  const out = [];
+  for (const sec of sections) {
+    const mine = store.entries.filter((e) => e.section === sec.id);
+    if (!mine.length) continue;
+    const decrypt = await sensitiveViewer(sec, mine);
+    for (const e of mine) {
+      const item = serializeEntry(sec, e, { decrypt });
+      for (const def of sec.fields) {
+        const hit = KEY_FIELD_RE.test(def.key) || KEY_FIELD_RE.test(def.label) || def.type === 'secret' || def.sensitive === true;
+        if (!hit) continue;
+        const raw = item.values?.[def.key];
+        if (raw === undefined || raw === null || String(raw).trim() === '') continue;
+        const s = Array.isArray(raw) ? raw.join('、') : String(raw);
+        const isSecretish = def.type === 'secret' || def.sensitive === true || isSensitiveField(sec, def.key) || KEY_SECRET_RE.test(def.key) || KEY_SECRET_RE.test(def.label);
+        const isUrlish = KEY_URL_RE.test(def.key) || KEY_URL_RE.test(def.label);
+        out.push({
+          section: sec.title,
+          sectionId: sec.id,
+          entry: e.title,
+          entryId: e.id,
+          key: def.key,
+          label: def.label,
+          sensitive: isSecretish,
+          value: reveal ? s
+            : (isSecretish || isCipherBlob(s)) ? maskValue(s)
+              : isUrlish ? s
+                : (s.length > 12 ? `${s.slice(0, 4)}…${s.slice(-4)}` : `${s.slice(0, 2)}***`),
+        });
+      }
+    }
+  }
+  if (q) {
+    const needle = String(q).toLowerCase();
+    return { count: out.length, reveal: Boolean(reveal), items: out.filter((x) =>
+      [x.section, x.entry, x.key, x.label, x.value].some((v) => String(v).toLowerCase().includes(needle))) };
+  }
+  return { count: out.length, reveal: Boolean(reveal), items: out };
+}
+
+export function renderKeysLedger(d) {
+  if (!d.items.length) return '（没有命中关键 key 的字段——往条目里填 链接/账号/密码/镜像 类字段后这里会出现）';
+  const lines = [`关键 key 台账：${d.items.length} 条${d.reveal ? '（明文）' : '（打码；--reveal 看原文）'}`];
+  let last = '';
+  for (const x of d.items) {
+    if (x.section !== last) { lines.push('', `【${x.section}】${x.sectionId}`); last = x.section; }
+    lines.push(`  ${x.entry}（${x.entryId}）`);
+    lines.push(`    ${x.label.padEnd(10)} ${x.key.padEnd(14)} ${x.sensitive ? '[密文] ' : ''}${x.value}`);
   }
   return lines.join('\n');
 }

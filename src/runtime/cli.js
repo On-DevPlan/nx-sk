@@ -162,7 +162,9 @@ function pushFlag(raw, name, value, spec) {
   }
 }
 
-function parseArgs(action, tokens) {
+// 导出让单测能直接钉「多键 --data 别被 KV 逻辑误伤」这类边界：
+// 它们只在解析层出错，跑业务测试反而绕开了真正的发生点。
+export function parseArgs(action, tokens) {
   const flagSpecs = new Map(flagSpecsOf(action).map((s) => [s.name, s]));
   const argSpecs = argSpecsOf(action);
   const flags = {};
@@ -202,7 +204,7 @@ function parseArgs(action, tokens) {
   // 而后者在值以 `-` 开头时会被当成 flag（那时只能走前者）。
   // 位置参数与 flag 一起交给展开函数：`key set K -` 的 `-` 是位置参数，
   // 不能因为它「看起来像 flag」就漏掉。
-  return expandSafeArgs({ ...raw, ...flags });
+  return expandSafeArgs({ ...raw, ...flags }, { hasValueArg: argSpecs.some((s) => s.name === 'value') });
 }
 
 /**
@@ -214,7 +216,7 @@ function parseArgs(action, tokens) {
  * 换成真正的值。放这里而不是 spec.js：那边的 coerce() 是 CLI 与 HTTP 共用的
  * 纯净解码器，而 HTTP 没有「命令行通道」这回事。
  */
-function expandSafeArgs(raw) {
+function expandSafeArgs(raw, { hasValueArg = false } = {}) {
   const out = { ...raw };
   let stdinUsed = false;
   // stdin 只能被消费一次：两个参数都写 `-` 的话第二个读到的是空，
@@ -236,9 +238,14 @@ function expandSafeArgs(raw) {
   // 所以给了 data 就不该再因为缺 value 而报用法错。
   // 取 value 键；没有 value 键时取对象里唯一那个键。
   //
+  // **只有声明了 value 参数的 action 才做这条推导**（目前只有 `key set <name> <value>`）。
+  // 其他 action 的 `--data` 是「整份值对象」（entry add/update），多键才是常态 ——
+  // 这里曾无差别执行，于是 `entry add --data @item.json`（5 个字段）直接报
+  // 「--data 需要含 value 键，或只含一个键」：文档写着「整份 JSON」，实际只收单键。
+  //
   // 位置参数 `-` 要**先于**这里的提取被认出来，否则 `key set K -` 的 `-` 会被
   // 当成字面值 `-`。所以 stdin 判定放在 data 提取之后、用「value 是否还等于 -」判断。
-  if (out.value === undefined && out.data && typeof out.data === 'object' && !Array.isArray(out.data)) {
+  if (hasValueArg && out.value === undefined && out.data && typeof out.data === 'object' && !Array.isArray(out.data)) {
     const keys = Object.keys(out.data);
     if (out.data.value !== undefined) out.value = out.data.value;
     else if (keys.length === 1) out.value = out.data[keys[0]];

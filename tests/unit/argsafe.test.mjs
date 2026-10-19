@@ -7,6 +7,7 @@ import { useTempHome } from '../helpers.mjs';
 const dir = await useTempHome();
 
 const { parseDataArg, parseStdinValue } = await import('../../src/core/argsafe.js');
+const { parseArgs } = await import('../../src/runtime/cli.js');
 
 // 这些桩函数证明「读 stdin / 读文件」不是不可测的隐式依赖：
 // 走哪条通道由参数决定，测试能把通道换成桩。
@@ -114,4 +115,32 @@ test('CLI 解析层：--data 给多键对象时报错指路，不静默登记未
   const keys = Object.keys(ambiguous);
   assert.equal(keys.length, 2, '夹具本身要有两个键');
   assert.equal(ambiguous.value, undefined, '夹具本身不含 value 键');
+});
+
+// value 推导只属于「声明了 value 参数」的 action（`key set <name> <value>`）。
+// 其余 action 的 --data 是「整份值对象」，多键才是常态。
+test('CLI 解析层：key set 的 --data 多键仍然报错（KV 只有一个值）', () => {
+  const { action } = ctxOf(['key', 'set', 'k1']);
+  assert.throws(
+    () => parseArgs(action, ['k1', '--data', '{"a":"1","b":"2"}']),
+    (e) => e.code === 'INVALID_INPUT' && /--data 需要含 value 键，或只含一个键/.test(e.message),
+  );
+});
+
+test('CLI 解析层：entry add 的 --data 可以是多键对象（整份值）', () => {
+  const { action } = ctxOf(['entry', 'add']);
+  assert.ok(action, 'entry add 必须可解析');
+  const ctx = parseArgs(action, ['--section', 'memo', '--title', '甲', '--data', '{"a":"1","b":"2"}']);
+  assert.deepEqual(ctx.data, { a: '1', b: '2' }, '多键对象必须原样进 ctx，不能被 KV 逻辑拦下');
+  assert.equal(ctx.section, 'memo');
+  assert.equal(ctx.title, '甲');
+});
+
+test('CLI 解析层：entry add 的 --data @文件 多键原样通过', () => {
+  const p = join(dir, 'item-multi.json');
+  writeFileSync(p, JSON.stringify({ name: '甲', kind: '待办', due: '2026-10-19', body: 'x', source: 'y' }));
+  const { action } = ctxOf(['entry', 'add']);
+  const ctx = parseArgs(action, ['--section', 'memo', '--title', '甲', '--data', '@' + p]);
+  assert.equal(Object.keys(ctx.data).length, 5);
+  assert.equal(ctx.data.name, '甲');
 });

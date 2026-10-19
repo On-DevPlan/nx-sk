@@ -47,6 +47,27 @@ export function validateFieldDef(raw, { allowGroup } = {}) {
     type,
     group: String(raw.group || allowGroup || 'other'),
   };
+  // entrylist（结构清单）的列就是它自己的小字典：不声明列就没法渲染、没法校验。
+  // 其它类型声明 fields 一律拒绝——字典里不该有「定义了也用不上」的键。
+  if (type === 'entrylist') {
+    if (!Array.isArray(raw.fields) || !raw.fields.length) {
+      throw badInput(`字段 ${key} 是 entrylist（结构清单），必须声明子字段 fields。`
+        + `例如 fields:[{"key":"url","label":"链接"},{"key":"pass","label":"密码","sensitive":true}]`);
+    }
+    const seen = new Set();
+    def.fields = raw.fields.map((s) => {
+      if (!s || typeof s !== 'object') throw badInput(`字段 ${key} 的子字段必须是对象，收到 ${JSON.stringify(s)}`);
+      const sk = assertFieldKey(String(s.key || '').trim());
+      if (seen.has(sk)) throw badInput(`字段 ${key} 的子字段 key 重复: ${sk}`);
+      seen.add(sk);
+      const out = { key: sk, label: String(s.label || sk) };
+      if (s.sensitive === true) out.sensitive = true;
+      if (s.hint) out.hint = String(s.hint);
+      return out;
+    });
+  } else if (raw.fields !== undefined) {
+    throw badInput(`字段 ${key} 不是 entrylist，不能声明子字段 fields（只有结构清单有清单列）`);
+  }
   if (raw.hint) def.hint = String(raw.hint);
   if (Array.isArray(raw.options) && raw.options.length) def.options = raw.options.map(String);
   if (raw.sensitive === true) def.sensitive = true;

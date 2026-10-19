@@ -124,7 +124,7 @@ nx-sk section update job --remove-field blog
 nx-sk section update job --fields @fields.json
 ```
 
-字段定义支持：`key`（字母开头）、`label`、`type`（`text|textarea|number|date|month|bool|select|tags|secret|file|md`）、
+字段定义支持：`key`（字母开头）、`label`、`type`（`text|textarea|number|date|month|bool|select|tags|entrylist|secret|file|md`）、
 `group`、`hint`、`options`（候选项）、`sensitive`（true 则密文落盘）、`maxItems`（tags / file 上限）、
 `fill`（填写策略，见下）。
 
@@ -137,6 +137,23 @@ nx-sk section update job --fields @fields.json
 > （新标签页打开），便于把控制台、文档地址嵌进 SOP；`![说明](https://…)` 这样的外链图片也会直接显示
 > （不进附件库，需要联网）。`entry get` 会把本地图片引用还原成「[图片: 说明] 本地路径」，
 > 外链图片则给「[外链图片: 说明] 地址」。写部署 SOP 这类「说明 + 截屏」的内容用它，口径见 `50-deploy`。
+
+> `type: 'entrylist'` 是**结构清单字段**：值 = 行对象的**数组**，行数不限（变长）；列（子字段）
+> 在字段定义的 `fields` 里声明。适合「一个条目挂多组 链接/账号/密码」这类密集结构——
+> tags 存不了结构，拆成多个字段又不知道会有几组。声明 `sensitive: true` 的列与顶层敏感字段
+> 同一条边界：密文落盘、默认原文、`--mask` 打码。面板渲染成密集迷你表，直接增删行。
+>
+> ```bash
+> # 建字段（面板「新增字段」选「结构清单」会预填 名称/链接/账号/密码(密文) 四列）
+> nx-sk section update mysec --add-field '{"key":"accounts","label":"账号清单","type":"entrylist","group":"main","fields":[{"key":"name","label":"名称"},{"key":"url","label":"链接"},{"key":"user","label":"账号"},{"key":"pass","label":"密码","sensitive":true}]}'
+>
+> # 写入：值是行数组（--data 直接给 JSON；--set 认 JSON 串）；`--set 字段=` 清空
+> nx-sk entry update 张三 --data '{"账号清单":[{"名称":"主控台","链接":"https://…","账号":"ops","密码":"…"}]}'
+> ```
+>
+> 规矩：全空行写入时自动剔除；行里的键必须是声明的清单列（写错当场报，不静默丢）；
+> 没登记过的键直接写行数组会**自动登记**成 entrylist 并从行推断列。`entry get` 里清单一行一条：
+> `名称=主控台 · 链接=https://… · 账号=ops · 密码=…`（--mask 时密码列打码）。
 
 > `select` 的 `options` 是**候选项不是白名单**：真实值（如某个少数民族）不在候选里也允许写入。
 

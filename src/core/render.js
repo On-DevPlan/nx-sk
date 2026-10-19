@@ -13,12 +13,40 @@ export function isBlank(v) {
   return String(v).trim() === '';
 }
 
-/** 值 → 人读字符串（bool / tags / 数组 / 标量）。 */
+/** 值 → 人读字符串（bool / tags / 数组 / 标量 / entrylist 行）。 */
 export function formatValue(value) {
   if (isBlank(value)) return '';
-  if (Array.isArray(value)) return value.map(String).join('、');
+  if (Array.isArray(value)) {
+    // 结构清单的行：`k=v · k=v；k=v` 压成一行——section dump 的表格里放不下多行版
+    if (value.length && value.every((x) => isPlainRow(x))) {
+      return value.map((row) => Object.entries(row)
+        .filter(([, v]) => !isBlank(v))
+        .map(([k, v]) => `${k}=${typeof v === 'boolean' ? (v ? '是' : '否') : v}`)
+        .join(' · ')).filter(Boolean).join('；');
+    }
+    return value.map(String).join('、');
+  }
   if (typeof value === 'boolean') return value ? '是' : '否';
   return String(value);
+}
+
+function isPlainRow(x) {
+  return !!x && typeof x === 'object' && !Array.isArray(x);
+}
+
+/**
+ * entrylist 的一行：敏感子值走与顶层敏感字段同一条 displaySensitive 边界
+ * （默认原文 / mask 打码 / 有 decrypt 才解密）。非对象行（坏数据）原样放过。
+ */
+function displayRow(def, row, opts) {
+  if (!isPlainRow(row)) return row;
+  const subs = (def.fields || []).filter((s) => s.sensitive);
+  if (!subs.length) return row;
+  const out = { ...row };
+  for (const s of subs) {
+    if (out[s.key] !== undefined && out[s.key] !== null) out[s.key] = displaySensitive(out[s.key], opts);
+  }
+  return out;
 }
 
 /**
@@ -55,6 +83,10 @@ export function serializeEntry(section, entry, { mask = false, decrypt } = {}) {
   for (const def of section.fields) {
     const raw = entry.values?.[def.key];
     if (isBlank(raw)) { values[def.key] = null; continue; }
+    if (def.type === 'entrylist' && Array.isArray(raw)) {
+      values[def.key] = raw.map((row) => displayRow(def, row, { mask, decrypt }));
+      continue;
+    }
     values[def.key] = isSensitiveField(section, def.key)
       ? displaySensitive(raw, { mask, decrypt })
       : raw;
@@ -133,6 +165,8 @@ export function dumpSection(section, entries, { mask = false, decrypt } = {}) {
       group: x.group,
       hint: x.hint || '',
       options: x.options || null,
+      // 结构清单的列（子字段）必须跟着字典出去，否则面板渲染不出列、agent 不知道行里该有什么键
+      fields: x.fields || null,
       kind: x.kind || '',
       sensitive: isSensitiveField(section, x.key),
       // 填写策略要跟着字段字典出去，否则面板与 agent 不知道哪个格子「不用填」
