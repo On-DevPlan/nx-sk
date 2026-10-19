@@ -3,7 +3,7 @@
 //
 // type 取值：text | textarea | number | date | month | bool | select | tags | secret | file
 
-export const FIELD_TYPES = ['text', 'textarea', 'number', 'date', 'month', 'bool', 'select', 'tags', 'secret', 'file', 'md'];
+export const FIELD_TYPES = ['text', 'textarea', 'number', 'date', 'month', 'bool', 'select', 'tags', 'entrylist', 'secret', 'file', 'md'];
 
 /**
  * 类型的人读标签 —— 只用于**面板下拉框**。
@@ -20,6 +20,7 @@ export const FIELD_TYPE_LABELS = {
   bool: '是/否',
   select: '单选',
   tags: '多值标签',
+  entrylist: '结构清单（变长行）',
   secret: '密文',
   file: '附件',
   md: '图文（可贴图）',
@@ -235,6 +236,32 @@ const DEPLOY_FIELDS = [
   f('files', '原件附件', 'file', 'use', { fill: 'optional', hint: '要连真实文件一起留档时挂这里（可选）' }),
 ];
 
+// —— 容器平台模板：一个平台（KubeSphere / Rancher / 自建 k8s…）一个条目 ——
+// 链接、账号、密码、镜像统一落一个条目，配合 `entry keys` 台账做跨栏目统一列表。
+// 密码用 secret 类型（密文落盘）；链接/账号是关键定位信息，进 key 台账。
+const PLATFORM_FIELDS = [
+  f('platformName', '平台名称', 'text', 'basic', { hint: '如 川农容器平台(KubeSphere)' }),
+  f('provider', '提供方', 'text', 'basic', { fill: 'optional', hint: '学校/厂商/自建' }),
+  f('env', '环境', 'select', 'basic', { options: ['生产', '测试', '开发', '其他'] }),
+  f('consoleUrl', '控制台链接', 'text', 'access', { hint: '平台入口 URL，点击即达' }),
+  f('account', '账号', 'text', 'access'),
+  f('password', '密码', 'secret', 'access', { hint: '密文落盘，读出默认原文' }),
+  f('projectNamespace', '项目 / 命名空间', 'text', 'deploy', { fill: 'optional' }),
+  f('registry', '镜像仓库地址', 'text', 'deploy', { fill: 'optional', hint: 'registry 或 仓库/项目 前缀' }),
+  f('image', '镜像名', 'text', 'deploy', { fill: 'optional', hint: '如 repo/app:1.2.0（不带仓库前缀时看 registry）' }),
+  f('deployYaml', '部署清单附件', 'file', 'deploy', { fill: 'optional', hint: 'Deployment/Service YAML 等原件' }),
+  f('ingressUrl', '应用入口链接', 'text', 'network', { fill: 'optional', hint: '部署后对外访问的 URL' }),
+  f('note', '备注', 'textarea', 'extra', { fill: 'optional' }),
+];
+
+const PLATFORM_GROUPS = [
+  { id: 'basic', title: '基本信息' },
+  { id: 'access', title: '访问凭据' },
+  { id: 'deploy', title: '镜像与部署' },
+  { id: 'network', title: '网络入口' },
+  { id: 'extra', title: '其他' },
+];
+
 const TEMPLATES = {
   job: {
     id: 'job',
@@ -310,6 +337,15 @@ const TEMPLATES = {
       { id: 'use', title: '使用说明' },
     ],
     fields: DEPLOY_FIELDS,
+  },
+  platform: {
+    id: 'platform',
+    label: '容器平台（链接/账号/密码/镜像）',
+    description: '一个平台一个条目：控制台链接、账号密码（密文）、镜像与命名空间。配合 `nx-sk entry keys` 台账做跨平台统一列表。',
+    titleField: 'platformName',
+    titleLabel: '平台名',
+    groups: PLATFORM_GROUPS,
+    fields: PLATFORM_FIELDS,
   },
 };
 
@@ -402,7 +438,9 @@ export function syncSectionGroups(groups, fields) {
  * `options`/`maxItems` 缺失与空数组/空值等价。不归一的话，一份「模板里没写 fill、
  * 栏目里写了 fill:normal」的等价定义会被报成漂移，噪音会淹没真正的差异。
  */
-const FIELD_CMP_KEYS = ['label', 'type', 'group', 'hint', 'options', 'maxItems', 'sensitive', 'fill'];
+// entrylist 的子字段也要参与漂移对比：清单列是结构的一部分，模板把「密码」列标了
+// sensitive 而栏目里没有，这种差异必须报出来——否则密文边界在两份定义间悄悄分叉。
+const FIELD_CMP_KEYS = ['label', 'type', 'group', 'hint', 'options', 'maxItems', 'sensitive', 'fill', 'fields'];
 
 function normalizedFieldDef(f) {
   return {
@@ -414,6 +452,10 @@ function normalizedFieldDef(f) {
     maxItems: Number.isFinite(f?.maxItems) ? f.maxItems : null,
     sensitive: f?.sensitive === true,
     fill: f?.fill || 'normal',
+    // 子字段只比结构三要素（key/label/sensitive）；hint 是文案，抖动太频繁不值得报
+    fields: Array.isArray(f?.fields)
+      ? f.fields.map((s) => ({ key: String(s?.key || ''), label: String(s?.label || s?.key || ''), sensitive: s?.sensitive === true }))
+      : null,
   };
 }
 

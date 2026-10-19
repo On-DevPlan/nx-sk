@@ -6,7 +6,19 @@ import { CliHints, Empty, Modal, Tag } from '../../web/frontend/components/ui.js
 import { FieldGroup } from '../../web/frontend/components/fieldEditor.jsx';
 import KvTable from './kvTable.jsx';
 
-const norm = (x) => (x === null || x === undefined ? '' : (Array.isArray(x) ? x.join('、') : String(x)));
+// 脏值比较用：对象/数组（tags、entrylist 的行）必须走 JSON 序列化——
+// String(obj) 恒为 '[object Object]'，会把「没改」误判成「每处都改了」
+const norm = (x) => (x === null || x === undefined ? '' : (typeof x === 'object' ? JSON.stringify(x) : String(x)));
+
+// 条目定位文本（面包屑点击复制用）：人读的路径 + agent 可直接执行的 CLI。
+// id 与标题都带——标题可能重名/被改，id 是唯一事实；命令里用 id 定位最稳。
+function entryRefText(section, entry) {
+  return [
+    `nx-sk 条目 · 栏目「${section.title}」(${section.id}) › 条目「${entry.title}」(${entry.id})`,
+    `读: nx-sk entry get --section ${section.id} ${entry.id}`,
+    `改: nx-sk entry update --section ${section.id} ${entry.id} --set 字段=值`,
+  ].join('\n');
+}
 
 
 /**
@@ -39,6 +51,42 @@ export default function SectionView({ sectionId }) {
   const zipInput = useRef(null);
   const moreRef = useRef(null);
   const mask = !!ui.mask;
+
+  // —— 左右栏拖宽：条目列表 ↔ 内容 ——
+  // 宽度持久化在 ui.listW（patchUi 对新键照存）。拖动过程只改**本地** state，
+  // 松手才落盘——否则每次 mousemove 都会经 context 重渲染整个表单树。
+  const colsRef = useRef(null);
+  const listWRef = useRef(Number(ui.listW) || 300);
+  const [listW, setListW] = useState(listWRef.current);
+  const [draggingCol, setDraggingCol] = useState(false);
+  const startColDrag = (e) => { e.preventDefault(); setDraggingCol(true); };
+  useEffect(() => {
+    if (!draggingCol) return undefined;
+    const move = (ev) => {
+      const rect = colsRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const w = Math.round(Math.min(560, Math.max(240, ev.clientX - rect.left)));
+      listWRef.current = w;
+      setListW(w);
+    };
+    const up = () => setDraggingCol(false);
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+    document.body.classList.add('col-resizing');
+    return () => {
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', up);
+      document.body.classList.remove('col-resizing');
+      if (listWRef.current !== (Number(ui.listW) || 300)) patchUi({ listW: listWRef.current });
+    };
+    // ui.listW 只在拖动开始/结束之间有意义；patchUi 稳定，不会造成重复订阅
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draggingCol]);
+  const resetColDrag = () => {
+    listWRef.current = 300;
+    setListW(300);
+    patchUi({ listW: 300 });
+  };
 
   const load = useCallback(async (keepId) => {
     setBusy(true);
@@ -155,6 +203,26 @@ export default function SectionView({ sectionId }) {
   });
 
   const closeMore = () => { if (moreRef.current) moreRef.current.open = false; };
+
+  // 面包屑点击复制：把「栏目›条目」定位（含 id 与 CLI 命令）贴进剪贴板，
+  // 粘给任意 agent 即可精确定位这条条目去做修改
+  const copyEntryRef = guard(async (entry) => {
+    if (!entry) return;
+    const text = entryRefText(data.section, entry);
+    try {
+      await navigator.clipboard.writeText(text);
+      toast(`已复制条目定位：${data.section.title} › ${entry.title}（贴给 agent 即可）`);
+    } catch {
+      // 剪贴板被拒（非安全上下文/权限）时退回选中文本方案
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      ta.remove();
+      toast(`已复制条目定位：${data.section.title} › ${entry.title}`);
+    }
+  });
 
   /** 浏览器下载：让 <a download> 去接，前端不碰 zip 内容；含凭据与否由菜单项决定。 */
   const exportZip = (withSecrets) => {
@@ -319,8 +387,8 @@ export default function SectionView({ sectionId }) {
         <button className="btn small" onClick={addEntry}>新建条目</button>
       </div>
 
-      <div className="cols">
-        <div className="col" style={{ flex: '0 0 300px' }}>
+      <div className="cols" ref={colsRef}>
+        <div className="col" style={{ flex: `0 0 ${listW}px` }}>
           <div className="card">
             <div className="colhead">
               <label className="inline pickall" title="全选 / 取消全选（只影响导出与批量操作）">
@@ -350,6 +418,12 @@ export default function SectionView({ sectionId }) {
                   <span className="name">{e.title || '（无名）'}</span>
                   <span className="acts">
                     {e.missing.length ? <span className="tag">{e.completeness.ratio}%</span> : <span className="tag strong">已填满</span>}
+                    <button
+                      type="button"
+                      className="row-copy"
+                      title="复制条目定位（贴给 agent 即可修改）"
+                      onClick={(ev) => { ev.stopPropagation(); copyEntryRef(e); }}
+                    >⧉</button>
                   </span>
                 </div>
               )) : <Empty>还没有条目。点右上角「新建条目」，或用 CLI：nx-sk entry add --section {data.section.id} --set ...</Empty>}
@@ -357,13 +431,29 @@ export default function SectionView({ sectionId }) {
           </div>
         </div>
 
+        <div
+          className={`col-splitter${draggingCol ? ' active' : ''}`}
+          title="拖动调整左右宽度（双击恢复默认）"
+          onMouseDown={startColDrag}
+          onDoubleClick={resetColDrag}
+        />
+
         <div className="col">
           {!draft ? (
             <div className="card"><Empty>左边选一条，或新建一条</Empty></div>
           ) : (
             <div className="card">
               <div className="colhead">
-                <span className="grow nowrap">{current?.title || draft.title}</span>
+                <span
+                  className="crumb grow nowrap"
+                  title="点击复制条目定位（栏目›条目 + id + CLI 命令，贴给 agent 即可修改）"
+                  onClick={() => copyEntryRef(current || draft)}
+                >
+                  <span className="crumb-sec">{data.section.title}</span>
+                  <span className="crumb-sep">›</span>
+                  <span className="crumb-ent">{current?.title || draft.title}</span>
+                  <span className="crumb-copy" aria-hidden>⧉</span>
+                </span>
                 <span className="muted mono">{draft.id}</span>
                 {current ? <Tag kind={current.missing.length ? '' : 'strong'}>完整度 {current.completeness.ratio}%</Tag> : null}
               </div>

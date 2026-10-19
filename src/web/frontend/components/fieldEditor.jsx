@@ -469,6 +469,66 @@ export function MdImageFieldControl({ def, value, onChange }) {
   );
 }
 
+/**
+ * 结构清单字段（`type: 'entrylist'`）：一个字段装**变长的一张迷你表**。
+ *
+ * 场景：一个条目要挂「多组 链接/账号/密码」——tags 存不了结构，拆成多个字段
+ * 又不知道会有几组。列（子字段）由字段字典声明（def.fields），行自由增删；
+ * 敏感列与顶层敏感字段同一条边界（密文落盘），输入框按工具栏的「打码显示」
+ * 切 password 形态（只是显示形态，值始终是草稿里的原文）。
+ *
+ * 密集：列头 + 行输入框直接铺开，没有「先展开再编辑」的两段式——这类清单
+ * 就是拿来快速增删查改的。空行不用管，保存时服务端会剔除全空行。
+ */
+export function EntryListFieldControl({ def, value, onChange }) {
+  const { ui } = useStore();
+  const mask = !!ui.mask;
+  const subs = Array.isArray(def.fields) ? def.fields : [];
+  const rows = Array.isArray(value) ? value.filter((r) => r && typeof r === 'object') : [];
+  const template = `${subs.map(() => 'minmax(0, 1fr)').join(' ')} auto`;
+
+  const setRow = (i, key, v) => onChange(rows.map((r, idx) => (idx === i ? { ...r, [key]: v } : r)));
+  const addRow = () => onChange([...rows, {}]);
+  const removeRow = (i) => onChange(rows.filter((_, idx) => idx !== i));
+
+  if (!subs.length) {
+    return <span className="hint">这个清单字段没有声明列（子字段），渲染不出输入格。用 section update 把字段的 fields 子字段补上。</span>;
+  }
+
+  return (
+    <div className="entrylist">
+      <div className="entrylist-head" style={{ gridTemplateColumns: template }}>
+        {subs.map((s) => (
+          <span key={s.key} className="entrylist-col" title={s.hint || ''}>
+            {s.label}
+            {s.sensitive ? <span className="tag bad">密文</span> : null}
+          </span>
+        ))}
+        <span />
+      </div>
+      {rows.map((row, i) => (
+        <div key={i} className="entrylist-row" style={{ gridTemplateColumns: template }}>
+          {subs.map((s) => (
+            <input
+              key={s.key}
+              type={s.sensitive && mask ? 'password' : 'text'}
+              autoComplete="off"
+              value={String(row[s.key] ?? '')}
+              placeholder={s.sensitive ? '密文落盘' : ''}
+              onChange={(e) => setRow(i, s.key, e.target.value)}
+            />
+          ))}
+          <button type="button" className="btn small ghost" title="删除这一行" onClick={() => removeRow(i)}>×</button>
+        </div>
+      ))}
+      <div className="entrylist-add">
+        <button type="button" className="btn small" onClick={addRow}>＋ 添加一行</button>
+        <span className="hint">{rows.length ? `${rows.length} 行` : '还没有行'}　·　变长，空行保存时自动剔除</span>
+      </div>
+    </div>
+  );
+}
+
 export function FieldControl({ def, value, onChange, disabled }) {
   const type = def.type || 'text';
   const v = value === null || value === undefined ? '' : value;
@@ -479,6 +539,10 @@ export function FieldControl({ def, value, onChange, disabled }) {
 
   if (type === 'file') {
     return <FileFieldControl def={def} value={v} onChange={onChange} />;
+  }
+
+  if (type === 'entrylist') {
+    return <EntryListFieldControl def={def} value={v} onChange={onChange} />;
   }
 
   if (type === 'bool') {
@@ -541,7 +605,7 @@ export function FieldGroup({ title, fields, draft, onPatch }) {
       <div className="pad">
         <div className="grid">
           {fields.map((def) => (
-            <div key={def.key} className={`field ${['textarea', 'file', 'md'].includes(def.type) ? 'wide' : ''}`}>
+            <div key={def.key} className={`field ${['textarea', 'file', 'md', 'entrylist'].includes(def.type) ? 'wide' : ''}`}>
               <div className="flabel">
                 <span>{def.label}</span>
                 {def.sensitive ? <span className="tag bad">密文</span> : null}

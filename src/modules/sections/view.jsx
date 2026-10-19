@@ -345,10 +345,38 @@ function CreateForm({ templates, form, onChange, onSubmit }) {
   );
 }
 
+// entrylist 的默认列：最常见的就是「链接 / 账号 / 密码」这组，选中类型即预填，
+// 一次点「加入字典」就能用；列可增删改，「密文」列落盘加密。
+const ENTRYLIST_DEFAULT_COLS = [
+  { key: 'name', label: '名称' },
+  { key: 'url', label: '链接' },
+  { key: 'user', label: '账号' },
+  { key: 'pass', label: '密码', sensitive: true },
+];
+
 function EditForm({ modal, types, labels, onChange, onSave, onSync, onAddField, onRemoveField, onClose }) {
   const [nf, setNf] = useState({ key: '', label: '', type: 'text', group: '' });
   const full = modal.full;
   const groups = full?.groupList || [];
+  // 列编辑只在 entrylist 时显示；cols 为 null 表示还没动过 → 用默认列
+  const cols = nf.type === 'entrylist' ? (nf.cols || ENTRYLIST_DEFAULT_COLS) : null;
+  const setCol = (i, patch) => setNf((m) => ({ ...m, cols: (m.cols || ENTRYLIST_DEFAULT_COLS).map((c, idx) => (idx === i ? { ...c, ...patch } : c)) }));
+  const addCol = () => setNf((m) => ({ ...m, cols: [...(m.cols || ENTRYLIST_DEFAULT_COLS), { key: '', label: '' }] }));
+  const removeCol = (i) => setNf((m) => ({ ...m, cols: (m.cols || ENTRYLIST_DEFAULT_COLS).filter((_, idx) => idx !== i) }));
+  const buildDef = () => {
+    const def = { key: nf.key.trim(), label: nf.label.trim() || nf.key.trim(), type: nf.type };
+    if (nf.group) def.group = nf.group;
+    if (nf.type === 'entrylist') {
+      const fields = cols.map((c) => {
+        const out = { key: c.key.trim(), label: c.label.trim() || c.key.trim() };
+        if (c.sensitive) out.sensitive = true;
+        return out;
+      }).filter((c) => c.key);
+      if (!fields.length) return { error: '结构清单至少要有一列（填列 key）' };
+      def.fields = fields;
+    }
+    return { def };
+  };
   return (
     <div className="stack">
       <div className="grid">
@@ -404,7 +432,12 @@ function EditForm({ modal, types, labels, onChange, onSave, onSync, onAddField, 
                   <span className="mono muted">{f.key}</span>
                   <Tag>{f.type}</Tag>
                   {f.sensitive ? <Tag kind="bad">密文</Tag> : null}
-                  <span className="desc">{f.hint || ''}</span>
+                  <span className="desc">
+                    {f.hint || ''}
+                    {f.type === 'entrylist' && Array.isArray(f.fields) && f.fields.length
+                      ? `${f.hint ? '　' : ''}列：${f.fields.map((s) => `${s.label}${s.sensitive ? '（密文）' : ''}`).join(' / ')}`
+                      : ''}
+                  </span>
                   <span className="acts"><button className="btn small ghost" onClick={() => onRemoveField(f.key)}>删除</button></span>
                 </div>
               ))}
@@ -438,13 +471,31 @@ function EditForm({ modal, types, labels, onChange, onSave, onSync, onAddField, 
             <option value="">（首个分组）</option>
             {groups.map((g) => <option key={g.id} value={g.id}>{g.title}</option>)}
           </select>
+          {nf.type === 'entrylist' ? (
+            <div className="stack" style={{ gap: 4 }}>
+              <div className="hint">清单列（每行一列，变长行共用）。key 英文字母开头；勾「密文」的列以密文落盘、--mask 打码。</div>
+              {cols.map((c, i) => (
+                <div key={i} className="rowgap" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                  <input style={{ width: 150 }} placeholder="列 key（如 url）" value={c.key} onChange={(e) => setCol(i, { key: e.target.value })} />
+                  <input style={{ width: 150 }} placeholder="列名（如 链接）" value={c.label} onChange={(e) => setCol(i, { label: e.target.value })} />
+                  <label className="inline hint" title="这一列的值以 AES-256-GCM 密文落盘">
+                    <input type="checkbox" checked={!!c.sensitive} onChange={(e) => setCol(i, { sensitive: e.target.checked })} /> 密文
+                  </label>
+                  <button type="button" className="btn small ghost" onClick={() => removeCol(i)}>×</button>
+                </div>
+              ))}
+              <div>
+                <button type="button" className="btn small ghost" onClick={addCol}>＋ 添加列</button>
+              </div>
+            </div>
+          ) : null}
           <button
             className="btn small"
             onClick={() => {
-              const def = { key: nf.key.trim(), label: nf.label.trim() || nf.key.trim(), type: nf.type };
-              if (nf.group) def.group = nf.group;
+              const { def, error } = buildDef();
+              if (error) { toast(error, 'bad'); return; }
               onAddField(def);
-              setNf({ key: '', label: '', type: 'text', group: nf.group });
+              setNf({ key: '', label: '', type: 'text', group: nf.group, cols: null });
             }}
           >
             加入字典

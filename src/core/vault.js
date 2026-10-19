@@ -100,9 +100,16 @@ export async function currentKeyId() {
  */
 export async function sensitiveViewer(section, entries = []) {
   const sensitive = (section?.fields || []).filter((f) => f.sensitive || f.type === 'secret');
-  if (!sensitive.length) return undefined;
+  // 结构清单（entrylist）的敏感子值也是密文落盘：不探行内的话，清单里真有密文时
+  // viewer 不会被创建，读出来全变成「需要密钥才能解密」。
+  const entryLists = (section?.fields || []).filter((f) => f.type === 'entrylist');
+  if (!sensitive.length && !entryLists.length) return undefined;
   const keys = sensitive.map((f) => f.key);
-  const hasBlob = entries.some((e) => keys.some((k) => isCipherBlob(e?.values?.[k])));
+  const subKeysOf = (f) => (f.fields || []).filter((s) => s.sensitive).map((s) => s.key);
+  const hasBlob = entries.some((e) => keys.some((k) => isCipherBlob(e?.values?.[k]))
+    || entryLists.some((f) => Array.isArray(e?.values?.[f.key]) && e.values[f.key].some((row) => (
+      !!row && typeof row === 'object' && subKeysOf(f).some((k) => isCipherBlob(row[k]))
+    ))));
   if (!hasBlob) return undefined;
   const { key } = await resolveVaultKey();
   return (blob) => decryptValue(key, blob);

@@ -63,6 +63,26 @@ async function plainValues(section, values) {
       out[k] = v;
     }
   }
+  // 结构清单（entrylist）的敏感子值也是密文落盘：不解开的话包里会混进密文对象，
+  // 导入到另一台机器（另一把密钥）就永远解不开了。
+  for (const f of section.fields || []) {
+    if (f.type !== 'entrylist' || !Array.isArray(out[f.key])) continue;
+    const subs = (f.fields || []).filter((s) => s.sensitive);
+    if (!subs.length) continue;
+    const plain = [];
+    for (const row of out[f.key]) {
+      if (!row || typeof row !== 'object' || Array.isArray(row)) { plain.push(row); continue; }
+      const next = { ...row };
+      for (const s of subs) {
+        if (isCipherBlob(next[s.key])) {
+          const { key } = await resolveVaultKey();
+          next[s.key] = decryptValue(key, next[s.key]);
+        }
+      }
+      plain.push(next);
+    }
+    out[f.key] = plain;
+  }
   return out;
 }
 

@@ -874,3 +874,37 @@ a.file-name:hover { text-decoration: underline; }
 .drop-box:hover, .drop-box.over { border-color: var(--mid); background: var(--soft-2); }
 .transfer-sec-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; border-bottom: 1px dashed var(--soft-2); }
 .transfer-sec-row:last-child { border-bottom: 0; }
+
+/* ============ 条目定位面包屑（点击复制，贴给 agent） ============ */
+.crumb { cursor: copy; display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.crumb:hover .crumb-ent { text-decoration: underline; }
+.crumb-sec { color: var(--mid); }
+.crumb-sep { color: var(--mid); }
+.crumb-ent { font-weight: 600; }
+.crumb-copy { color: var(--mid); font-size: 11px; }
+.crumb:hover .crumb-copy { color: var(--ink); }
+.row-copy {
+  border: 0; background: transparent; cursor: copy;
+  color: var(--mid); font-size: 11px; padding: 0 4px;
+  opacity: 0; transition: opacity 0.12s;
+}
+.row.selectable:hover .row-copy { opacity: 1; }
+.row-copy:hover { color: var(--ink); }
+
+/* ============ 结构清单字段（entrylist）：密集迷你表 ============ */
+.entrylist { display: flex; flex-direction: column; gap: 3px; }
+.entrylist-head, .entrylist-row { display: grid; gap: 5px; align-items: center; }
+.entrylist-head { font-size: 11px; color: var(--mid); }
+.entrylist-head .entrylist-col { display: inline-flex; align-items: center; gap: 4px; min-width: 0; }
+.entrylist-head .entrylist-col .tag { font-size: 10px; padding: 0 4px; }
+.entrylist-row input { padding: 3px 6px; font-size: 12px; }
+.entrylist-add { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
+
+/* ============ 左右栏拖宽（条目列表 ↔ 内容） ============ */
+/* margin: 0 -14px 让把手恰好骑在 .cols 的 14px 间隙上——间距节奏不变，命中区变成整条间隙 */
+.col-splitter {
+  flex: 0 0 14px; margin: 0 -14px; align-self: stretch;
+  cursor: col-resize; position: relative; z-index: 1; border-radius: 3px; min-width: 0;
+}
+.col-splitter:hover, .col-splitter.active { background: var(--soft-2); }
+body.col-resizing, body.col-resizing * { cursor: col-resize !important; user-select: none !important; }

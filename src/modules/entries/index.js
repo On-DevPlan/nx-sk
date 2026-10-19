@@ -11,6 +11,19 @@ export default {
   resource: 'entry',
   actions: [
     {
+      id: 'entry.keys',
+      cli: ['entry', 'keys'],
+      http: ['GET', '/api/entries/keys'],
+      summary: '关键 key 台账（跨栏目聚合 链接/账号/密码/镜像 类字段；值默认打码，--reveal 看原文）',
+      flags: {
+        section: { type: 'string', hint: '限定栏目（id 或标题）' },
+        q: { type: 'string', hint: '关键字过滤（栏目/条目/字段/值）' },
+        reveal: { type: 'boolean', hint: '显示明文（密文字段会解密）' },
+      },
+      run: (ctx) => service.keysLedger(ctx),
+      render: (d) => service.renderKeysLedger(d),
+    },
+    {
       id: 'entry.list',
       cli: ['entry', 'list'],
       http: ['GET', '/api/entries'],
