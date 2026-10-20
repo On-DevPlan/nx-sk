@@ -3,7 +3,7 @@
 import { loadStore, mutateStore } from '../../core/store.js';
 import { assertFieldKey, assertSafeId } from '../../core/paths.js';
 import { badInput, blocked, conflict, notFound } from '../../core/errors.js';
-import { FILL_POLICIES, FIELD_TYPES, findSection, getTemplate, groupFields, instantiateTemplate, mergeTemplate, sectionNames, syncSectionGroups, templateSummaries } from '../../core/fields.js';
+import { FILL_POLICIES, FIELD_TYPES, SOURCE_FIELD, SOURCE_GROUP, findSection, getTemplate, groupFields, instantiateTemplate, mergeTemplate, sectionNames, syncSectionGroups, templateSummaries } from '../../core/fields.js';
 import { dumpSection, formatValue } from '../../core/render.js';
 import { sensitiveViewer } from '../../core/vault.js';
 import { nowIso } from '../../core/ids.js';
@@ -130,7 +130,8 @@ export async function addSection({ id, title, template, description, order, fiel
     }
     draft = t;
   } else {
-    draft = { id: sid, title: title || sid, description: description || '', order: Number.isFinite(order) ? order : 50, template: null, kv: false, titleField: null, titleLabel: '名称', groups: [], fields: [] };
+    // 自定义栏目也自带「原始资料」袋：每个栏目都该有乱入的地方（见 core/fields.js 的说明）
+    draft = { id: sid, title: title || sid, description: description || '', order: Number.isFinite(order) ? order : 50, template: null, kv: false, titleField: null, titleLabel: '名称', groups: [{ ...SOURCE_GROUP }], fields: [{ ...SOURCE_FIELD }] };
   }
   if (Array.isArray(groups)) draft.groups = groups.map(validateGroupDef);
   if (Array.isArray(fields)) {

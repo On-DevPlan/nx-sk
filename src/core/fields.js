@@ -3,7 +3,7 @@
 //
 // type 取值：text | textarea | number | date | month | bool | select | tags | secret | file
 
-export const FIELD_TYPES = ['text', 'textarea', 'number', 'date', 'month', 'bool', 'select', 'tags', 'entrylist', 'secret', 'file', 'md'];
+export const FIELD_TYPES = ['text', 'textarea', 'number', 'date', 'month', 'bool', 'select', 'tags', 'entrylist', 'source', 'secret', 'file', 'md'];
 
 /**
  * 类型的人读标签 —— 只用于**面板下拉框**。
@@ -21,6 +21,7 @@ export const FIELD_TYPE_LABELS = {
   select: '单选',
   tags: '多值标签',
   entrylist: '结构清单（变长行）',
+  source: '原始资料（乱入后整理）',
   secret: '密文',
   file: '附件',
   md: '图文（可贴图）',
@@ -254,6 +255,105 @@ const PLATFORM_FIELDS = [
   f('note', '备注', 'textarea', 'extra', { fill: 'optional' }),
 ];
 
+// —— 毕业论文（信息工程学院 2022 版规范 · 设计开发类）——
+//
+// 这个栏目不是「写论文」，是**把格式规范变成可查的字段**：每条硬指标都在这里有一条，
+// 写的时候开着面板对照，交稿前跑一遍「交稿自检」。
+// 之所以按字段而不是按条目拆：规范是一份整体，拆成条目反而要在几十条里翻。
+//
+// 字段值 = 规范原文的硬指标（cm / pt / 字），不是「待办」。改规范时改模板再 section sync。
+const THESIS_GROUPS = [
+  { id: 'meta', title: '论文档案' },
+  { id: 'format', title: '页面与字体（硬指标）' },
+  { id: 'structure', title: '结构与字数' },
+  { id: 'figures', title: '图表规范' },
+  { id: 'code', title: '代码与算法' },
+  { id: 'refs', title: '参考文献' },
+  { id: 'submit', title: '打印、装订与时间' },
+  { id: 'check', title: '交稿自检' },
+  { id: 'attach', title: '附件' },
+];
+
+const THESIS_FIELDS = [
+  // —— 论文档案：封面与标题页要用的信息 ——
+  f('thesisTitle', '论文题目', 'text', 'meta', { hint: '原则上不超过 20 字；超了加副标题，别硬塞' }),
+  f('thesisTitleEn', '英文题目', 'text', 'meta', { hint: '与中文对应；实词首字母大写，介词除外' }),
+  f('thesisType', '论文类型', 'select', 'meta', { options: ['设计开发类', '管理类', '算法理论类'] }),
+  f('college', '学院', 'text', 'meta'),
+  f('major', '专业', 'text', 'meta'),
+  f('studentName', '姓名', 'text', 'meta'),
+  f('studentId', '学号', 'text', 'meta'),
+  f('cohort', '年级', 'text', 'meta', { hint: '如 2023 级' }),
+  f('graduationYear', '毕业年份', 'text', 'meta', { hint: '封面「（20XX届）」填这个，不是入学年份' }),
+  f('advisor', '导师', 'text', 'meta'),
+  f('advisorTitle', '职称', 'text', 'meta'),
+  f('selectionType', '选题类型', 'text', 'meta', { fill: 'optional', hint: '基础型 / 应用基础型 / 应用型 / 调研型' }),
+  f('topicSource', '课题来源', 'text', 'meta', { fill: 'optional', hint: '国家级 / 省部级 / 横向合作 / 校级 / 自选' }),
+  f('finishDate', '完成日期', 'date', 'meta', { hint: '应晚于答辩委员会日期' }),
+
+  // —— 页面与字体：全篇最容易扣分的部分 ——
+  f('pageSetup', '页面设置', 'text', 'format', { hint: 'A4；上 2.5cm、下 2cm、左 2.5cm、右 2cm；单面打印' }),
+  f('lineRule', '行距与字距', 'text', 'format', { hint: '1.5 倍行距；段前段后 0；标准字距' }),
+  f('bodyFont', '正文字体', 'text', 'format', { hint: '中文宋体小四（12pt）；西文与数字 Times New Roman 小四' }),
+  f('titleFont', '论文题目字体', 'text', 'format', { hint: '黑体三号（16pt），居中' }),
+  f('h1Font', '一级标题', 'text', 'format', { hint: '黑体四号（14pt）不加粗；顶格；序号后空一格' }),
+  f('h2Font', '二级标题', 'text', 'format', { hint: '黑体小四（12pt）不加粗；顶格' }),
+  f('h3Font', '三级标题', 'text', 'format', { hint: '宋体小四（12pt）不加粗；顶格' }),
+  f('h4Rule', '四级标题', 'text', 'format', { hint: '不单独占行：用（1）（2）接排，按正文格式，首行缩进 2 字符' }),
+  f('paraIndent', '正文缩进', 'text', 'format', { hint: '首行缩进 2 字符' }),
+  f('numberRule', '标题编号', 'text', 'format', { hint: '1 / 1.1 / 1.1.1，半角点号；原则上不超过 4 级；标题末尾不加标点' }),
+  f('headerRule', '页眉', 'text', 'format', { hint: '一律不加页眉；页眉处不得有横线' }),
+  f('pageNumRule', '页码', 'text', 'format', { hint: '页脚底端 1.5cm、居中、小五 Times New Roman；封面与目录不编页码，标题页起为 1' }),
+
+  // —— 结构：正文该有哪几章、每部分写什么 ——
+  f('frontMatter', '前置部分', 'textarea', 'structure', { hint: '内页封面 → 目录（只到三级）→ 标题页（中英文题目、作者、摘要、关键词）' }),
+  f('chapterPlan', '正文章节', 'textarea', 'structure', { hint: '设计开发类：背景 → 相关技术 → 需求与总体设计 → 重点模块实现 → 测试 → 结论' }),
+  f('bodyOutline', '各章要写什么', 'textarea', 'structure', { hint: '评审看的是「做了什么、怎么做、凭什么说做成了」' }),
+  f('abstractRule', '中文摘要', 'text', 'structure', { hint: '250–300 字，不分段，按【目的】【方法】【结果】【结论】组织；无公式图表、不标引用' }),
+  f('keywordsRule', '关键词', 'text', 'structure', { hint: '3–5 个；分号分隔；按外延由大到小' }),
+  f('englishRule', '英文摘要', 'text', 'structure', { hint: '题目/作者/摘要/关键词与中文一一对应' }),
+  f('wordRule', '字数与页数', 'text', 'structure', { hint: '一般不少于 8000 字，尽量 25 页以上' }),
+  f('thanksRule', '致谢', 'text', 'structure', { hint: '另起一页；「致谢」黑体四号居中；内容按正文格式，200 字以上' }),
+  f('appendixRule', '附录', 'text', 'structure', { hint: '另起一页；格式参照正文；原始数据、数据库表结构、大段代码放这里' }),
+
+  // —— 图表：三线表与图题位置是最常见的扣分点 ——
+  f('figureRule', '图', 'textarea', 'figures', { hint: '图题在图下方；「图1 名称」；黑体五号；居中' }),
+  f('tableRule', '表', 'textarea', 'figures', { hint: '表题在表上方；「表1 名称」；黑体五号；表内五号' }),
+  f('threeLineRule', '三线表', 'text', 'figures', { hint: '无左右边线；上下底 1.5 磅粗实线，表头下 1 磅细实线' }),
+  f('chartSpacing', '图表间距', 'text', 'figures', { hint: '图、表与正文上下各空一行；表格尽量不跨页' }),
+  f('chartNumber', '图表编号', 'text', 'figures', { hint: '全文连续编号；不要写成 图1-1 / 图1.1' }),
+  f('tableNote', '表注', 'text', 'figures', { fill: 'optional', hint: '写在表底线下方左侧，宋体小五' }),
+
+  // —— 代码：设计开发类的重灾区 ——
+  f('codeRule', '代码取舍', 'textarea', 'code', { hint: '不出自动生成的代码；正文代码不超过 3/4 页；只留核心、难以言表的部分' }),
+  f('codeFormat', '代码排版', 'textarea', 'code', { hint: '按正文字体字号；缩进 2 或 4 空格；同级起止同列；行内注释对齐' }),
+  f('codeExplain', '代码讲解', 'text', 'code', { hint: '以思想与流程为主，夹叙夹议；参数变量须有说明' }),
+
+  // —— 参考文献：数量、格式、标注三件事 ——
+  f('refCount', '数量与时效', 'text', 'refs', { hint: '≥15 篇，其中外文 ≥2 篇；以近 5 年期刊为主；必须亲自读过' }),
+  f('refStyle', '著录标准', 'text', 'refs', { hint: 'GB/T 7714-2015，顺序编码制' }),
+  f('citeRule', '正文标注', 'text', 'refs', { hint: '引用处右上角上标 [X]；按出现先后编号；同一文献只用一个编号' }),
+  f('refFormat', '参考文献表', 'text', 'refs', { hint: '小四，1.5 倍行距，悬挂缩进 2 字符；标点半角、后空一格；每条以实心点结束' }),
+  f('refSample', '著录示例', 'textarea', 'refs', { hint: '期刊 [J] / 专著 [M] / 学位论文 [D] / 会议 [C] / 标准 [S] / 电子资源 [EB/OL]' }),
+
+  // —— 提交：打印装订与日期红线 ——
+  f('printRule', '打印与装订', 'text', 'submit', { hint: 'A4 单面打印；左侧装订；统一发放的硬皮封面' }),
+  f('bindingOrder', '装订顺序', 'textarea', 'submit', { hint: '成绩评定表 → 导师评分表 → 答辩评分表 → 开题答辩记录 → 开题报告 → 改题申请表 → 新开题报告 → 封面/目录/正文' }),
+  f('proposalRule', '开题报告', 'text', 'submit', { hint: '≥3500 字；文献 15 篇（外文 2 篇）；标题字号与论文不同：H1 黑体小四、H2 宋体小四' }),
+  f('deadlineRule', '日期红线', 'textarea', 'submit', { hint: '导师意见签署日期须早于答辩日期；封面完成日期须晚于答辩委员会日期' }),
+
+  // —— 自检：交稿前逐条打勾 ——
+  f('checklist', '交稿自检清单', 'md', 'check', { hint: '每交一稿跑一遍；md 里用 - [ ] 勾选' }),
+
+  // —— 附件：论文与相关材料 ——
+  f('thesisDoc', '论文正文', 'file', 'attach', { fill: 'optional', hint: '当前版本的 docx/pdf' }),
+  f('proposalDoc', '开题报告', 'file', 'attach', { fill: 'optional' }),
+  f('templateDoc', '格式模板', 'file', 'attach', { fill: 'optional', hint: 'assets/sk-thesis/templates/ 下的模板' }),
+  f('specDoc', '规范原文（本类）', 'file', 'attach', { fill: 'optional', hint: '设计开发类那份（带批注）' }),
+  f('specDocFull', '规范全文', 'file', 'attach', { fill: 'optional', hint: '含管理类 / 设计开发类 / 算法理论类的完整版' }),
+  f('coverScan', '封面与签字页', 'file', 'attach', { fill: 'optional', hint: '导师签字、答辩记录等扫描件' }),
+];
+
 const PLATFORM_GROUPS = [
   { id: 'basic', title: '基本信息' },
   { id: 'access', title: '访问凭据' },
@@ -347,6 +447,17 @@ const TEMPLATES = {
     groups: PLATFORM_GROUPS,
     fields: PLATFORM_FIELDS,
   },
+  thesis: {
+    id: 'thesis',
+    label: '毕业论文',
+    description:
+      '按信息工程学院 2022 版规范（设计开发类）整理的论文档案：页面 / 字体 / 图表 / 参考文献等'
+      + '硬指标逐条可查，另带交稿自检清单。模板 docx 见 assets/sk-thesis/。',
+    titleField: 'thesisTitle',
+    titleLabel: '论文题目',
+    groups: THESIS_GROUPS,
+    fields: THESIS_FIELDS,
+  },
 };
 
 export function templateIds() {
@@ -369,9 +480,41 @@ export function templateSummaries() {
 }
 
 /** 由模板实例化一个栏目。深拷贝 —— 栏目自己的字段集从此独立演化。 */
+/**
+ * 「原始资料」字段：**每个栏目都自带一个**的乱入袋。
+ *
+ * 为什么每个栏目都要有：真实数据几乎从不是「一次填对」的——邮件、截图、PDF 摘录、
+ * 一段手抄的表，全都先有个「还没整理」的阶段。没有这个袋子，用户只有两个坏选择：
+ * 把乱数据硬塞进结构化字段（把结构搞脏），或者干脆不存（信息丢了）。
+ * 有了它，**先乱入、后整理**就成立了：杂乱资料原样落袋，agent 或人再按字段字典整理。
+ *
+ * 三条设计取舍：
+ *   - **只增不删**：袋里的东西是「原始证据」，整理完也留着（对齐字段后可标注已整理）。
+ *   - **不计完整度**（fill: optional）：它是暂存区，不是「该填的格子」——
+ *     完整度是「你真正该填什么」的导航，混进暂存区就废了。
+ *   - **不放密文**：整袋加密会让「看清单」都要密钥。敏感内容另去「密钥」栏目。
+ */
+export const SOURCE_FIELD = Object.freeze({
+  key: 'source',
+  label: '原始资料',
+  type: 'source',
+  group: 'source',
+  fill: 'optional',
+  hint: '杂乱资料先原样丢进来（粘贴文字 / 拖文件），之后由 agent 或人按字段字典整理进上面的字段',
+});
+
+export const SOURCE_GROUP = Object.freeze({ id: 'source', title: '原始资料' });
+
 export function instantiateTemplate(templateId, overrides = {}) {
   const t = getTemplate(templateId);
   if (!t) return null;
+  const groups = t.groups.map((g) => ({ ...g }));
+  const fields = t.fields.map((x) => ({ ...x }));
+  // KV 表不加：它的形状就是「一行一个键值对」，多一个字段就散了
+  if (t.kv !== true) {
+    if (!groups.some((g) => g.id === SOURCE_GROUP.id)) groups.push({ ...SOURCE_GROUP });
+    if (!fields.some((f) => f.key === SOURCE_FIELD.key)) fields.push({ ...SOURCE_FIELD });
+  }
   return {
     id: overrides.id,
     title: overrides.title || t.label,
@@ -381,8 +524,8 @@ export function instantiateTemplate(templateId, overrides = {}) {
     kv: t.kv === true,
     titleField: overrides.titleField || t.titleField,
     titleLabel: overrides.titleLabel || t.titleLabel,
-    groups: t.groups.map((g) => ({ ...g })),
-    fields: t.fields.map((x) => ({ ...x })),
+    groups,
+    fields,
     createdAt: overrides.createdAt || null,
     updatedAt: overrides.updatedAt || null,
   };

@@ -908,3 +908,69 @@ a.file-name:hover { text-decoration: underline; }
 }
 .col-splitter:hover, .col-splitter.active { background: var(--soft-2); }
 body.col-resizing, body.col-resizing * { cursor: col-resize !important; user-select: none !important; }
+
+/* ============ 原始资料袋（source） ============ */
+/* 折叠条 → 右侧抽屉：左清单 + 中正文。容器一律不投影（全站不变量：立体感只给可按的元素）。 */
+.source-field { display: flex; flex-direction: column; gap: 4px; }
+.source-strip {
+  display: flex; align-items: center; gap: 6px; width: 100%;
+  min-height: var(--row-h); padding: 3px 8px;
+  background: var(--soft); border: var(--border); border-radius: var(--radius-btn);
+  cursor: pointer; text-align: left; font: inherit; color: inherit;
+  transition: background .15s ease;
+}
+.source-strip:hover { background: var(--soft-2); }
+.source-strip-label { font-weight: 600; }
+.source-strip-preview { color: var(--mid); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 42%; }
+.source-caret { color: var(--mid); }
+
+.source-mask { justify-content: flex-end; padding: 0; }
+.source-drawer {
+  background: var(--paper); border-left: var(--border);
+  width: min(760px, 94vw); height: 100%;
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.source-drawer-head { display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 12px; border-bottom: var(--border); flex-shrink: 0; }
+.source-drawer-body { display: flex; flex: 1; min-height: 0; }
+
+.source-list-pane { width: 264px; flex-shrink: 0; border-right: var(--border); display: flex; flex-direction: column; min-height: 0; }
+.source-list-pane.drag { outline: 2px dashed var(--mid); outline-offset: -4px; background: var(--soft); }
+.source-list-tools { display: flex; align-items: center; gap: 6px; padding: 8px; border-bottom: var(--border); flex-wrap: wrap; }
+.source-paste { display: flex; flex-direction: column; gap: 4px; padding: 8px; border-bottom: var(--border); }
+.source-paste textarea { font: inherit; resize: vertical; }
+.source-items { flex: 1; overflow: auto; min-height: 0; }
+.source-item {
+  display: flex; align-items: center; gap: 6px; width: 100%;
+  padding: 4px 8px; border: 0; border-bottom: 1px solid var(--soft-2);
+  background: transparent; cursor: pointer; text-align: left; font: inherit; color: inherit;
+  transition: background .15s ease;
+}
+.source-item:hover { background: var(--soft); }
+.source-item.sel { background: var(--soft-2); }
+.source-item-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.source-view-pane { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.source-view-head { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-bottom: var(--border); }
+.source-view-body { flex: 1; overflow: auto; padding: 12px; min-height: 0; }
+.source-preview-img { max-width: 100%; border: var(--border); border-radius: 4px; }
+
+/* 模态内的焦点指示器：WCAG 2.2 要求可见且至少 2px（3:1 对比）。
+   深墨色描边在白底上对比远超要求，且不引入新颜色（单色不变量）。 */
+.source-drawer :focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; border-radius: 3px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .source-strip, .source-item { transition: none; }
+}
+
+/* 被取代的旧条：留痕但退居其次（灰掉 + 可展开） */
+.source-item.old { opacity: .62; }
+.source-item.old:hover { opacity: 1; }
+.source-item-time { margin-left: auto; color: var(--mid); font-size: 10px; white-space: nowrap; }
+.source-old-toggle {
+  display: block; width: 100%; text-align: left;
+  padding: 4px 8px; border: 0; border-bottom: 1px solid var(--soft-2);
+  background: var(--soft); color: var(--mid); cursor: pointer;
+  font: inherit; font-size: 11px;
+  transition: background .15s ease;
+}
+.source-old-toggle:hover { background: var(--soft-2); color: var(--ink); }

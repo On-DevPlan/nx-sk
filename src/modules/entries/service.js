@@ -8,13 +8,14 @@
 import { loadStore, mutateStore } from '../../core/store.js';
 import { assertFieldKey } from '../../core/paths.js';
 import { badInput, conflict, notFound } from '../../core/errors.js';
-import { BOOL_FALSE, BOOL_TRUE, findKvSection, findSection, isSensitiveField, sectionNames } from '../../core/fields.js';
+import { BOOL_FALSE, BOOL_TRUE, SOURCE_FIELD, SOURCE_GROUP, findKvSection, findSection, isSensitiveField, sectionNames } from '../../core/fields.js';
 import { completeness, displaySensitive, isBlank, serializeEntry } from '../../core/render.js';
 import { newId, nowIso } from '../../core/ids.js';
 import { decryptValue, encryptValue, isCipherBlob, maskValue } from '../../core/crypto.js';
 import { resolveVaultKey, sensitiveViewer } from '../../core/vault.js';
 import * as att from '../../core/attachments.js';
 import { mdImageIds, rewriteMdImages } from '../../core/mdimages.js';
+import { looksLikeSourceList, normalizeSourceItem, normalizeSourceItems, resolveSourceConflicts, sourceItemSummary, sourceItemTimeLabel } from '../../core/source.js';
 import { displayPath } from '../../core/paths.js';
 
 export function mustFindSection(store, ref) {
@@ -119,6 +120,15 @@ function normalizeValue(def, raw) {
       throw badInput(`字段「${def.label}」是结构清单（entrylist），值要是行数组（JSON），收到 ${JSON.stringify(raw).slice(0, 80)}`);
     }
     return normalizeRows(def, list);
+  }
+  if (type === 'source') {
+    // 原始资料袋：值 = 一组 item（文字/附件/网址）。形状与归一规则见 core/source.js。
+    // 三种入口都认：数组（面板/JSON）、JSON 串（--set）、一段普通文字（--set 随手记）。
+    try {
+      return normalizeSourceItems(raw);
+    } catch (e) {
+      throw badInput(`字段「${def.label}」的原始资料有问题：${e.message}`);
+    }
   }
   if (type === 'file') {
     // 值 = 附件 id（或唯一文件名）的**列表**：一个字段可以挂多个附件（简历传多个版本、
@@ -247,6 +257,9 @@ const looksLikeRow = (x) => !!x && typeof x === 'object' && !Array.isArray(x);
 function inferFieldType(raw) {
   if (Array.isArray(raw)) {
     if (raw.length && raw.every(looksLikeFileId)) return 'file';
+    // 一袋 source（带 kind 且有内容）→ 登记成原始资料袋；判断比 entrylist 严，
+    // 因为 entrylist 的列也可能叫 kind —— 宁可登记成 entrylist 也不要错认成 source
+    if (looksLikeSourceList(raw)) return 'source';
     // 行对象数组登记成结构清单——`--data '{"账号清单":[{…},{…}]}'` 自动建出能渲染的字段
     if (raw.length && raw.every(looksLikeRow)) return 'entrylist';
     return 'tags';
@@ -350,6 +363,13 @@ export async function getEntry(ref, { mask, section } = {}) {
   }
   for (const f of sec.fields.filter((x) => x.type === 'md')) {
     for (const id of mdImageIds(serialized.values[f.key])) putFile(id);
+  }
+  // 原始资料袋里的附件也要解析出来：袋里躺着一份 PDF，读的人/agent 要知道它叫什么、
+  // 在磁盘哪、怎么下 —— 否则只剩一串 f_xxx
+  for (const f of sec.fields.filter((x) => x.type === 'source')) {
+    for (const item of serialized.values[f.key] || []) {
+      if (item && item.kind === 'file' && item.fileId) putFile(item.fileId);
+    }
   }
   // 字段类型随读出来：CLI 渲染要知道哪个值是「图文」，才能把 f_xxx 换成文件名/路径；
   // 结构清单还要带**列定义**（entryFields），渲染行时才知道每个键的人读标签
@@ -625,6 +645,208 @@ export async function keyRemove(name, { section, 'dry-run': dryRun } = {}) {
   return removeEntry(entry.id, { 'dry-run': dryRun });
 }
 
+// —— 原始资料袋（source 字段）——
+//
+// 袋是**乱入区**：先原样收下杂乱资料（邮件、截图、PDF 摘录、手抄的表），
+// 之后由 agent 或人按栏目字段字典整理成结构化字段。
+// 命令族：source list / get / add / remove / ensure。
+
+/** 某条目的袋内容（原始形状）。 */
+function sourceItemsOf(entry) {
+  return normalizeSourceItems(entry?.values?.source) || [];
+}
+
+/** 袋里引用的附件解析（名字 / 物理路径 / 链接）——否则只剩一串 f_xxx。 */
+function sourceFiles(store, items) {
+  const files = {};
+  for (const item of items) {
+    if (item.kind !== 'file' || !item.fileId || files[item.fileId]) continue;
+    const rec = att.findFileRecord(store, item.fileId);
+    if (!rec) continue;
+    const links = att.fileLinks(rec);
+    files[item.fileId] = {
+      id: rec.id, name: rec.name, ext: rec.ext, isImage: att.isImageExt(rec.ext),
+      path: displayPath(att.fileRecordAbs(rec)), url: links.url, downloadUrl: links.downloadUrl,
+    };
+  }
+  return files;
+}
+
+/** source list：各栏目的袋子概况。 */
+export async function listSource({ section } = {}) {
+  const store = await loadStore();
+  const secs = section
+    ? [mustFindSection(store, section)]
+    : store.sections.filter((s) => s.kv !== true);
+  const out = [];
+  for (const sec of secs) {
+    const mine = store.entries.filter((e) => e.section === sec.id);
+    let items = 0;
+    let filled = 0;
+    for (const e of mine) {
+      const n = sourceItemsOf(e).length;
+      if (n) { filled += 1; items += n; }
+    }
+    out.push({
+      section: sec.id,
+      sectionTitle: sec.title,
+      hasField: sec.fields.some((f) => f.type === 'source'),
+      entries: mine.length,
+      filled,
+      items,
+    });
+  }
+  return { count: out.length, sections: out };
+}
+
+/** source get：某条目的袋明细。 */
+export async function getSource(ref, { section } = {}) {
+  const store = await loadStore();
+  const entry = resolveEntry(store, ref, section);
+  const sec = mustFindSection(store, entry.section);
+  const items = sourceItemsOf(entry);
+  return {
+    id: entry.id,
+    title: entry.title,
+    section: sec.id,
+    sectionTitle: sec.title,
+    hasField: sec.fields.some((f) => f.type === 'source'),
+    count: items.length,
+    // 当前版本 = 没被取代的；旧的留痕但不算数
+    current: items.filter((x) => !x.superseded).length,
+    superseded: items.filter((x) => x.superseded).length,
+    items,
+    files: sourceFiles(store, items),
+    updatedAt: entry.updatedAt,
+  };
+}
+
+/** source add：往袋里加一条（文字 / 文件 / 网址）。 */
+export async function addSourceItem(ref, { section, text, file, url, name, note, mapped, at, supersedes, 'dry-run': dryRun } = {}) {
+  const store = await loadStore();
+  const target = resolveEntry(store, ref, section);
+  const sec = mustFindSection(store, target.section);
+  if (!sec.fields.some((f) => f.type === 'source')) {
+    throw badInput(`栏目「${sec.title}」没有「原始资料」字段（source）——先跑 nx-sk source ensure 补上`);
+  }
+  const items = sourceItemsOf(target);
+  let item = null;
+  const extra = { note, mapped, at };
+  if (supersedes) extra.supersedes = Array.isArray(supersedes) ? supersedes : [supersedes];
+  if (file) {
+    // 文件先进附件库，袋里只留引用。**默认复制不搬走**：「加一条资料」不该把用户本机的
+    // 原件搬进库里（那是 `file add` 的语义，且它明写「默认移动」）。
+    const outcome = await att.importLocalFile(store, { path: file, copy: true, category: 'other' });
+    item = normalizeSourceItem({ kind: 'file', fileId: outcome.record.id, name: name || outcome.record.name, ...extra });
+    if (!dryRun && !outcome.duplicate) await mutateStore((s) => { s.files.push(outcome.record); });
+  } else if (url) {
+    item = normalizeSourceItem({ kind: 'url', url, name, ...extra });
+  } else if (text !== undefined && text !== null && String(text).trim() !== '') {
+    item = normalizeSourceItem({ kind: 'text', text, name, ...extra });
+  } else {
+    throw badInput('要给一条资料：--text <文字> | --file <本机路径> | --url <网址>');
+  }
+  if (!item) throw badInput('这条资料是空的，没东西可加');
+  // 冲突判定（同名以新的为准、旧的留痕）在归一层统一发生
+  const next = resolveSourceConflicts([...items, item]);
+  if (dryRun) return { status: 'skipped', dryRun: true, wouldAdd: item, count: next.length };
+  await mutateStore((s) => {
+    const e = s.entries.find((x) => x.id === target.id);
+    e.values.source = next;
+    e.updatedAt = nowIso();
+  });
+  return { status: 'ok', added: item, count: next.length, current: next.filter((x) => !x.superseded).length, id: target.id, title: target.title, section: sec.id };
+}
+
+/**
+ * source update：改袋里某一条的**元信息**（名字 / 备注 / 整理去向）。
+ *
+ * 为什么要它：「整理完要留痕」是双向同步的锚点 —— 一条资料被同步到哪些字段（mapped）
+ * 记在它自己身上，下次同步就能知道「这条已经用过」，不会重复整理。
+ * 注意**不改正文**（text 永远是原文；改内容 = 删掉重加）。
+ */
+export async function updateSourceItem(ref, { section, id, name, note, mapped, at, superseded, 'dry-run': dryRun } = {}) {
+  const store = await loadStore();
+  const target = resolveEntry(store, ref, section);
+  const items = sourceItemsOf(target);
+  const key = String(id || '').trim();
+  const idx = items.findIndex((x) => x.id === key);
+  if (idx < 0) throw notFound(`袋里没有这条资料: ${key}`);
+  const item = { ...items[idx] };
+  if (name !== undefined) item.name = String(name);
+  if (note !== undefined) item.note = String(note);
+  if (at !== undefined) item.at = String(at);
+  if (superseded !== undefined) {
+    if (superseded === true) item.superseded = true;
+    else delete item.superseded;
+  }
+  if (mapped !== undefined) {
+    const list = Array.isArray(mapped) ? mapped : String(mapped).split(/[,，、]+/);
+    const keys = list.map((x) => String(x).trim()).filter(Boolean);
+    if (keys.length) item.mapped = keys;
+    else delete item.mapped;
+  }
+  const next = resolveSourceConflicts([...items.slice(0, idx), item, ...items.slice(idx + 1)]);
+  if (dryRun) return { status: 'skipped', dryRun: true, wouldChange: item };
+  await mutateStore((s) => {
+    const e = s.entries.find((x) => x.id === target.id);
+    e.values.source = next;
+    e.updatedAt = nowIso();
+  });
+  return { status: 'ok', updated: item, count: next.length, id: target.id, title: target.title };
+}
+
+/** source remove：从袋里删掉一条。 */
+export async function removeSourceItem(ref, { section, id, 'dry-run': dryRun } = {}) {
+  const store = await loadStore();
+  const target = resolveEntry(store, ref, section);
+  const items = sourceItemsOf(target);
+  const key = String(id || '').trim();
+  const idx = items.findIndex((x) => x.id === key);
+  if (idx < 0) {
+    const hint = items.length ? `袋里有 ${items.length} 条，用 nx-sk source get ${target.id} 看 id` : '袋是空的';
+    throw notFound(`袋里没有这条资料: ${key}（${hint}）`);
+  }
+  const [gone] = items.splice(idx, 1);
+  if (dryRun) return { status: 'skipped', dryRun: true, wouldRemove: gone };
+  await mutateStore((s) => {
+    const e = s.entries.find((x) => x.id === target.id);
+    e.values.source = items.length ? items : null;
+    e.updatedAt = nowIso();
+  });
+  return { status: 'ok', removed: gone, count: items.length, id: target.id, title: target.title };
+}
+
+/**
+ * source ensure：给所有缺「原始资料」字段的栏目补上。
+ *
+ * 为什么需要它：栏目是**持久化数据**，模板后来新增的字段不会回溯到已建好的栏目
+ * （老问题的同一形状，见 `section sync`）。source 字段是「每个栏目都该有」的那种，
+ * 所以给一条命令把缺口一次补齐，而不是让用户逐个栏目加。
+ */
+export async function ensureSourceFields({ 'dry-run': dryRun } = {}) {
+  const store = await loadStore();
+  const added = [];
+  const skipped = [];
+  for (const sec of store.sections) {
+    if (sec.kv) { skipped.push({ id: sec.id, title: sec.title, why: 'KV 表（形状固定，不加字段）' }); continue; }
+    if (sec.fields.some((f) => f.type === 'source')) { skipped.push({ id: sec.id, title: sec.title, why: '已有' }); continue; }
+    added.push(sec.id);
+  }
+  if (dryRun) return { status: 'skipped', dryRun: true, wouldAdd: added, skipped };
+  if (!added.length) return { status: 'ok', added: [], skipped, count: 0 };
+  await mutateStore((s) => {
+    for (const id of added) {
+      const sec = s.sections.find((x) => x.id === id);
+      if (!sec) continue;
+      if (!sec.groups.some((g) => g.id === SOURCE_GROUP.id)) sec.groups.push({ ...SOURCE_GROUP });
+      if (!sec.fields.some((f) => f.key === SOURCE_FIELD.key)) sec.fields.push({ ...SOURCE_FIELD });
+      sec.updatedAt = nowIso();
+    }
+  });
+  return { status: 'ok', added, skipped, count: added.length };
+}
+
 // —— CLI 人读渲染（KV 系列） ——
 export function renderKeyList(d) {
   const lines = [`${d.count} 个密钥 · 栏目 ${d.section}${d.mask ? ' · 已打码' : ''}`];
@@ -647,6 +869,70 @@ export function renderKeySet(d) {
 export function renderKeyRemove(d) {
   if (d.status === 'skipped') return `试运行（未落盘）：${JSON.stringify(d.wouldRemove)}`;
   return `已删除密钥 ${d.removed.title}`;
+}
+
+// —— CLI 人读渲染（原始资料） ——
+const SOURCE_KIND_LABEL = { text: '文字', file: '附件', url: '网址' };
+
+export function renderSourceList(d) {
+  const lines = [`原始资料袋 · ${d.count} 个栏目`];
+  for (const s of d.sections) {
+    const tag = s.hasField ? '' : '　[缺 source 字段：nx-sk source ensure 补上]';
+    lines.push(`  ${s.section.padEnd(14)}${s.sectionTitle}　${s.items} 条资料 / ${s.filled} 个条目有袋（栏目共 ${s.entries} 条目）${tag}`);
+  }
+  lines.push('', '看某个条目的袋: nx-sk source get <条目id>　　加一条: nx-sk source add <条目id> --text "…"');
+  return lines.join('\n');
+}
+
+export function renderSourceGet(d) {
+  const lines = [`${d.title || d.id}（${d.id}）· 栏目 ${d.section} · 原始资料 ${d.count} 条`
+    + (d.superseded ? `（当前 ${d.current} 条，另有 ${d.superseded} 条被更新的取代、留痕可查）` : '')];
+  if (!d.count) {
+    lines.push('  （袋子是空的）');
+    lines.push('', `加一条: nx-sk source add ${d.id} --text "随手记的一句"`);
+    return lines.join('\n');
+  }
+  for (const item of d.items) {
+    const kind = SOURCE_KIND_LABEL[item.kind] || item.kind;
+    const mapped = item.mapped?.length ? `　→ 已整理到 ${item.mapped.join('、')}` : '';
+    const old = item.superseded ? '　[已被取代，留痕]' : '';
+    const when = sourceItemTimeLabel(item);
+    lines.push(`  ${item.id}　[${kind}] ${item.name}${when ? `　${when}` : ''}${old}${mapped}`);
+    if (item.kind === 'file') {
+      const f = d.files?.[item.fileId];
+      lines.push(`      ${f ? `${f.name}　${f.path}` : `附件 ${item.fileId}（库里已不存在）`}`);
+    } else if (item.kind === 'text') {
+      for (const line of String(item.text).split('\n')) lines.push(`      ${line}`);
+    } else if (item.kind === 'url') {
+      lines.push(`      ${item.url}`);
+    }
+    if (item.note) lines.push(`      备注: ${item.note}`);
+  }
+  lines.push('', `整理成结构化字段: nx-sk entry update ${d.id} --data @整理.json`);
+  return lines.join('\n');
+}
+
+export function renderSourceChange(d) {
+  if (d.status === 'skipped') {
+    // 顺序要紧：ensure 的 wouldAdd 是**栏目 id 数组**，add 的是**一条资料对象**——
+    // 数组也是真值，先判 item 会把数组当成资料渲染成 "[undefined] undefined"。
+    if (Array.isArray(d.wouldAdd)) {
+      return d.wouldAdd.length
+        ? `试运行（未落盘）：将给 ${d.wouldAdd.length} 个栏目补上「原始资料」字段：${d.wouldAdd.join('、')}`
+        : '试运行（未落盘）：所有栏目都已有「原始资料」字段，无需补';
+    }
+    if (d.wouldAdd) return `试运行（未落盘）：将加入一条资料 [${d.wouldAdd.kind}] ${d.wouldAdd.name}`;
+    if (d.wouldRemove) return `试运行（未落盘）：将移除 ${d.wouldRemove.id}（${d.wouldRemove.name}）`;
+    return `试运行（未落盘）：${JSON.stringify(d.wouldAdd || d.wouldRemove || {})}`;
+  }
+  if (d.removed) return `已从资料袋移除 ${d.removed.id}（${d.removed.name}）· 袋里还剩 ${d.count} 条`;
+  if (d.added && !Array.isArray(d.added)) return `已加入资料 [${d.added.kind}] ${d.added.name} · 袋里共 ${d.count} 条`;
+  if (Array.isArray(d.added)) {
+    return d.added.length
+      ? `已给 ${d.added.length} 个栏目补上「原始资料」字段：${d.added.join('、')}`
+      : '所有栏目都已有「原始资料」字段，无需补';
+  }
+  return '没有改动';
 }
 
 function maskAll(section, entry, decrypt, mask) {
@@ -679,6 +965,7 @@ export function renderEntryList(d) {
  * 一个字段值渲染成几行文本。
  * - 附件（`file` 字段，值可能是 id 列表）：解析成「附件名　物理路径」，**几个占几行**
  * - 结构清单（entrylist）：**一行一条**，`列名=值 · 列名=值`——清单本来就是拿来看的
+ * - 原始资料（source）：**一行一条**，带类型与摘要——袋里的东西要能一眼分清是字还是文件
  * - 其它数组（tags 之类）：仍旧一行、顿号连接——不要顺手把它们也拆成多行
  */
 function valueLines(d, v, key) {
@@ -687,6 +974,17 @@ function valueLines(d, v, key) {
   if (Array.isArray(v) && v.length && v.every((x) => asFile(x))) return v.map(asFile);
   const one = asFile(v);
   if (one) return [one];
+  if (type === 'source' && Array.isArray(v)) {
+    const kindLabel = { text: '文字', file: '附件', url: '网址' };
+    return v.map((item) => {
+      const tag = kindLabel[item.kind] || item.kind || '资料';
+      const body = item.kind === 'file' && d.files?.[item.fileId]
+        ? `${d.files[item.fileId].name}　${d.files[item.fileId].path}`
+        : sourceItemSummary(item);
+      const mapped = item.mapped?.length ? `　→ 已整理到 ${item.mapped.join('、')}` : '';
+      return `[${tag}] ${item.name || body}${body && body !== item.name ? `　${body}` : ''}${mapped}`;
+    });
+  }
   if (Array.isArray(v) && v.length && v.every(isPlainRow)) {
     const subs = d.entryFields?.[key] || [];
     const labelOf = (k) => subs.find((s) => s.key === k)?.label || k;

@@ -30,3 +30,4 @@ seed/
 /*.xlsx
 /*.zip
 workbuddy-ai/
+.workbuddy-ai/
