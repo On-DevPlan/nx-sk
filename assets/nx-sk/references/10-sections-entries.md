@@ -162,7 +162,7 @@ nx-sk section update job --fields @fields.json
 > 把乱数据硬塞进结构化字段（把结构搞脏）或干脆不存（信息丢了）两个坏选择。
 > - 面板上：条目表单底部一条**折叠条**「原始资料 · N 条」，点开是右侧抽屉——
 >   左清单、中间正文，文件可拖进去（也给了「选择文件」按钮与粘贴框：拖拽不能是唯一入口）。
-> - CLI：`nx-sk source list / get / add / update / remove / ensure`（细节见 `kv-source` skill）。
+> - CLI：`nx-sk source list / get / add / update / remove / ensure`（细节见 `sk-source` skill）。
 > - 三条纪律：**原文不改写**（整理结果写进字段或新的一条）、**不确定就留空**、
 >   **敏感内容不进袋**（袋是明文的，密码走「密钥」栏目或 `sensitive` 字段）。
 > - 袋**不计完整度**（`fill: optional`）：它是暂存区，不是「该填的格子」。
