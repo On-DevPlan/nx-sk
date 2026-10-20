@@ -17,23 +17,47 @@ async function cmdServe(ctx) {
   const { openBrowser } = await import('../core/open.js');
   const { loadStore, storePathInUse } = await import('../core/store.js');
   const { appHome, displayPath } = await import('../core/paths.js');
+  const { autoOpenEnabled, resolvePortConflict, describeOccupant } = await import('../core/serve-port.js');
 
   await loadStore(); // 触发首次播种：面板一打开就该有「求职」栏目
+  const host = '127.0.0.1';
+  // --port 0 = 让 OS 挑一个空闲端口（测试用），所以这里不能用 DEFAULT_PORT 兜底
+  const desiredPort = ctx.port;
+  // --no-open 与 NX_SERVE_NO_OPEN 走同一个开关：任一为真就不开浏览器
+  const canOpen = autoOpenEnabled(ctx['no-open']);
+  // --json 分支的字段形状：正常启动与复用旧实例共用一份，避免两条路径漂移
+  const jsonLine = (u, p) => JSON.stringify({
+    url: u, port: p, host, pid: process.pid,
+    storePath: displayPath(storePathInUse()), storePathRaw: storePathInUse(), home: displayPath(appHome()),
+  }) + '\n';
+  // --json 模式下 stdout 只能有 JSON，人类可读的行改走 stderr
+  const say = (s) => (OUTPUT_JSON ? process.stderr : process.stdout).write(s + '\n');
+
   let server;
   try {
-    server = await startServer({ port: ctx.port });
+    server = await startServer({ port: desiredPort });
   } catch (e) {
-    if (e && e.code === 'EADDRINUSE') throw external(`端口 ${ctx.port} 已被占用；换一个：nx-sk serve --port ${ctx.port + 1}（或在 nxSk.port 里改默认端口）`);
-    throw external(`启动服务失败: ${e && e.message ? e.message : String(e)}`);
+    if (!e || e.code !== 'EADDRINUSE') throw external(`启动服务失败: ${e && e.message ? e.message : String(e)}`);
+    // 端口被占：先问一句「上面跑的是不是我」。
+    const decision = await resolvePortConflict(desiredPort, APP_NAME, host);
+    if (decision.action === 'reuse') {
+      // 自己的面板已经在跑：不重复启动，直接把浏览器指过去。
+      const runningUrl = `http://${host}:${desiredPort}`;
+      say(APP_NAME + ' 已在运行：' + runningUrl);
+      say('直接打开浏览器（不重复启动）；如需重启请先停掉旧实例');
+      if (OUTPUT_JSON) process.stdout.write(jsonLine(runningUrl, desiredPort));
+      if (canOpen) await openBrowser(runningUrl);
+      return { status: 'reused', url: runningUrl, port: desiredPort, host, pid: process.pid };
+    }
+    // 别人占的：顺延到下一个空闲端口，再起自己的面板。
+    say(`端口 ${desiredPort} 已被占用（占用者: ${describeOccupant(decision.occupant)}），改用 ${decision.port}`);
+    server = await startServer({ port: decision.port });
   }
   // --port 0 = 让 OS 挑一个空闲端口（测试用），所以真实端口要回读，不能信入参
-  const realPort = server.address() && typeof server.address() === 'object' ? server.address().port : ctx.port;
+  const realPort = server.address() && typeof server.address() === 'object' ? server.address().port : desiredPort;
   const url = `http://127.0.0.1:${realPort}`;
   if (OUTPUT_JSON) {
-    process.stdout.write(JSON.stringify({
-      url, port: realPort, host: '127.0.0.1', pid: process.pid,
-      storePath: displayPath(storePathInUse()), storePathRaw: storePathInUse(), home: displayPath(appHome()),
-    }) + '\n');
+    process.stdout.write(jsonLine(url, realPort));
   } else {
     process.stdout.write([
       `面板:   ${url}`,
@@ -42,7 +66,7 @@ async function cmdServe(ctx) {
       '机器可读: nx-sk serve --json（先打一行 JSON，再继续常驻）',
     ].join('\n') + '\n');
   }
-  if (!ctx['no-open']) await openBrowser(url);
+  if (canOpen) await openBrowser(url);
 
   await new Promise((done) => {
     let closed = false;
@@ -64,7 +88,7 @@ const BUILTINS = [
     module: 'system',
     cli: ['serve'],
     http: null,
-    summary: '启动 Web 面板（唯一常驻命令；--no-open 给开发与 CI 用）',
+    summary: '启动 Web 面板（默认 :7866；--port N 改端口；--no-open 不开浏览器；端口上已有本面板则直接打开它；NX_SERVE_NO_OPEN=1 全局不开浏览器）',
     flags: { port: { type: 'number', default: DEFAULT_PORT }, 'no-open': { type: 'boolean' } },
     run: (ctx) => cmdServe(ctx),
     render: () => '',
