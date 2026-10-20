@@ -160,7 +160,7 @@ nx-sk source ensure                    # 给老栏目补上这个字段（模板
 **把袋子里的东西整理成字段**（agent 侧）有配套 skill：
 
 ```bash
-nx-sk skill install kv-source     # 装到 ~/.claude/skills/kv-source
+nx-sk skill install sk-source     # 装到 ~/.claude/skills/sk-source
 ```
 
 它讲的是双向同步：source → 字段（整理）与 字段 → source（回写留痕），

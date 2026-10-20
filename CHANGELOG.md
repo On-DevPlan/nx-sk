@@ -4,6 +4,14 @@
 
 ## [Unreleased]
 
+## 0.15.2 (2026-10-20)
+
+### Changed
+
+- **skill 改名：`kv-source` → `sk-source`**——与 sk-pdf / sk-needdo / sk-thesis 用同一个
+  `sk-` 前缀（它们都是「教 agent 做一类事」的配套 skill，`nx-*` 前缀留给 CLI 本体）。
+  已装过旧名的：`nx-sk skill install sk-source --force` 装新的，旧的目录可手动删。
+
 ## 0.15.1 (2026-10-20)
 
 ### Fixed
@@ -43,7 +51,7 @@
   - 三条纪律写进代码与文档：**原文不改写**、**不确定就留空**、**敏感内容不进袋**（袋是明文的，
     密码走「密钥」栏目或 `sensitive` 字段）；袋**不计完整度**（暂存区不是「该填的格子」）。
   - 新栏目（模板或自定义）都自带这个字段；老栏目用 `nx-sk source ensure` 一次补齐。
-- **`kv-source` skill**（随包分发，`nx-sk skill install kv-source`）：讲透「原始资料 ↔ 字段」
+- **`sk-source` skill**（随包分发，`nx-sk skill install sk-source`）：讲透「原始资料 ↔ 字段」
   的双向同步、映射表纪律（把握不足就不写）、以及各种文件（PDF/截图/邮件/表格）怎么进袋。
 
 ### Fixed
