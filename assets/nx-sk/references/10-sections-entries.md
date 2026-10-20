@@ -124,7 +124,7 @@ nx-sk section update job --remove-field blog
 nx-sk section update job --fields @fields.json
 ```
 
-字段定义支持：`key`（字母开头）、`label`、`type`（`text|textarea|number|date|month|bool|select|tags|entrylist|secret|file|md`）、
+字段定义支持：`key`（字母开头）、`label`、`type`（`text|textarea|number|date|month|bool|select|tags|entrylist|source|secret|file|md`）、
 `group`、`hint`、`options`（候选项）、`sensitive`（true 则密文落盘）、`maxItems`（tags / file 上限）、
 `fill`（填写策略，见下）。
 
@@ -154,6 +154,22 @@ nx-sk section update job --fields @fields.json
 > 规矩：全空行写入时自动剔除；行里的键必须是声明的清单列（写错当场报，不静默丢）；
 > 没登记过的键直接写行数组会**自动登记**成 entrylist 并从行推断列。`entry get` 里清单一行一条：
 > `名称=主控台 · 链接=https://… · 账号=ops · 密码=…`（--mask 时密码列打码）。
+
+> `type: 'source'` 是**原始资料袋**：每个栏目都自带一个的「乱入区」。值 = 一组资料条目
+> （`{id, kind, name, text|fileId|url, addedAt, note, mapped}`，kind = text/file/url）。
+> 杂乱资料（邮件、截图、PDF 摘录、手抄的表）先**原样**丢进袋里，之后由 agent 或人
+> 按字段字典整理进上面的字段——「先乱入、后整理」因此成立：没有这个袋子，用户只有
+> 把乱数据硬塞进结构化字段（把结构搞脏）或干脆不存（信息丢了）两个坏选择。
+> - 面板上：条目表单底部一条**折叠条**「原始资料 · N 条」，点开是右侧抽屉——
+>   左清单、中间正文，文件可拖进去（也给了「选择文件」按钮与粘贴框：拖拽不能是唯一入口）。
+> - CLI：`nx-sk source list / get / add / update / remove / ensure`（细节见 `kv-source` skill）。
+> - 三条纪律：**原文不改写**（整理结果写进字段或新的一条）、**不确定就留空**、
+>   **敏感内容不进袋**（袋是明文的，密码走「密钥」栏目或 `sensitive` 字段）。
+> - 袋**不计完整度**（`fill: optional`）：它是暂存区，不是「该填的格子」。
+> - **冲突以新的为准，旧的留痕**：同名即冲突，时间新的那条是「当前版本」，
+>   旧的标「已被取代」但**不删**（原始证据要能翻回去看）；`--at` 记资料自身的时间
+>   （如邮件时间），缺省用入袋时间；名字不同但同一件事用 `--supersedes <旧id>` 显式指明。
+> - 老栏目是模板实例化时建的、当时还没有这个字段 → `nx-sk source ensure` 一次补齐。
 
 > `select` 的 `options` 是**候选项不是白名单**：真实值（如某个少数民族）不在候选里也允许写入。
 

@@ -481,7 +481,7 @@ export default function SectionView({ sectionId }) {
               </div>
 
               {groups.map((g) => (
-                <FieldGroup key={g.id} title={g.title} fields={g.fields} draft={draft.values} onPatch={patchField} />
+                <FieldGroup key={g.id} title={g.title} fields={g.fields} draft={draft.values} onPatch={patchField} sectionTitle={data.section.title} entryTitle={current?.title || draft.title} />
               ))}
 
               <div className="rowgap pad">

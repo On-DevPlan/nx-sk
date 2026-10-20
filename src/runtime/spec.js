@@ -58,8 +58,19 @@ function coerce(spec, value) {
     throw badInput(`--${spec.name} 需要是/否，收到 ${JSON.stringify(value)}`);
   }
   if (type === 'array') {
-    const list = Array.isArray(value) ? value : String(value).split(',');
-    return list.map((x) => String(x).trim()).filter((x) => x !== '');
+    // **每个元素都要再按逗号切一次**：CLI 解析层会把 array 型 flag 收成数组
+    // （`--tags a --tags b` → ['a','b']），若这里只看「是不是数组」就跳过切分，
+    // `--tags a,b` 会变成**一个**叫 "a,b" 的元素 —— 文档写的「逗号分隔」形同虚设，
+    // `--unset a,b` 更是直接报「没有字段: a,b」。
+    const raw = Array.isArray(value) ? value : [value];
+    const out = [];
+    for (const v of raw) {
+      for (const piece of String(v ?? '').split(',')) {
+        const s = piece.trim();
+        if (s !== '') out.push(s);
+      }
+    }
+    return out;
   }
   if (type === 'json') {
     if (typeof value === 'object' && value !== null) return value;

@@ -137,6 +137,35 @@ nx-sk entry update 张三 --data '{"账号清单":[{"链接":"https://…","账�
 
 面板渲染成密集迷你表（直接增删行）；`entry get` 里清单一行一条、带列标签。口径见 [[10-sections-entries]]。
 
+原始资料袋（`type: 'source'`）——**每个栏目都自带一个**的「乱入区」。值 = 一组资料条目
+（`{id, kind, name, text|fileId|url, addedAt, note, mapped}`；kind = text / file / url）。
+杂乱资料（邮件、截图、PDF 摘录、手抄的表）先**原样**丢进袋里，之后由 agent 或人
+按栏目字段字典整理进上面的字段——「先乱入、后整理」因此成立：没有这个袋子，
+用户只有两个坏选择：把乱数据硬塞进结构化字段（把结构搞脏），或干脆不存（信息丢了）。
+
+```bash
+nx-sk source list                       # 各栏目的袋概况
+nx-sk source get <条目> --json          # 某条目的袋（item 明细 + 附件信息）
+nx-sk source add <条目> --text "…"      # 加一条文字（原样存，不改写）
+nx-sk source add <条目> --file <路径>   # 加一个文件（先进附件库，原件保留不搬走）
+nx-sk source update <条目> --id <itemId> --mapped 字段key   # 标注「这条已整理到哪些字段」
+nx-sk source ensure                    # 给老栏目补上这个字段（模板是后加的，老栏目没有）
+```
+
+面板上：条目表单底部一条**折叠条**「原始资料 · N 条」，点开是右侧抽屉（左清单、中正文），
+文件可拖进去（也给了「选择文件」按钮与粘贴框——拖拽不能是唯一入口，WCAG 2.2 AA）。
+三条纪律：**原文不改写**、**不确定就留空**、**敏感内容不进袋**（袋是明文的）。
+袋**不计完整度**：它是暂存区，不是「该填的格子」。
+
+**把袋子里的东西整理成字段**（agent 侧）有配套 skill：
+
+```bash
+nx-sk skill install kv-source     # 装到 ~/.claude/skills/kv-source
+```
+
+它讲的是双向同步：source → 字段（整理）与 字段 → source（回写留痕），
+以及「哪些资料还没被整理过」怎么查（每条资料的 `mapped` 标记）。
+
 **把 PDF 变成图文 SOP 栏目**（抽文字、按版面挑截图、建栏目、写图文步骤）有配套 skill，
 含两个已验证的抽取脚本：
 

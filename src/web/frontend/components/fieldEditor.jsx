@@ -6,6 +6,7 @@ import { fileToDataUrl, listAttachments, mergeFiles, refreshAttachments } from '
 import { Copyable, copyText } from './ui.jsx';
 import { Lightbox } from './lightbox.jsx';
 import { MdView, imageRecord } from './mdView.jsx';
+import { SourceFieldControl } from './sourcePanel.jsx';
 import { imageRefs, linkCount } from '../mdInline.js';
 import { smartStats } from '../mdSmart.js';
 import { taskStats, toggleTaskAtLine } from '../mdSource.js';
@@ -529,7 +530,7 @@ export function EntryListFieldControl({ def, value, onChange }) {
   );
 }
 
-export function FieldControl({ def, value, onChange, disabled }) {
+export function FieldControl({ def, value, onChange, disabled, ctx }) {
   const type = def.type || 'text';
   const v = value === null || value === undefined ? '' : value;
 
@@ -539,6 +540,10 @@ export function FieldControl({ def, value, onChange, disabled }) {
 
   if (type === 'file') {
     return <FileFieldControl def={def} value={v} onChange={onChange} />;
+  }
+
+  if (type === 'source') {
+    return <SourceFieldControl def={{ ...def, ...(ctx || {}) }} value={v} onChange={onChange} />;
   }
 
   if (type === 'entrylist') {
@@ -598,14 +603,14 @@ export function FieldControl({ def, value, onChange, disabled }) {
 }
 
 /** 一整组字段（同一 group）的矩阵。 */
-export function FieldGroup({ title, fields, draft, onPatch }) {
+export function FieldGroup({ title, fields, draft, onPatch, sectionTitle, entryTitle }) {
   return (
     <>
       <div className="group-title">{title}</div>
       <div className="pad">
         <div className="grid">
           {fields.map((def) => (
-            <div key={def.key} className={`field ${['textarea', 'file', 'md', 'entrylist'].includes(def.type) ? 'wide' : ''}`}>
+            <div key={def.key} className={`field ${['textarea', 'file', 'md', 'entrylist', 'source'].includes(def.type) ? 'wide' : ''}`}>
               <div className="flabel">
                 <span>{def.label}</span>
                 {def.sensitive ? <span className="tag bad">密文</span> : null}
@@ -615,7 +620,12 @@ export function FieldGroup({ title, fields, draft, onPatch }) {
                 <span className="fkey">{def.key}</span>
               </div>
               <div className="fctrl">
-                <FieldControl def={def} value={draft[def.key]} onChange={(v) => onPatch(def.key, v)} />
+                <FieldControl
+                  def={def}
+                  value={draft[def.key]}
+                  onChange={(v) => onPatch(def.key, v)}
+                  ctx={{ sectionTitle, entryTitle }}
+                />
               </div>
             </div>
           ))}

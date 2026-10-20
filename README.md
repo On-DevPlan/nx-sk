@@ -353,6 +353,28 @@ python assets/sk-pdf/scripts/pdf_extract.py book.pdf --out /tmp/out
 | `20-sop-schema` | 栏目六段结构（简介/准备材料/入口/手册/常见问题/自检）、账号怎么拆 sensitive 字段 |
 | `30-pitfalls` | 占位符忘换 id、本地路径渲染不出、密码泄漏、md 图片被误判未引用… |
 
+### sk-thesis：毕业论文格式与结构
+
+按信息工程学院 2022 版规范（设计开发类）把格式做成**可查的字段**与**可用的 Word 模板**：
+页面 2.5/2/2.5/2 cm、1.5 倍行距、宋体小四、标题黑体四号/黑体小四/宋体小四、三线表 1.5·1 磅、
+目录域与分节页码（封面与目录不编、标题页起为 1）。
+
+```bash
+nx-sk section add thesis --template thesis   # 新建「毕业论文」栏目（9 组 / 59 字段）
+nx-sk section get thesis                     # 全部硬指标 + 交稿自检清单
+nx-sk skill get sk-thesis 10-format          # 数值速查
+
+# 重新生成模板（本机 managed venv 已装 python-docx）
+~/.workbuddy/binaries/python/envs/default/Scripts/python.exe \
+  assets/sk-thesis/scripts/make_thesis_template.py
+```
+
+| ref | 何时读 |
+| --- | --- |
+| `10-format` | 页边距、字号、标题层级、图表、参考文献、页码的全部数值 |
+| `20-structure` | 章节骨架、每章写什么、开题与论文的格式差异、装订顺序 |
+| `30-pitfalls` | 真实错法：一级标题加粗、图题「图 1」多空格、（1）自动编号带悬挂缩进、批注没删 |
+
 ## 开发
 
 ```bash
