@@ -974,3 +974,16 @@ body.col-resizing, body.col-resizing * { cursor: col-resize !important; user-sel
   transition: background .15s ease;
 }
 .source-old-toggle:hover { background: var(--soft-2); color: var(--ink); }
+
+/* 附件列表：**固定 5 行高的滚动窗口**。
+   附件一多，全铺开会把整页表单撑得很长（每行 ~50px，20 个附件就是 1000px），
+   填别的字段时得拖着整页上下滚。改成窗口内滚动，表单高度就稳住了。 */
+.file-picker-list {
+  display: flex; flex-direction: column; gap: 4px;
+  max-height: 266px;            /* ≈ 5 行（每行 ~50px）+ 间隙 */
+  overflow-y: auto; overflow-x: hidden;
+  padding-right: 2px;           /* 给滚动条留位，滚动条不压住「移除」按钮 */
+  scrollbar-width: thin;
+}
+.file-picker-list.expanded { max-height: none; }
+.file-picker-list .file-preview { flex-shrink: 0; }
