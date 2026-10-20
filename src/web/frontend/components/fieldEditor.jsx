@@ -81,6 +81,8 @@ export function FileFieldControl({ def, value, onChange }) {
   const { toast, guard, patchUi } = useStore();
   const [data, setData] = useState(null);
   const [dragOver, setDragOver] = useState(false);
+  // 附件多的时候不把表单撑长：默认只露 5 行，窗口内上下滚动；需要看全时一键展开
+  const [expanded, setExpanded] = useState(false);
   const uploadRef = useRef(null);
   // dragenter/dragleave 在子元素间穿梭时会成对触发，用深度计数避免「还没离开就熄掉高亮」
   const dragDepth = useRef(0);
@@ -137,29 +139,41 @@ export function FileFieldControl({ def, value, onChange }) {
       onDragLeave={() => { dragDepth.current -= 1; if (dragDepth.current <= 0) { dragDepth.current = 0; setDragOver(false); } }}
       onDrop={onDrop}
     >
-      {ids.map((id) => {
-        const rec = byId(id);
-        if (!rec) {
-          return (
-            <div className="file-preview" key={id}>
-              <span className="hint bad grow">引用的附件已不存在（{id}）—— 重新上传，或移除。</span>
-              <button type="button" className="btn small ghost" onClick={() => removeAt(id)}>移除</button>
-            </div>
-          );
-        }
-        return (
-          <div className="file-preview" key={id}>
-            {rec.isImage
-              ? <img src={rec.url} alt={rec.name} />
-              : <span className="ext-badge" style={{ fontSize: 13, width: 40, textAlign: 'center' }}>{rec.ext ? rec.ext.slice(1).toUpperCase() : 'FILE'}</span>}
-            <a className="file-preview-name grow" href={rec.url} target="_blank" rel="noreferrer" title={rec.displayPath}>{rec.name}</a>
-            <a className="btn small ghost" href={rec.downloadUrl}>下载</a>
-            <Copyable className="hint" text={rec.path} title="点击复制物理路径">路径</Copyable>
-            <button type="button" className="btn small ghost" onClick={() => removeAt(id)}>移除</button>
-          </div>
-        );
-      })}
+      {ids.length ? (
+        <div className={`file-picker-list${expanded ? ' expanded' : ''}`}>
+          {ids.map((id) => {
+            const rec = byId(id);
+            if (!rec) {
+              return (
+                <div className="file-preview" key={id}>
+                  <span className="hint bad grow">引用的附件已不存在（{id}）—— 重新上传，或移除。</span>
+                  <button type="button" className="btn small ghost" onClick={() => removeAt(id)}>移除</button>
+                </div>
+              );
+            }
+            return (
+              <div className="file-preview" key={id}>
+                {rec.isImage
+                  ? <img src={rec.url} alt={rec.name} />
+                  : <span className="ext-badge" style={{ fontSize: 13, width: 40, textAlign: 'center' }}>{rec.ext ? rec.ext.slice(1).toUpperCase() : 'FILE'}</span>}
+                <a className="file-preview-name grow" href={rec.url} target="_blank" rel="noreferrer" title={rec.displayPath}>{rec.name}</a>
+                <a className="btn small ghost" href={rec.downloadUrl}>下载</a>
+                <Copyable className="hint" text={rec.path} title="点击复制物理路径">路径</Copyable>
+                <button type="button" className="btn small ghost" onClick={() => removeAt(id)}>移除</button>
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
       {!ids.length ? <span className="hint">还没有附件。</span> : null}
+      {ids.length > 5 ? (
+        <div className="file-pick-row">
+          <span className="hint">共 {ids.length} 个附件{expanded ? '（已展开全部）' : '（窗口内上下滚动查看）'}</span>
+          <button type="button" className="btn small ghost" onClick={() => setExpanded((v) => !v)}>
+            {expanded ? '收起到 5 行' : '展开全部'}
+          </button>
+        </div>
+      ) : null}
       <div className="file-pick-row">
         <select value="" disabled={full || !available.length} onChange={(e) => add(e.target.value)}>
           <option value="">{available.length ? '（从附件库选一个，选中即追加）' : '（库里没有可再选的附件）'}</option>
