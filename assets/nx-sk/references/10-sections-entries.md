@@ -23,16 +23,16 @@ store.json（~/nx-sk/store.json 或 $NX_SK_STORE）
 
 ## 二、栏目命令（集合资源，五操作齐备）
 
-| 操作 | 命令 | 接口 |
-| --- | --- | --- |
-| 列表 | `nx-sk section list` | `GET /api/sections` |
-| 单条 | `nx-sk section get <id或标题>` | `GET /api/sections/:ref` |
-| 新增 | `nx-sk section add <id> --title <标题> --template job` | `POST /api/sections` |
-| 修改 | `nx-sk section update <id> [--title …] [--add-field '{…}'] [--remove-field a --remove-field b]` | `PATCH /api/sections/:ref` |
-| 删除 | `nx-sk section remove <id> [--force]` | `DELETE /api/sections/:ref` |
-| **全量** | `nx-sk section dump <id> [--mask]` | `GET /api/sections/:ref/dump` |
-| **同步模板** | `nx-sk section sync <id> [--dry-run]` | `POST /api/sections/:ref/sync` |
-| 模板 | `nx-sk section templates` | `GET /api/sections/templates` |
+| 操作 | 命令 |
+| --- | --- |
+| 列表 | `nx-sk section list` |
+| 单条 | `nx-sk section get <id或标题>` |
+| 新增 | `nx-sk section add <id> --title <标题> --template job` |
+| 修改 | `nx-sk section update <id> [--title …] [--add-field '{…}'] [--remove-field a --remove-field b]` |
+| 删除 | `nx-sk section remove <id> [--force]` |
+| **全量** | `nx-sk section dump <id> [--mask]` |
+| **同步模板** | `nx-sk section sync <id> [--dry-run]` |
+| 模板 | `nx-sk section templates` |
 
 - **`remove` 在栏目非空时会被 `blocked` 挡住**（除非 `--force`）——防止一键抹掉全部档案。
 - `remove` 目标不存在时**报 `NOT_FOUND`**（不静默成功），就是为了让「打错一个字」当场暴露。
@@ -45,18 +45,21 @@ store.json（~/nx-sk/store.json 或 $NX_SK_STORE）
     这是**只提示、不动手**——因为定义归栏目，你可能就是刻意改过。要换成模板的新定义得手动来：
     `section update <id> --fields '<整份字段数组>'`，或先 `--remove-field` 再 `--add-field`（`--add-field` 遇到同名会报冲突）。
 
-内置模板 6 个：`job`（求职 / 个人信息，79 字段 / 10 分组——含「附件资料」组：简历附件 / 头像图片 / 成绩单 / 证书扫描件）、`projects`（项目经历）、`internships`（实习/工作经历）、`campus`（校内职务/实践）、`secret`（密钥，**单字段 KV**——细节见 `20-secrets`）、`deploy`（部署配置：Dockerfile / compose / k8s 清单，**一份文件一个条目**——细节见 `50-deploy`）。三类经历栏目（projects / internships / campus）**一个项目 / 一段经历 = 一个条目**，角色、时间、技术栈都是独立字段——不要往 job 栏目里塞经历。
+内置模板 8 个：`job`（求职 / 个人信息，约 80 字段 / 10 分组——含「附件资料」组：简历附件 / 头像图片 / 成绩单 / 证书扫描件）、`projects`（项目经历）、`internships`（实习/工作经历）、`campus`（校内职务/实践）、`secret`（密钥，**单字段 KV**——细节见 `20-secrets`）、`deploy`（部署配置：Dockerfile / compose / k8s 清单，**一份文件一个条目**，自带「凭据清单」——细节见 `50-deploy`）、`platform`（容器平台：控制台链接 / 账号 / 密码 / 镜像，一个平台一个条目）、`thesis`（毕业论文规范字段化）。三类经历栏目（projects / internships / campus）**一个项目 / 一段经历 = 一个条目**，角色、时间、技术栈都是独立字段——不要往 job 栏目里塞经历。
+
+首次运行只**播种 6 个**（job / projects / internships / campus / secret / deploy），
+platform 与 thesis 需要时用 `section add <id> --template platform|thesis` 建。
 
 ## 三、条目命令
 
-| 操作 | 命令 | 接口 |
-| --- | --- | --- |
-| 列表 | `nx-sk entry list [--section job] [--q 关键字]` | `GET /api/entries` |
-| 字段字典 | `nx-sk entry fields [--section job]` | `GET /api/entries/fields` |
-| 单条 | `nx-sk entry get <id或名字> [--mask] [--section job]` | `GET /api/entries/:ref` |
-| 新增 | `nx-sk entry add --section job --set 姓名=张三 [--set 电话=…]` | `POST /api/entries` |
-| 修改 | `nx-sk entry update <ref> --set 期望城市=北京、上海 [--unset 微信]` | `PATCH /api/entries/:ref` |
-| 删除 | `nx-sk entry remove <ref>` | `DELETE /api/entries/:ref` |
+| 操作 | 命令 |
+| --- | --- |
+| 列表 | `nx-sk entry list [--section job] [--q 关键字]` |
+| 字段字典 | `nx-sk entry fields [--section job]` |
+| 单条 | `nx-sk entry get <id或名字> [--mask] [--section job]` |
+| 新增 | `nx-sk entry add --section job --set 姓名=张三 [--set 电话=…]` |
+| 修改 | `nx-sk entry update <ref> --set 期望城市=北京、上海 [--unset 微信]` |
+| 删除 | `nx-sk entry remove <ref>` |
 
 ### 参数要点
 
@@ -112,6 +115,12 @@ nx-sk entry update 张三 --set 期望行业=互联网 --set 技术博客=https:
 
 **刻意不推 number**：18 位身份证号这类长数字超过 2^53，推成数字会静默丢精度。
 
+**键名像凭据的，自动登记成密文字段**：密码 / 口令 / 密钥 / 账号 / 帐号 / 凭据 / 凭证 /
+token / apiKey / accessKey / secretKey / password / passphrase… 这些词出现在键名里，
+新登记的字段就直接是密文字段（落盘 AES-256-GCM 密文，读出来默认原文）。
+所以「直接写账号密码」是安全的——不必先声明 schema，也不会明文躺在 `store.json` 里。
+完整口径与凭据归属见 `30-credentials`。
+
 需要给字段配上候选值 / 提示文案 / 密文标记时，再显式声明：
 
 ```bash
@@ -152,6 +161,7 @@ nx-sk section update job --fields @fields.json
 > ```
 >
 > 规矩：全空行写入时自动剔除；行里的键必须是声明的清单列（写错当场报，不静默丢）；
+> **列名用 key 或中文标签都认**（`密码` 与 `pass` 等价，与顶层 `--set` 同一口径）；
 > 没登记过的键直接写行数组会**自动登记**成 entrylist 并从行推断列。`entry get` 里清单一行一条：
 > `名称=主控台 · 链接=https://… · 账号=ops · 密码=…`（--mask 时密码列打码）。
 
@@ -164,7 +174,7 @@ nx-sk section update job --fields @fields.json
 >   左清单、中间正文，文件可拖进去（也给了「选择文件」按钮与粘贴框：拖拽不能是唯一入口）。
 > - CLI：`nx-sk source list / get / add / update / remove / ensure`（细节见 `sk-source` skill）。
 > - 三条纪律：**原文不改写**（整理结果写进字段或新的一条）、**不确定就留空**、
->   **敏感内容不进袋**（袋是明文的，密码走「密钥」栏目或 `sensitive` 字段）。
+>   **敏感内容不进袋**（袋是明文的；密码走**场景栏目里的密文字段**，不进袋也不进密钥栏目）。
 > - 袋**不计完整度**（`fill: optional`）：它是暂存区，不是「该填的格子」。
 > - **冲突以新的为准，旧的留痕**：同名即冲突，时间新的那条是「当前版本」，
 >   旧的标「已被取代」但**不删**（原始证据要能翻回去看）；`--at` 记资料自身的时间
