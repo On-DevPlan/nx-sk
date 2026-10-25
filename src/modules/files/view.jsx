@@ -174,6 +174,30 @@ export default function FilesView() {
     await reload();
   });
 
+  /**
+   * 一键清理**未引用**的附件（孤儿附件）。
+   *
+   * 判据与「未引用」筛选片同一套：没有任何条目的 file 字段引用它、正文里也没有引用它的图。
+   * 逐个删是折磨 —— 批量导入 SOP 截图、临时传一份再删，都会留下这种孤儿。
+   * 物理原件一起删、不可撤销，所以先弹确认并说清数量。
+   */
+  const cleanup = guard(async () => {
+    const n = data?.unlinked || 0;
+    if (!n) return;
+    const ok = await dialog({
+      message: `清理 ${n} 个未被任何条目引用的附件？`,
+      detail: '物理原件会一起删除，不可撤销。\n想留底就先在「导出导入」页导一份。',
+      danger: true,
+      confirmText: '清理',
+    });
+    if (!ok) return;
+    const r = await api('/api/files/cleanup', { method: 'POST', body: {} });
+    toast(r.count ? `已清理 ${r.count} 个未引用的附件` : '没有未引用的附件');
+    await refreshAttachments();
+    await load();
+    await reload();
+  });
+
   if (err) {
     return <div className="pad stack"><div className="bad"><strong>附件库读不到</strong></div><pre className="block">{err}</pre></div>;
   }
@@ -206,6 +230,14 @@ export default function FilesView() {
           onChange={(e) => setQ(e.target.value)}
         />
         <button className="btn small ghost" onClick={load}>刷新</button>
+        <button
+          className="btn small ghost danger-ghost"
+          disabled={!data.unlinked}
+          onClick={cleanup}
+          title="删除所有没有任何条目引用的附件（物理原件一并删除，不可撤销）"
+        >
+          清理未引用{data.unlinked ? `（${data.unlinked}）` : ''}
+        </button>
         <button className="btn small ghost" onClick={openPathImport}>本机路径导入</button>
         <button className="btn small" onClick={() => pickerRef.current?.click()}>上传文件</button>
         <input

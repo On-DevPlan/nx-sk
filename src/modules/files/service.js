@@ -177,6 +177,40 @@ export async function removeFile(ref, patch = {}) {
   return { status: 'ok', removed: { id: target.id, name: target.name, category: target.category } };
 }
 
+/**
+ * 一键清理**未被任何条目引用**的附件（孤儿附件）。
+ *
+ * 判据与「附件中心」的「未引用」筛选片**完全同一套**（`fileReferences` 为空）：
+ * 没有任何条目的 file 字段引用它、正文里也没有引用它的图。
+ *
+ * 为什么值得一键做：附件库是「导入即进库」，批量导入 SOP 截图、临时传一份再删
+ * 都会留下孤儿——它们既占空间，又在附件中心混在真资料里。逐个删是折磨。
+ *
+ * 不可撤销（物理原件一起删），所以：
+ *   - 面板侧先弹确认，列出将删的数量与体积；
+ *   - CLI 侧有 --dry-run，先看清单再动手。
+ */
+export async function cleanupUnreferenced(patch = {}) {
+  const dryRun = patch['dry-run'];
+  const store = await loadStore();
+  const orphans = store.files.filter((rec) => !fileReferences(store, rec).length);
+  if (!orphans.length) {
+    // 已经是期望状态（没有孤儿）→ skipped，不是失败
+    return { status: 'skipped', count: 0, removed: [], reason: '没有未引用的附件' };
+  }
+  const brief = orphans.map((r) => ({
+    id: r.id, name: r.name, category: r.category, bytes: r.bytes, path: displayPath(fileRecordAbs(r)),
+  }));
+  if (dryRun) {
+    return { status: 'skipped', dryRun: true, count: orphans.length, wouldRemove: brief };
+  }
+  // 先删物理文件（失败即抛，台账不动）——不能出现「台账没了、文件还在」的中间态
+  for (const rec of orphans) await deletePhysical(rec);
+  const ids = new Set(orphans.map((r) => r.id));
+  await mutateStore((s) => { s.files = s.files.filter((x) => !ids.has(x.id)); });
+  return { status: 'ok', count: orphans.length, removed: brief };
+}
+
 /** CLI 的 file content：给出物理路径与链接（不直接吐二进制，终端里没法看）。 */
 export async function contentInfo(ref, { download } = {}) {
   const store = await loadStore();
@@ -269,6 +303,19 @@ export function renderFileChange(d) {
   if (d.restored && d.exported) return `已导出副本到 ${d.displayPath}（库中保留原件）`;
   if (d.restored) return `已还原到 ${d.displayPath}（台账记录已撤销）`;
   return `已更新附件 ${d.name}（${d.id}）`;
+}
+
+export function renderFileCleanup(d) {
+  if (d.dryRun) {
+    const lines = [`试运行（未落盘）：将清理 ${d.count} 个未引用的附件`];
+    for (const r of d.wouldRemove || []) lines.push(`  ${r.id}  ${r.name}　${fmtBytes(r.bytes)}`);
+    lines.push('确认无误后去掉 --dry-run 即可执行。');
+    return lines.join('\n');
+  }
+  if (d.status === 'skipped') return `没有未引用的附件，无需清理`;
+  const lines = [`已清理 ${d.count} 个未引用的附件（物理原件一并删除，不可撤销）`];
+  for (const r of d.removed || []) lines.push(`  ${r.id}  ${r.name}　${fmtBytes(r.bytes)}`);
+  return lines.join('\n');
 }
 
 export function renderContent(d) {
