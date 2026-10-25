@@ -24,8 +24,9 @@
 | `stack` | 适用技术栈：`node` / `go` / `python` / `任意` |
 | `path` | 建议落盘路径，如 `deploy/k8s/base/deployment.yaml` |
 | `tags` | 自由标签，如 `prod`、`多阶段`、`健康检查`、`SSE` |
-| `content` | **文件正文**（整份原文） |
+| `content` | **文件正文**（整份原文，模板形态：密钥写 `${VAR}` 占位） |
 | `vars` | 复用前要替换的变量，每行一个 `变量 = 说明` |
+| `creds` | **凭据清单**（结构清单）：这个场景自己的账号 / 密码 / 令牌，**密码与令牌列密文落盘** |
 | `usage` | 何时用、为什么这么写、坑在哪 |
 | `sop` | 「说明 + 截屏」的操作步骤（`md` 类型）：直接 Ctrl+V 粘图，图片统一列在下方可放大看细节 |
 | `files` | 要连真实文件一起留档时挂附件（可选） |
@@ -63,10 +64,11 @@ nx-sk entry add --section deploy --title "标准 k8s Deployment" \
 # 1) 找：按类型 / 标签 / 关键词筛（q 会搜正文）
 nx-sk entry list --section deploy --q Dockerfile --json
 
-# 2) 取：拿到完整字段（正文在 .values.content）
+# 2) 取：拿到完整字段（正文在 .values.content，这个场景的凭据在 .values.creds）
 nx-sk entry get "node-web 多阶段 Dockerfile" --json
 
 # 3) 替换：.values.vars 里列的那些变量，逐个换成本项目的值
+#    （本场景自己的凭据已经在 .values.creds 里，真值自动解密 —— 渲染见第六节）
 # 4) 落盘：写到 .values.path 指向的位置
 ```
 
@@ -104,25 +106,47 @@ nx-sk transfer export deploy --out deploy.zip
 
 > 截屏里如果出现 token / 密码 / 内网地址，**先打码再贴**：正文与图片都回不到密文形态。
 
-## 六、明文密钥不写在这里
+## 六、密钥分两层：模板层与场景层
 
-`content` 里**只写占位符**，真值放「密钥」栏目（那里是密文落盘）：
+`content` 是**会被复制进别人项目**的东西（最后进 git），所以模板层只写占位符：
 
 ```yaml
-# 对：占位
+# 对：占位（模板）
 stringData:
   token: ${REGISTRY_TOKEN}
 ```
 
+**真值写在同一个条目的「凭据清单」里**（`creds` 字段，密码 / 令牌列密文落盘）：
+
 ```bash
-nx-sk key set REGISTRY_TOKEN <真值>     # 密文落盘，读出来是原文
+nx-sk entry update "prod 部署" --section deploy --data '{"凭据清单":[{"名称":"REGISTRY_TOKEN","令牌":"tok-真值"}]}'
 ```
 
-理由：配置文件是最容易被**整份复制粘贴分享**的东西（发同事、贴 issue、进聊天记录），
-而密钥栏目的落盘是 AES-256-GCM 密文。把两者混在一起，等于给凭据开了一条最宽的出口。
+这不是「怕明文」，是**模板与实例本来就是两种东西**：
+`content` 是模板（可复用、可分享、进仓库），`creds` 是这个场景的实例数据（在本机、密文落盘）。
 
-> 例外：`k8s-secret` 作为**资源模板**可以有条目，但里面的值同样要写成占位符 ——
-> 它描述的是"Secret 该怎么组织"，不是"密钥是多少"。
+### 出配置文件：直接给成品
+
+用户要的是**能直接用的配置**，不是模板 + 一句「你自己填」。所以：
+
+```bash
+# 取真值（密文自动解密）
+nx-sk entry get "prod 部署" --section deploy --json > /tmp/e.json
+
+# 用 creds 里的真值替换 content 里的 ${VAR}，产出成品
+node assets/nx-sk/scripts/render-config.js /tmp/e.json ./docker-compose.local.yml
+```
+
+**成品里带真值没问题**（本机文件，没人看），只要守住两条：
+
+- **别让它进 git**：仓库里提交的是占位符版本 + `.env.example`，真值放 `.env` / `*.local.yml`，
+  并让 `.gitignore` 盖住。
+- **别把它打进日志或交给第三方**。
+
+细节（多组账号怎么建清单、跨栏目台账、各类凭据放哪）见 `30-credentials`。
+
+> 例外：`k8s-secret` 作为**资源模板**可以有条目，但正文里的值同样要写成占位符 ——
+> 它描述的是"Secret 该怎么组织"，不是"密钥是多少"；真值仍然在这个条目的凭据清单里。
 
 ## 七、什么时候不放这里
 

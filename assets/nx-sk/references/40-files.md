@@ -20,16 +20,16 @@
 
 ## 二、命令
 
-| 操作 | 命令 | 接口 |
-| --- | --- | --- |
-| 列表 | `nx-sk file list [--section job] [--q 关键字]` | `GET /api/files` |
-| 单条 | `nx-sk file get <id>` | `GET /api/files/:ref` |
-| 导入 | `nx-sk file add --path <本机文件>` | `POST /api/files` |
-| 改属性 | `nx-sk file update <id> [--name …] [--tags …] [--note …]` | `PATCH /api/files/:ref` |
-| 取本体 | `nx-sk file content <id> [--download]` | `GET /api/files/:ref/content` |
-| 打开 | `nx-sk file open <id>`（本机默认程序） | 无（纯 CLI） |
-| 还原 | `nx-sk file restore <id> [--to DIR] [--copy]` | `POST /api/files/:ref/restore` |
-| 删除 | `nx-sk file remove <id>` | `DELETE /api/files/:ref` |
+| 操作 | 命令 |
+| --- | --- |
+| 列表 | `nx-sk file list [--section job] [--q 关键字]` |
+| 单条 | `nx-sk file get <id>` |
+| 导入 | `nx-sk file add --path <本机文件>` |
+| 改属性 | `nx-sk file update <id> [--name …] [--tags …] [--note …]` |
+| 取本体 | `nx-sk file content <id> [--download]` |
+| 打开 | `nx-sk file open <id>`（本机默认程序） |
+| 还原 | `nx-sk file restore <id> [--to DIR] [--copy]` |
+| 删除 | `nx-sk file remove <id>` |
 
 - `file list --section <栏目>` 只看「被某栏目引用」的附件；`--section none` 只看**还没有任何条目引用**的。
 - `file content` 是浏览器链接：内联预览，加 `--download` 强制下载；CLI 侧打印物理路径与链接。

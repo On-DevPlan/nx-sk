@@ -8,7 +8,7 @@
 import { loadStore, mutateStore } from '../../core/store.js';
 import { assertFieldKey } from '../../core/paths.js';
 import { badInput, conflict, notFound } from '../../core/errors.js';
-import { BOOL_FALSE, BOOL_TRUE, SOURCE_FIELD, SOURCE_GROUP, findKvSection, findSection, isSensitiveField, sectionNames } from '../../core/fields.js';
+import { BOOL_FALSE, BOOL_TRUE, SOURCE_FIELD, SOURCE_GROUP, findKvSection, findSection, isSensitiveField, looksSecretish, sectionNames } from '../../core/fields.js';
 import { completeness, displaySensitive, isBlank, serializeEntry } from '../../core/render.js';
 import { newId, nowIso } from '../../core/ids.js';
 import { decryptValue, encryptValue, isCipherBlob, maskValue } from '../../core/crypto.js';
@@ -72,10 +72,17 @@ function registerField(section, rawKey, rawValue) {
     );
   }
   const key = assertFieldKey(String(rawKey).trim());
+  let type = inferFieldType(rawValue);
+  // 键名长得像凭据（密码 / 令牌 / 密钥 / 账号…）→ **直接建成密文字段**。
+  //
+  // 这是「大胆写」能成立的前提：agent 可以一把 `--set 密码=…` 写进栏目，
+  // 而这把密码**落盘就是密文**，不会明文躺在 store.json 里。
+  // 刻意只对标量值生效：数组类（附件 / 结构清单 / 资料袋）有自己的形状，不能改类型。
+  if (looksSecretish(key) && SCALAR_FIELD_TYPES.has(type)) type = 'secret';
   const def = {
     key,
     label: key,
-    type: inferFieldType(rawValue),
+    type,
     group: section.groups?.[0]?.id || section.fields?.[0]?.group || 'other',
   };
   section.fields.push(def);
@@ -169,13 +176,16 @@ function normalizeRows(def, list) {
     }
     const row = {};
     for (const [k, v] of Object.entries(item)) {
-      const sub = subs.find((s) => s.key === k);
+      // 列名**key 与 label 都认**（与顶层 `--set 字段=值` 同一口径）：
+      // 人写的是「密码」，清单声明的是 pass —— 不该让人先背一遍英文 key。
+      const sub = subs.find((s) => s.key === k) || subs.find((s) => s.label === k);
       if (!sub) {
         throw badInput(`字段「${def.label}」没有子字段「${k}」（清单列: ${subs.map((s) => s.label).join('、') || '无'}）。`
           + `清单列在字段定义里，要改用 section update <栏目> --fields '<整份字段数组>'`);
       }
       const text = String(v ?? '').trim();
-      if (text !== '') row[k] = text;
+      // 一律归到列的 **key** 下：密文判定、面板渲染都按 key 走
+      if (text !== '') row[sub.key] = text;
     }
     if (Object.keys(row).length) rows.push(row);
   }
@@ -253,6 +263,10 @@ async function prepareValue(section, def, raw, current) {
 // 而不是一个普通文本字段或 tags。
 const looksLikeFileId = (x) => typeof x === 'string' && /^f_[0-9a-z]+$/i.test(x.trim());
 const looksLikeRow = (x) => !!x && typeof x === 'object' && !Array.isArray(x);
+
+// 标量类型：值就是一个字符串/数字/布尔。能安全地改成密文字段（type: 'secret'）。
+// 数组类（file / entrylist / source / tags）有自己的形状，不在自动改型的范围里。
+const SCALAR_FIELD_TYPES = new Set(['text', 'textarea', 'number', 'date', 'month', 'bool']);
 
 function inferFieldType(raw) {
   if (Array.isArray(raw)) {
@@ -1064,6 +1078,8 @@ export function renderFields(d) {
 // 需求：散在各栏目条目里的「关键 key」（控制台链接、账号、密码、镜像名…）要有一张
 // 统一清单，方便一眼拿到、也方便交给 agent 定位修改。
 // 匹配规则：字段 key/label 命中启发式 **或** 字段类型是 secret/标记 sensitive。
+// **结构清单要展开成行**：场景凭据（deploy 的「凭据清单」）住在清单的行里，
+// 只扫顶层字段的话台账就看不见最该看见的那些。
 // 值策略：链接类明文（地址是要点击使用的）；账号/密码/token 类一律打码（短值全 *）；
 // 其余长文本前 4+尾 4。--reveal 才出原文（密文走解密）。
 const KEY_URL_RE = /(url|link|链接|console|入口|registry|仓库|image|镜像)/i;
@@ -1082,10 +1098,45 @@ export async function keysLedger({ section, q, reveal } = {}) {
     for (const e of mine) {
       const item = serializeEntry(sec, e, { decrypt });
       for (const def of sec.fields) {
-        const hit = KEY_FIELD_RE.test(def.key) || KEY_FIELD_RE.test(def.label) || def.type === 'secret' || def.sensitive === true;
-        if (!hit) continue;
         const raw = item.values?.[def.key];
         if (raw === undefined || raw === null || String(raw).trim() === '') continue;
+
+        // **结构清单要展开成行**：场景凭据现在住在清单的行里（deploy 的「凭据清单」），
+        // 只扫顶层字段的话，台账恰好看不见最该看见的那些 —— 「一条命令看全部凭据」
+        // 必须真的看得到全部。
+        if (def.type === 'entrylist' && Array.isArray(raw)) {
+          for (const row of raw) {
+            if (!row || typeof row !== 'object') continue;
+            const rowName = row.name ?? row.名称 ?? '';
+            for (const [cellKey, cellVal] of Object.entries(row)) {
+              if (cellVal === undefined || cellVal === null || String(cellVal).trim() === '') continue;
+              const sub = (def.fields || []).find((x) => x.key === cellKey);
+              const cellLabel = sub?.label || cellKey;
+              const secretish = sub?.sensitive === true
+                || KEY_SECRET_RE.test(cellKey) || KEY_SECRET_RE.test(cellLabel);
+              const urlish = KEY_URL_RE.test(cellKey) || KEY_URL_RE.test(cellLabel);
+              if (!secretish && !urlish && !KEY_FIELD_RE.test(cellKey) && !KEY_FIELD_RE.test(cellLabel)) continue;
+              const s = String(cellVal);
+              out.push({
+                section: sec.title,
+                sectionId: sec.id,
+                entry: e.title,
+                entryId: e.id,
+                key: `${def.key}.${cellKey}`,
+                label: rowName ? `${rowName} · ${cellLabel}` : cellLabel,
+                sensitive: secretish,
+                value: reveal ? s
+                  : (secretish || isCipherBlob(s)) ? maskValue(s)
+                    : urlish ? s
+                      : (s.length > 12 ? `${s.slice(0, 4)}…${s.slice(-4)}` : `${s.slice(0, 2)}***`),
+              });
+            }
+          }
+          continue;
+        }
+
+        const hit = KEY_FIELD_RE.test(def.key) || KEY_FIELD_RE.test(def.label) || def.type === 'secret' || def.sensitive === true;
+        if (!hit) continue;
         const s = Array.isArray(raw) ? raw.join('、') : String(raw);
         const isSecretish = def.type === 'secret' || def.sensitive === true || isSensitiveField(sec, def.key) || KEY_SECRET_RE.test(def.key) || KEY_SECRET_RE.test(def.label);
         const isUrlish = KEY_URL_RE.test(def.key) || KEY_URL_RE.test(def.label);

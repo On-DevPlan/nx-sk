@@ -204,9 +204,10 @@ const CAMPUS_FIELDS = [
 // 而是"下次能在别的项目里照着用"：所以除了正文，还要有「放哪」「哪些值要替换」
 // 「什么场景用」。缺了后三项，正文就只是一段没有上下文的 YAML。
 //
-// 明文密钥不进这里：`content` 里只写 `${VAR}` 占位，真值放「密钥」栏目
-// （那里是密文落盘）。这条写进字段 hint，而不是靠人自觉 —— 配置文件是最容易
-// 被整份复制粘贴分享出去的东西。
+// 密钥分两层，各有各的位置：
+//   - **模板层**（`content`）：正文会被复制进别人的项目（进 git），所以只写 `${VAR}` 占位。
+//   - **场景层**（`creds` 凭据清单）：这个场景**自己的**账号/密码/令牌，密文落盘。
+//     agent 要出配置文件时从这里取真值直接渲染 —— 不必再绕回「密钥」栏目。
 const DEPLOY_FIELDS = [
   f('name', '资源名', 'text', 'main', { hint: '一眼能看出是什么，如「node-web 多阶段 Dockerfile」' }),
   f('kind', '资源类型', 'select', 'main', {
@@ -220,11 +221,21 @@ const DEPLOY_FIELDS = [
   f('path', '建议落盘路径', 'text', 'main', { fill: 'optional', hint: '如 deploy/Dockerfile、deploy/k8s/base/deployment.yaml' }),
   f('tags', '标签', 'tags', 'main', { fill: 'optional', hint: '如 prod、多阶段、健康检查、SSE' }),
   f('content', '文件正文', 'textarea', 'body', {
-    hint: '整份文件原文。密钥一律写 ${VAR} 占位，真值放「密钥」栏目，别写明文',
+    hint: '整份文件原文。**模板**里的密钥写 ${VAR} 占位（这份正文会进 git）；真值写进下面的「凭据清单」',
   }),
   f('vars', '需替换的变量', 'textarea', 'body', {
     fill: 'optional',
     hint: '每行一个「变量 = 说明」。复用前先替换这些，别指望正文里的值直接能用',
+  }),
+  f('creds', '凭据清单', 'entrylist', 'cred', {
+    hint: '这个场景自己的账号 / 密码 / 令牌 —— 直接写这里，密码与令牌列**密文落盘**。出配置文件时从这里取真值',
+    fields: [
+      { key: 'name', label: '名称' },
+      { key: 'user', label: '账号' },
+      { key: 'pass', label: '密码', sensitive: true },
+      { key: 'token', label: '令牌', sensitive: true },
+      { key: 'note', label: '备注' },
+    ],
   }),
   f('usage', '何时用 / 关键取舍', 'textarea', 'use', {
     fill: 'optional',
@@ -428,12 +439,13 @@ const TEMPLATES = {
     label: '部署配置（Docker / K8s）',
     description:
       '一份配置文件一个条目：正文即文件原文，配「放哪」「哪些值要替换」「什么场景用」，' +
-      '好让它在别的项目里能照着用。明文密钥不放这里（用 ${VAR} 占位，真值进「密钥」栏目）。',
+      '好让它在别的项目里能照着用。这个场景自己的账号密码写在条目自己的「凭据清单」里（密文落盘）。',
     titleField: 'name',
     titleLabel: '资源名',
     groups: [
       { id: 'main', title: '基本信息' },
       { id: 'body', title: '文件内容' },
+      { id: 'cred', title: '凭据' },
       { id: 'use', title: '使用说明' },
     ],
     fields: DEPLOY_FIELDS,
@@ -680,6 +692,30 @@ export function fieldByLabel(section, label) {
 export function isSensitiveField(section, key) {
   const def = fieldByKey(section, key);
   return !!(def && (def.sensitive || def.type === 'secret'));
+}
+
+// —— 凭据键名启发式 ——
+//
+// 「自动登记的新键」如果长得像凭据（密码 / 令牌 / 密钥 / 账号…），就**直接建成密文字段**：
+// 落盘即 AES-256-GCM 密文。
+//
+// 为什么要有这条：nx-sk 的用法是「大胆写」——`--set 密码=…` 一把写进去，不必先声明 schema。
+// 但如果自动登记一律建成普通文本，那把密码就会**明文躺在 store.json 里**，
+// 「大胆」的前提就变成了「不安全」。所以默认值反过来：**看着像凭据就当凭据**。
+//
+// 判据宽松是有意的：把一个不是凭据的字段多加密一次，代价只是多几行密文；
+// 反过来（该加密却没加密）的代价是凭据裸奔。
+export const SECRETISH_RE = /(api[-_]?key|access[-_]?key|secret[-_]?key|private[-_]?key|apikey|accesskey|secretkey|privatekey|password|passwd|passphrase|credential|secret|token|pwd|密钥|口令|密码|凭据|凭证|账号|帐号|私钥|访问令牌)/i;
+
+// 整个键就是这些词时也算（避免 'secret' / 'token' 之外的短词被漏掉，如 'key'）。
+const SECRETISH_EXACT = new Set(['key', 'keys', 'pass', 'pwd', 'token', 'secret', '密码', '账号', '帐号', '密钥']);
+
+/** 这个键名看起来像凭据吗？——决定自动登记时建成密文字段还是普通字段。 */
+export function looksSecretish(key) {
+  const s = String(key || '').trim();
+  if (!s) return false;
+  if (SECRETISH_EXACT.has(s.toLowerCase())) return true;
+  return SECRETISH_RE.test(s);
 }
 
 /**

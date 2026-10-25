@@ -376,6 +376,41 @@ test('已迁走的开发规范不许重新出现在 assets/nx-sk/（文档漂移
   assert.equal(new Set(nums).size, nums.length, `ref 编号有重复: ${nums.join(', ')}`);
 });
 
+/**
+ * 随包手册的**知识边界**：只讲「怎么用 nx-sk」，不讲「怎么改这个项目」。
+ *
+ * 判据来自脚手架 skill 的 A04：用户装完包，他的 agent 手上没有 `src/`，
+ * 「改这个项目本身」永远不是它的场景 —— 但这类文字照样会被检索、被加载，
+ * 而真正需要它的仓库开发者在项目仓库里反倒找不到。
+ *
+ * 所以这里钉死三件事不出现在 `assets/nx-sk/`：
+ *   - HTTP 路由（skill 只走 CLI；路由是实现细节）
+ *   - 源码路径（core/ modules/ src/ …）
+ *   - 构建 / lint 工具链
+ * 开发侧内容归位到仓库 README（见 README 的「设计取舍与踩坑记录」）。
+ */
+test('随包手册只讲「怎么用」：不许出现开发侧知识', async () => {
+  const skillDir = join(ROOT, 'assets', 'nx-sk');
+  const refDir = join(skillDir, 'references');
+  const files = [
+    join(skillDir, 'SKILL.md'),
+    ...(await readdir(refDir)).filter((n) => n.endsWith('.md')).map((n) => join(refDir, n)),
+  ];
+  const BANNED = [
+    { re: /\/api\//, why: 'HTTP 路由是实现细节（skill 只走 CLI）' },
+    { re: /(^|[^\w-])(src|core|modules|runtime)\//, why: '源码路径是开发侧知识' },
+    { re: /\b(eslint|vite|webpack|pnpm)\b/, why: '构建 / lint 工具链是开发侧知识' },
+  ];
+  for (const f of files) {
+    const text = await readFile(f, 'utf8');
+    for (const { re, why } of BANNED) {
+      const m = text.match(re);
+      assert.ok(!m, `${f.replace(ROOT, '')} 里出现了开发侧内容「${m?.[0]}」——${why}。`
+        + '把它挪到仓库 README；随包手册只回答「怎么用」与「东西该往哪儿放」。');
+    }
+  }
+});
+
 /** 抠出 Markdown 里的行内 code span 与围栏代码块，忽略 frontmatter。 */
 function codeSpans(markdown) {
   const body = markdown.replace(/^---\n[\s\S]*?\n---\n/, '');
