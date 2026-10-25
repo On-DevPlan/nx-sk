@@ -150,13 +150,14 @@ CLI 与 API 同源，skill 驱动 agent**。落到具体功能上：
 | `nx-sk routes [--module M] [--http "POST /api/entries"]` | 命令 ↔ 路由双向对照 |
 | `nx-sk section list \| get \| add \| update \| remove` | 栏目 CRUD |
 | `nx-sk section dump <id> [--mask]` | **一个栏目的全部信息**：字段台账 + 全部条目 + 每个条目的未填清单 |
-| `nx-sk section templates` | 内置模板（job / secret / projects / internships / campus / deploy） |
+| `nx-sk section templates` | 内置模板（job / secret / projects / internships / campus / deploy / platform / thesis） |
 | `nx-sk section sync <id> [--dry-run]` | 按模板**补齐**本栏目缺的分组与字段（只增不改不删）——模板演进后让老栏目追上 |
 | `nx-sk entry list \| get \| add \| update \| remove` | 条目 CRUD（PATCH 语义） |
 | `nx-sk entry fields [--section job]` | 字段字典 —— 填之前先看这个，别猜字段名 |
 | `nx-sk file list \| get \| add \| update \| remove` | 附件 CRUD（原件在 `~/nx-sk/files/`，同内容去重） |
 | `nx-sk file add --path <文件> [--copy] [--category C]` | 导入附件：**默认移动原件**，`--copy` 仅复制 |
 | `nx-sk file list [--section <栏目\|none>] [--q 关键字]` | 列附件：按「哪些栏目在引用」筛选（`none` = 未引用）；返回栏目汇总与存储目录 |
+| `nx-sk file cleanup [--dry-run]` | **一键清理未被任何条目引用的附件**（孤儿附件，物理原件一并删）；`--dry-run` 先看清单 |
 | `nx-sk file restore <id> [--to DIR] [--copy]` | **可逆**：移回原始位置并撤销台账；`--copy` 只导出副本 |
 | `nx-sk file content <id>` | 浏览器链接（内联预览 / `?download=1` 下载）；CLI 打印物理路径 |
 | `nx-sk file open <id>` | 用系统默认程序打开原件 |
@@ -238,6 +239,8 @@ node assets/nx-sk/scripts/render-config.js /tmp/e.json ./docker-compose.local.ym
 nx-sk file add --path "D:\简历\张三-简历.pdf"   # 默认移动原件进库
 nx-sk file list                                  # 台账：按栏目汇总 + 被引用情况
 nx-sk file list --section none                   # 只看还没有条目引用的
+nx-sk file cleanup --dry-run                     # 一键清理未引用附件：先看会删哪些
+nx-sk file cleanup                               # 真删（物理原件一起删，不可撤销）
 nx-sk file restore f_xxxx                        # 可逆：移回原始位置、撤销台账
 nx-sk file restore f_xxxx --to "D:\资料" --copy  # 或导出副本到指定目录
 ```
@@ -245,6 +248,16 @@ nx-sk file restore f_xxxx --to "D:\资料" --copy  # 或导出副本到指定目
 **附件怎么被条目引用**：条目的 `file` 字段存的是**附件 id 的列表**——一个字段可以挂**多个**
 附件（简历多版本、头像多张）。id 全局唯一，所以每条条目各有各的附件、互不串台；
 同一份原件也能被多条条目引用（sha256 去重后是同一条）。
+
+面板上的三处配合：
+
+- **字段里挑附件**：点「从附件库选…」打开的是**可搜索的选择面板**（不是下拉框）——
+  按名称 / 备注 / 标签过滤，**未引用的排在前面**（刚导入还没挂上去的原件就在最上面），
+  点一行即追加，可连点多个。
+- **附件中心一键清理**：「清理未引用（N）」删掉所有没有任何条目引用的附件
+  （判据与「未引用」筛选片同一套），物理原件一并删除，操作前弹确认。
+- **条目表单的保存按钮固定在右上角**：有改动时顶栏出现「N 处改动未保存 · 保存」，
+  长栏目滚到一半也看得见，不必翻到表单最底；关标签页前还会拦一下。
 **上传 / 选择发生在栏目条目的字段里**（求职 → 张三 → 「简历附件」直接上传或从库里选），
 不在附件中心做指派：
 

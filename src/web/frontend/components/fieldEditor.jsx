@@ -84,9 +84,13 @@ export function FileFieldControl({ def, value, onChange }) {
   // 附件多的时候不把表单撑长：默认只露 5 行，窗口内上下滚动；需要看全时一键展开
   const [expanded, setExpanded] = useState(false);
   const uploadRef = useRef(null);
+  // 附件库选择器：默认收起，点开才搜索 / 挑选（表单是给人填的，不是给人翻附件库的）
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickQuery, setPickQuery] = useState('');
   // dragenter/dragleave 在子元素间穿梭时会成对触发，用深度计数避免「还没离开就熄掉高亮」
   const dragDepth = useRef(0);
   const ids = toIds(value);
+  const idsKey = ids.join(',');
   const max = Number(def.maxItems) || 0;
   const full = max > 0 && ids.length >= max;
 
@@ -97,9 +101,37 @@ export function FileFieldControl({ def, value, onChange }) {
   }, []);
   useEffect(() => { load(true); }, [load]);
 
-  const all = data?.files || [];
+  const all = useMemo(() => data?.files || [], [data]);
   const byId = (id) => all.find((f) => f.id === id) || null;
-  const available = all.filter((f) => !ids.includes(f.id));
+  // 本字段还没挂的附件
+  const available = useMemo(
+    () => all.filter((f) => !idsKey.split(',').includes(f.id)),
+    [all, idsKey],
+  );
+  // **未引用优先**：附件中心刚导入、还没挂到任何条目的原件排在前面。
+  // 理由：选附件时最常要的正是「刚传的那几个」；已被别处引用的往后排，
+  // 仍然可选（同一个原件可以被多条条目共享）。
+  const ordered = useMemo(() => {
+    const free = [];
+    const used = [];
+    for (const f of available) (f.usedBy?.length ? used : free).push(f);
+    return [...free, ...used];
+  }, [available]);
+  // 关键字搜索：名称 / 备注 / 标签
+  const matched = useMemo(() => {
+    const q = pickQuery.trim().toLowerCase();
+    if (!q) return ordered;
+    return ordered.filter((f) => [f.name, f.note, ...(f.tags || [])]
+      .join('\n').toLowerCase().includes(q));
+  }, [ordered, pickQuery]);
+
+  // Esc 关掉选择器
+  useEffect(() => {
+    if (!pickerOpen) return undefined;
+    const onKey = (e) => { if (e.key === 'Escape') setPickerOpen(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [pickerOpen]);
 
   const upload = guard(async (fileList) => {
     const picked = [...(fileList || [])];
@@ -175,10 +207,15 @@ export function FileFieldControl({ def, value, onChange }) {
         </div>
       ) : null}
       <div className="file-pick-row">
-        <select value="" disabled={full || !available.length} onChange={(e) => add(e.target.value)}>
-          <option value="">{available.length ? '（从附件库选一个，选中即追加）' : '（库里没有可再选的附件）'}</option>
-          {available.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
-        </select>
+        <button
+          type="button"
+          className="btn small"
+          disabled={full || !available.length}
+          onClick={() => setPickerOpen((v) => !v)}
+          title="从附件库挑附件（可搜索；未引用的排在前面）"
+        >
+          从附件库选…
+        </button>
         <button type="button" className="btn small" disabled={full} onClick={() => uploadRef.current?.click()}>上传文件</button>
         <button type="button" className="btn small ghost" onClick={() => { patchUi({ view: 'files' }); window.location.hash = '#/files'; }}>附件中心</button>
         <input
@@ -189,6 +226,36 @@ export function FileFieldControl({ def, value, onChange }) {
           onChange={(e) => { upload(e.target.files); e.target.value = ''; }}
         />
       </div>
+      {pickerOpen ? (
+        <div className="file-pick-panel">
+          <div className="file-pick-search">
+            <input
+              autoFocus
+              value={pickQuery}
+              placeholder="按名称 / 备注 / 标签搜索附件"
+              onChange={(e) => setPickQuery(e.target.value)}
+            />
+            <span className="hint nowrap">{matched.length} / {available.length}</span>
+            <button type="button" className="btn small ghost" onClick={() => setPickerOpen(false)}>关闭</button>
+          </div>
+          {matched.length ? (
+            <div className="file-pick-list">
+              {matched.map((f) => (
+                <button type="button" key={f.id} className="file-pick-item" onClick={() => add(f.id)} title="点击追加到本字段">
+                  {f.isImage
+                    ? <img src={f.url} alt="" />
+                    : <span className="ext-badge" style={{ fontSize: 12, width: 34, textAlign: 'center' }}>{f.ext ? f.ext.slice(1).toUpperCase() : 'FILE'}</span>}
+                  <span className="file-pick-name grow nowrap">{f.name}</span>
+                  <span className="hint nowrap">{f.usedBy?.length ? `已被 ${f.usedBy.length} 处引用` : '未引用'}</span>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="hint pad">没有匹配的附件。换个关键字，或先「上传文件」。</div>
+          )}
+          <div className="hint pad">未引用的排在前面；点一行即追加到本字段（可连续点多个）。</div>
+        </div>
+      ) : null}
       {full ? <span className="hint">已达上限（{max} 个）：先移除一个，或把字段的 maxItems 调大。</span> : null}
       {def.hint ? <span className="hint">{def.hint}</span> : null}
     </div>

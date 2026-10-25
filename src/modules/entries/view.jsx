@@ -162,6 +162,19 @@ export default function SectionView({ sectionId }) {
     await reload();
   });
 
+  // 改到一半关标签页 = 改动全丢。浏览器只允许弹一句「确定要离开吗」，
+  // 拦不住也改不了文案，但至少别让未保存的改动无声消失。
+  useEffect(() => {
+    if (!dirty.count) return undefined;
+    const onBeforeUnload = (e) => {
+      e.preventDefault();
+      e.returnValue = '';
+      return '';
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [dirty.count]);
+
   // 「直接存 kv」的入口：敲一行 字段=值 回车即写入，字典里没有的键会自动登记
   const quickAdd = guard(async () => {
     if (!draft) { toast('先新建一条条目', 'bad'); return; }
@@ -443,7 +456,9 @@ export default function SectionView({ sectionId }) {
             <div className="card"><Empty>左边选一条，或新建一条</Empty></div>
           ) : (
             <div className="card">
-              <div className="colhead">
+              {/* 顶栏固定在窗口右上角：长栏目滚到一半也能看见「保存」——
+                  否则改完一个字段要翻到表单最底点保存，翻页越多越容易漏保存。 */}
+              <div className="colhead sticky-head">
                 <span
                   className="crumb grow nowrap"
                   title="点击复制条目定位（栏目›条目 + id + CLI 命令，贴给 agent 即可修改）"
@@ -456,6 +471,12 @@ export default function SectionView({ sectionId }) {
                 </span>
                 <span className="muted mono">{draft.id}</span>
                 {current ? <Tag kind={current.missing.length ? '' : 'strong'}>完整度 {current.completeness.ratio}%</Tag> : null}
+                {dirty.count ? (
+                  <>
+                    <span className="hint nowrap">{dirty.count} 处改动未保存</span>
+                    <button type="button" className="btn small" onClick={save} title="保存当前条目的改动">保存</button>
+                  </>
+                ) : null}
               </div>
 
               <div className="field wide pad" style={{ borderBottom: '1px solid var(--soft-2)' }}>

@@ -423,3 +423,43 @@ test('fileReferences 传加工过的副本也能命中（不靠对象引用比�
   assert.equal(refs.length, 1, '副本传参也要能反查到');
   assert.equal(refs[0].entryId, e.id);
 });
+
+/**
+ * 一键清理未引用附件（孤儿附件）。
+ *
+ * 判据必须与附件中心的「未引用」筛选片**同一套**（fileReferences 为空）——
+ * 两套判据会出现「筛选片里看不到、清理却删了」这种吓人的不一致。
+ */
+test('file cleanup：只删未被引用的附件，被引用的原样留下', async () => {
+  const sections = await import('../../src/modules/sections/service.js');
+  const srcUsed = await makeSource('cleanup-in', '被引用的.pdf', `used-${Math.random()}`);
+  const srcFree = await makeSource('cleanup-in', '没人用的.pdf', `free-${Math.random()}`);
+  const used = await svc.addFile({ path: srcUsed });
+  const free = await svc.addFile({ path: srcFree });
+
+  await sections.addSection({ id: 'clsec', title: '清理栏目', fields: [{ key: 'docs', label: '资料', type: 'file' }] });
+  await entries.addEntry({ section: 'clsec', title: '引用者', set: { docs: used.id } });
+
+  // 试运行：只列出会删谁，什么都不动
+  const dry = await svc.cleanupUnreferenced({ 'dry-run': true });
+  assert.equal(dry.dryRun, true);
+  assert.ok(dry.wouldRemove.some((r) => r.id === free.id), '没被引用的那个在清理清单里');
+  assert.ok(!dry.wouldRemove.some((r) => r.id === used.id), '被引用的那个不在清理清单里');
+  const totalBefore = (await svc.listFiles({})).total;
+  assert.ok((await svc.listFiles({})).files.some((f) => f.id === free.id), '试运行后附件还在');
+
+  // 真删：物理原件 + 台账一起清（清掉的是**所有**孤儿，不只是本例这一个）
+  const done = await svc.cleanupUnreferenced({});
+  assert.equal(done.status, 'ok');
+  assert.equal(done.count, dry.count);
+  const after = await svc.listFiles({});
+  assert.equal(after.total, totalBefore - dry.count);
+  assert.ok(after.files.some((f) => f.id === used.id), '被引用的附件活下来了');
+  assert.ok(!after.files.some((f) => f.id === free.id), '没人用的那个被清掉了');
+  await assert.rejects(fsp.access(join(filesDir(), ...free.rel.split('/'))), /ENOENT/, '物理原件也删了');
+
+  // 再来一次：被引用的那个仍然在（库里可能还有别的孤儿，所以不硬断言 skipped）
+  const again = await svc.cleanupUnreferenced({});
+  assert.equal(again.status, again.count ? 'ok' : 'skipped');
+  assert.ok((await svc.listFiles({})).files.some((f) => f.id === used.id), '反复清理不会伤到被引用的附件');
+});

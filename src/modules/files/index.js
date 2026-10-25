@@ -77,6 +77,15 @@ export default {
       render: (d) => service.renderFileChange(d),
     },
     {
+      id: 'file.cleanup',
+      cli: ['file', 'cleanup'],
+      http: ['POST', '/api/files/cleanup'],
+      summary: '一键清理**未被任何条目引用**的附件（孤儿附件，物理原件一并删除，不可撤销）',
+      flags: { 'dry-run': { type: 'boolean', hint: '只列出会删哪些，不真删' } },
+      run: (ctx) => service.cleanupUnreferenced(ctx),
+      render: (d) => service.renderFileCleanup(d),
+    },
+    {
       id: 'file.content',
       cli: ['file', 'content'],
       http: ['GET', '/api/files/:ref/content'],
