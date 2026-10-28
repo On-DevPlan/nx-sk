@@ -31,6 +31,22 @@ export function configToPayload(cfg) {
 
 export const isDirty = (a, b) => JSON.stringify(a) !== JSON.stringify(b);
 
+/**
+ * 结构是否等价：「屏幕上会长成什么样」相同就算没变。
+ *
+ * 与 isDirty 的区别在 `order`：平铺区只要挪过一次，order 里就会落下一串完整序列，
+ * 即使最终位置和原来一模一样，isDirty 也会判脏（用户看到的是「拖一下就提示未保存」）。
+ * 这里只比组名 / 组成员 / 隐藏 / 平铺可见顺序——拖回原位就算没动。
+ */
+export function sameStructure(a, b, allIds = []) {
+  const shape = (c) => JSON.stringify({
+    groups: c.groups.map((g) => [g.title.trim(), g.sections]),
+    hidden: c.hidden,
+    pool: ungroupedIds(c, allIds),
+  });
+  return shape(a) === shape(b);
+}
+
 // —— 分组：增删改 + 排序 ——
 
 export const addGroup = (cfg, title = '') => ({ ...cfg, groups: [...cfg.groups, { title, sections: [] }] });
@@ -48,6 +64,20 @@ export const moveGroup = (cfg, gi, delta) => {
   if (to < 0 || to >= cfg.groups.length) return cfg;
   const groups = [...cfg.groups];
   [groups[gi], groups[to]] = [groups[to], groups[gi]];
+  return { ...cfg, groups };
+};
+
+/**
+ * 把分组挪到指定位置（拖把手换位用）。
+ * 是「挪」不是「交换」：0 拖到 2 时中间那组上移一格，
+ * 交换会把 A B C 变成 C B A（B 反而留在原地），拖着的感觉和结果对不上。
+ */
+export const moveGroupTo = (cfg, from, to) => {
+  const n = cfg.groups.length;
+  if (from === to || from < 0 || to < 0 || from >= n || to >= n) return cfg;
+  const groups = [...cfg.groups];
+  const [moved] = groups.splice(from, 1);
+  groups.splice(to, 0, moved);
   return { ...cfg, groups };
 };
 
@@ -90,14 +120,28 @@ export function moveSectionTo(cfg, sid, gi, index = null) {
  * `{kind:'pool'} | {kind:'group', gi} | {kind:'hidden'}` —— 拖拽就是把栏目从一个容器挪到另一个。
  */
 /**
- * 栏目现在在哪个容器里，以及在该容器里的位置（拖拽预览要用它做索引换算）。
- * 三种容器都有位置：平铺区的位置来自 order（没排过的按栏目 order 排），分组与隐藏各自是数组。
+ * 容器里**看得见的那几行**，顺序与屏幕上一致。
+ *
+ * 平铺区只能用这个口径：`poolOrder` 是全量顺序（含已被归组 / 隐藏的栏目），
+ * 拿它当行号会与「屏幕上的第几行」差好几格，落点于是莫名其妙地偏。
+ * 拖拽索引、位置换算一律走这里，屏幕上第 i 行就是 rows[i]。
+ */
+export function viewRows(cfg, target, allIds = []) {
+  if (!target) return [];
+  if (target.kind === 'hidden') return [...cfg.hidden];
+  if (target.kind === 'pool') return ungroupedIds(cfg, allIds);
+  return [...(cfg.groups[target.gi]?.sections || [])];
+}
+
+/**
+ * 栏目现在在哪个容器里，以及在该容器里的位置（拖拽要用它做索引换算）。
+ * `index` 是**可见行**里的位置（= viewRows 的下标），不是全量顺序里的位置。
  */
 export function containerOf(cfg, sid, allIds = []) {
   if (cfg.hidden.includes(sid)) return { kind: 'hidden', index: cfg.hidden.indexOf(sid) };
   const gi = cfg.groups.findIndex((g) => g.sections.includes(sid));
   if (gi >= 0) return { kind: 'group', gi, index: cfg.groups[gi].sections.indexOf(sid) };
-  return { kind: 'pool', index: poolOrder(cfg, allIds).indexOf(sid) };
+  return { kind: 'pool', index: ungroupedIds(cfg, allIds).indexOf(sid) };
 }
 
 /**
@@ -112,10 +156,10 @@ export function poolOrder(cfg, allIds) {
 }
 
 /**
- * 悬停行索引 → 真正的插入位。
- * 落点语义是「插到悬停行**之前**」，但被拖走的自身会让位：
- * 同容器内往下拖时悬停行索引要减 1，否则实时预览会比实际落点差一格。
- * `hoveredIndex === null` 表示拖在容器空白处 = 追加到末尾，原样返回。
+ * 指针落位 → 真正的插入位。
+ * 落点语义是「插到第 `hoveredIndex` 行**之前**」，但被拖走的自身会让位：
+ * 同容器内往下拖时索引要减 1，否则结果会比指示线差一格。
+ * `hoveredIndex === null` 表示追加到末尾（空容器），原样返回。
  */
 export function insertionIndex(cfg, sid, target, hoveredIndex, allIds = []) {
   if (hoveredIndex === null || hoveredIndex === undefined) return null;
@@ -123,6 +167,19 @@ export function insertionIndex(cfg, sid, target, hoveredIndex, allIds = []) {
   const sameContainer = target.kind === from.kind && (target.kind !== 'group' || target.gi === from.gi);
   if (sameContainer && typeof from.index === 'number' && from.index < hoveredIndex) return hoveredIndex - 1;
   return hoveredIndex;
+}
+
+/**
+ * 指针 Y 坐标 → 插入位（0..n）。`midYs` 是各行**中线**的 Y，从上到下。
+ *
+ * 只跟中线比：指针越过某行中线才落到它后面。这样行的上下边缘、行与行之间的缝隙、
+ * 容器的内边距都天然归到「最近的一侧」，不需要额外的容错区间——
+ * 而「行内一个落点、行外另一个落点」正是先前边缘处反复横跳的来历。
+ */
+export function slotAt(midYs, y) {
+  let i = 0;
+  while (i < midYs.length && y > midYs[i]) i += 1;
+  return i;
 }
 
 /** 把栏目挪进目标容器（index = 在该容器里的插入位，null = 末尾）。 */
