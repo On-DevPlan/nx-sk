@@ -113,7 +113,9 @@ test('容器模型：containerOf 判定「平铺 / 分组 / 隐藏」，三者�
   let cfg = m.addGroup(m.emptyConfig(), 'A');
   cfg = m.addSection(cfg, 0, 'job');
   assert.deepEqual(m.containerOf(cfg, 'job'), { kind: 'group', gi: 0, index: 0 });
-  assert.deepEqual(m.containerOf(cfg, 'servers', ALL), { kind: 'pool', index: 3 });
+  // 索引是**看得见的行**里的序号：job 在分组里，平铺区第一行是 projects，
+  // 所以 servers 是第 3 行（下标 2），不是全量顺序里的 3
+  assert.deepEqual(m.containerOf(cfg, 'servers', ALL), { kind: 'pool', index: 2 });
 
   cfg = m.moveToContainer(cfg, 'job', { kind: 'hidden' });
   assert.deepEqual(m.containerOf(cfg, 'job'), { kind: 'hidden', index: 0 });
@@ -166,6 +168,66 @@ test('insertionIndex：同容器内往下拖要减 1，跨容器与末尾不减�
   assert.equal(m.insertionIndex(cfg, 'job', { kind: 'group', gi: 0 }, null), null);
 });
 
+
+test('viewRows：容器里「看得见的那几行」，与屏幕顺序一致', () => {
+  let cfg = m.addGroup(m.emptyConfig(), 'A');
+  cfg = m.addSection(cfg, 0, 'job');
+  cfg = m.toggleHidden(cfg, 'secret');
+  assert.deepEqual(m.viewRows(cfg, { kind: 'pool' }, ALL), ['projects', 'campus', 'servers'], '已归组 / 已隐藏的不占平铺的行号');
+  assert.deepEqual(m.viewRows(cfg, { kind: 'group', gi: 0 }, ALL), ['job']);
+  assert.deepEqual(m.viewRows(cfg, { kind: 'hidden' }, ALL), ['secret']);
+  assert.deepEqual(m.viewRows(cfg, { kind: 'group', gi: 9 }, ALL), [], '组不存在 = 空');
+  assert.deepEqual(m.viewRows(cfg, null, ALL), []);
+});
+
+test('平铺区落点：行号必须用「看得见的行」，拿全量顺序当行号会偏好几格', () => {
+  let cfg = m.addGroup(m.emptyConfig(), 'A');
+  cfg = m.addSection(cfg, 0, 'job'); // 屏幕上的平铺 = projects, campus, servers, secret
+  // servers 拖到第 1 行之前 → 插入位 0
+  assert.equal(m.insertionIndex(cfg, 'servers', { kind: 'pool' }, 0, ALL), 0);
+  assert.deepEqual(m.ungroupedIds(m.moveToContainer(cfg, 'servers', { kind: 'pool' }, 0, ALL), ALL),
+    ['servers', 'projects', 'campus', 'secret']);
+
+  // 同容器内往下拖一格：campus（下标 1）落到 servers 之前（slot 2）→ 让位后仍是原位
+  assert.equal(m.insertionIndex(cfg, 'campus', { kind: 'pool' }, 2, ALL), 1);
+
+  // 拖到末尾（slot = 平铺行数）
+  assert.deepEqual(m.ungroupedIds(m.moveToContainer(cfg, 'projects', { kind: 'pool' }, 3, ALL), ALL),
+    ['campus', 'servers', 'secret', 'projects']);
+});
+
+test('slotAt：只跟行中线比 —— 边缘与缝隙都归到最近的一侧', () => {
+  const mids = [14, 42, 70]; // 三行、行高 28，中线 14 / 42 / 70
+  assert.equal(m.slotAt(mids, 0), 0);
+  assert.equal(m.slotAt(mids, 14), 0, '正好压在中线上仍算它之前');
+  assert.equal(m.slotAt(mids, 15), 1);
+  assert.equal(m.slotAt(mids, 28), 1, '行与行的接缝不跳到末尾');
+  assert.equal(m.slotAt(mids, 56), 2);
+  assert.equal(m.slotAt(mids, 999), 3, '最后一行之下 = 末尾');
+  assert.equal(m.slotAt([], 100), 0, '空容器 = 第 0 位');
+});
+
+test('sameStructure：拖出去又拖回原位不算改动（order 里留下的脚印不参与比较）', () => {
+  const a = m.emptyConfig();
+  const back = m.moveToContainer(a, 'servers', { kind: 'pool' }, 3, ALL); // 落到它原来的位置
+  assert.notDeepEqual(back.order, a.order, 'order 里确实被写了完整序列');
+  assert.equal(m.isDirty(back, a), true, 'isDirty 会把它误判成脏');
+  assert.equal(m.sameStructure(back, a, ALL), true, '结构等价 = 没改动');
+
+  assert.equal(m.sameStructure(m.moveToContainer(a, 'servers', { kind: 'pool' }, 0, ALL), a, ALL), false);
+  const g = m.addGroup(a, 'A');
+  assert.equal(m.sameStructure(g, m.renameGroup(g, 0, 'B'), ALL), false, '改名算改动');
+});
+
+test('moveGroupTo：是「挪」不是「交换」', () => {
+  let cfg = m.emptyConfig();
+  for (const t of ['A', 'B', 'C']) cfg = m.addGroup(cfg, t);
+  const titles = (c) => c.groups.map((g) => g.title);
+  assert.deepEqual(titles(m.moveGroupTo(cfg, 0, 2)), ['B', 'C', 'A'], '中间的组各上移一格，不是互换');
+  assert.deepEqual(titles(m.moveGroupTo(cfg, 2, 0)), ['C', 'A', 'B']);
+  assert.equal(m.moveGroupTo(cfg, 1, 1), cfg, '原地不动');
+  assert.equal(m.moveGroupTo(cfg, 0, 9), cfg, '越界原样返回');
+});
 
 test('平铺顺序：拖过之后按 order 排；没排过的按栏目自身顺序跟在后面', () => {
   let cfg = m.emptyConfig();

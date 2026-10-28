@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { SECTION_VIEW, VIEWS } from './registry.js';
 import { Copyable, DialogHost, ErrorBoundary, Toasts } from './components/ui.jsx';
 import { useStore } from './store.jsx';
@@ -14,6 +14,9 @@ function viewFromHash() {
 export default function App() {
   const { boot, bootError, ui, patchUi, reload } = useStore();
   const view = normalizeViewId(ui.view);
+  // 展开着哪个分组入口（按下标记）：**同一时刻只开一个**。
+  // 交给 App 托管而不是各组件各开各的——否则快速划过两个分组会叠出两个菜单。
+  const [openGroup, setOpenGroup] = useState(null);
 
   // 栏目 tab 是**数据驱动**的（bootstrap.sections）；分组与隐藏来自 settings（设置页可配）；
   // 静态 tab 来自前端注册表。渲染顺序：未分组栏目（按 order）→ 分组（按配置顺序）→ 工具（按 order）。
@@ -79,6 +82,11 @@ export default function App() {
     window.location.hash = `#/${id}`;
   };
 
+  // 分组入口的开关（稳定引用：子组件的监听/定时器不会因为父组件重渲染而反复重挂）
+  const openGroupAt = useCallback((gi) => setOpenGroup(gi), []);
+  // 只关**自己**：A 组的「离开延迟关闭」可能晚于 B 组的展开，不加这个判断会把刚开的 B 关掉
+  const closeGroupAt = useCallback((gi) => setOpenGroup((cur) => (cur === gi ? null : cur)), []);
+
   return (
     <div className="app">
       {/* 身份栏：左边只说「我是谁」，右边才是「存储在哪 / 能做什么」。
@@ -112,8 +120,9 @@ export default function App() {
             {typeof t.count === 'number' ? <span className="count">{t.count}</span> : null}
           </button>
         ))}
-        {nav.groups.map((g) => (
-          <GroupTab key={g.title} group={g} currentId={currentId} onGo={go} />
+        {nav.groups.map((g, gi) => (
+          <GroupTab key={gi} gi={gi} group={g} currentId={currentId}
+            open={openGroup === gi} onOpen={openGroupAt} onClose={closeGroupAt} onGo={go} />
         ))}
         {nav.tools.length ? <span className="tabs-sep" aria-hidden /> : null}
         {nav.tools.map((t) => (
@@ -156,51 +165,89 @@ function SectionPane({ sectionId }) {
   return <View sectionId={sectionId} />;
 }
 
+// 悬浮展开的两个时间常数：
+//   OPEN  —— 悬停**意图**：停住才展开。少了这道延迟，鼠标横穿导航栏去点右边的 tab 时，
+//            路过的分组会被顺带弹开又收起，一眼看过去就是「乱闪」。
+//   CLOSE —— 从 pill 划到菜单行要时间（中间还隔着 4px 空隙），太快就是「刚展开就消失」。
+const OPEN_INTENT_MS = 130;
+const CLOSE_DELAY_MS = 180;
+
+/**
+ * 只有**真能悬浮**的设备才走 hover 这条路。
+ * 触屏 tap 会先合成 mouseenter 再发 click：悬停逻辑先把它打开，click 的「切换」
+ * 随即又关上——菜单在手机上等于永远出不来。所以按 `(hover: hover)` 分流。
+ */
+const canHover = () => (typeof window === 'undefined' ? false : window.matchMedia('(hover: hover)').matches);
+
 /**
  * 头部的一个**分组入口**：一个 pill 收拢多个栏目（同域栏目不再挤成一排）。
- * 悬浮展开、点击也能开（触屏没有 hover）；点行切换栏目。
- * 外点关闭用 `pointerdown`——`click` 与触发按钮自己的 onClick 同阶段冒泡，
- * 会「点一下关了又弹开」；受控组件而非纯 CSS hover，是为了能用键盘 Esc 关。
+ * 悬浮展开（带意图延迟）、点击切换（触屏没有 hover，只走这条路）；点行切换栏目。
+ *
+ * 展开态**由 App 托管**（`open` 受控、同一时刻只开一个）：各开各的会在快速划过时
+ * 叠出两个菜单。外点关闭用 `pointerdown`——`click` 与触发按钮自己的 onClick
+ * 同阶段冒泡，会「点一下关了又弹开」；不用纯 CSS hover 而用受控状态，
+ * 是为了能用键盘 Esc 关、也为了「只开一个」这条约束。
  */
-function GroupTab({ group, currentId, onGo }) {
-  const [open, setOpen] = useState(false);
+function GroupTab({ group, gi, currentId, open, onOpen, onClose, onGo }) {
   const ref = useRef(null);
-  // 离开时**延迟**再关：鼠标斜着从 pill 划到菜单行会短暂出界，立刻关就「刚展开就消失」
-  const closeTimer = useRef(null);
+  const intentTimer = useRef(null); // 悬停意图：还没到点就离开 → 撤销
+  const closeTimer = useRef(null); // 离开后的宽限期：划进菜单就撤销
   const active = group.sections.some((s) => s.id === currentId);
   // 角标是**栏目数**，不是条目数之和 —— 组是容器，不是「一条栏目」；展开后每行有自己的条目数
   const sectionCount = groupSectionCount(group);
 
-  const cancelClose = () => {
-    if (closeTimer.current) { clearTimeout(closeTimer.current); closeTimer.current = null; }
+  const drop = (t) => { if (t.current) { clearTimeout(t.current); t.current = null; } };
+  const openNow = () => { drop(intentTimer); drop(closeTimer); onOpen(gi); };
+  const closeNow = () => { drop(intentTimer); drop(closeTimer); onClose(gi); };
+
+  const onEnter = () => {
+    if (!canHover()) return;
+    drop(closeTimer); // 从菜单划回 pill：本来要关，撤销
+    if (open) return;
+    drop(intentTimer);
+    intentTimer.current = setTimeout(() => { intentTimer.current = null; onOpen(gi); }, OPEN_INTENT_MS);
   };
-  const openNow = () => { cancelClose(); setOpen(true); };
-  const closeSoon = () => { cancelClose(); closeTimer.current = setTimeout(() => setOpen(false), 140); };
-  useEffect(() => cancelClose, []);
+  const onLeave = () => {
+    if (!canHover()) return;
+    drop(intentTimer); // 只是路过，别开
+    drop(closeTimer);
+    closeTimer.current = setTimeout(() => { closeTimer.current = null; onClose(gi); }, CLOSE_DELAY_MS);
+  };
+
+  useEffect(() => () => {
+    if (intentTimer.current) clearTimeout(intentTimer.current);
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+  }, []);
+
+  // 已经开着（点开 / 别的组让位 / 换了栏目）→ 清掉还没生效的意图
+  useEffect(() => {
+    if (open && intentTimer.current) { clearTimeout(intentTimer.current); intentTimer.current = null; }
+  }, [open]);
 
   useEffect(() => {
     if (!open) return undefined;
-    const onDown = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
-    const onKey = (e) => { if (e.key === 'Escape') setOpen(false); };
+    const onDown = (e) => { if (ref.current && !ref.current.contains(e.target)) onClose(gi); };
+    const onKey = (e) => { if (e.key === 'Escape') onClose(gi); };
     document.addEventListener('pointerdown', onDown);
     document.addEventListener('keydown', onKey);
     return () => {
       document.removeEventListener('pointerdown', onDown);
       document.removeEventListener('keydown', onKey);
     };
-  }, [open]);
+  }, [open, gi, onClose]);
 
   return (
     <span
       className="tab-group"
       ref={ref}
-      onMouseEnter={openNow}
-      onMouseLeave={closeSoon}
+      onMouseEnter={onEnter}
+      onMouseLeave={onLeave}
     >
       <button
         className={`tab ${active ? 'active' : ''}`}
         aria-expanded={open}
-        onClick={openNow}
+        aria-haspopup="menu"
+        onClick={() => (open ? closeNow() : openNow())}
         title={`${group.title}：${sectionCount} 个栏目`}
       >
         {group.title}
@@ -214,7 +261,7 @@ function GroupTab({ group, currentId, onGo }) {
               key={s.id}
               role="menuitem"
               className={`tab-menu-row ${s.id === currentId ? 'current' : ''}`}
-              onClick={() => { cancelClose(); setOpen(false); onGo(s.id); }}
+              onClick={() => { closeNow(); onGo(s.id); }}
             >
               <span className="grow nowrap">{s.title}</span>
               {typeof s.count === 'number' ? <span className="count">{s.count}</span> : null}

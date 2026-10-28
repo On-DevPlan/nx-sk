@@ -106,6 +106,11 @@ nav.tabs {
   border-top: 4px solid var(--mid);
 }
 .tab-group .tab.active .caret { border-top-color: var(--ink); }
+/* 展开时三角翻上去：开没开一眼可辨，不必等菜单出现才知道点中了。
+   只动 transform，不改布局（0×0 的三角绕中心转）。 */
+.tab-group .caret { transition: transform .12s ease; }
+.tab-group .tab[aria-expanded="true"] .caret { border-top-color: var(--ink); transform: rotate(180deg); }
+@media (prefers-reduced-motion: reduce) { .tab-group .caret { transition: none; } }
 /* 上下列表：与面板同一套立体语言（单层 relief，别叠成岛屿） */
 .tab-menu {
   position: absolute; top: calc(100% + 4px); left: 0; z-index: 40;
@@ -512,8 +517,13 @@ a.file-name:hover { text-decoration: underline; }
 /* 拖拽落点：一眼看出「松手会放到这儿」 */
 .nav-pool.drop-target, .nav-group.drop-target { outline: 2px dashed var(--ink); outline-offset: -2px; background: var(--soft); }
 .nav-row.dragging { opacity: .45; }
-/* 落点表达交给实时预览本身：被拖的行已停在新位置（.dragging 半透明），
-   再叠一条"悬停行高亮"反而会和预览里的位置对不上（索引不同源）。 */
+/* 落点指示线：inset 阴影压在行的上/下边，**不占布局**。
+   换成「插一个占位元素」的话，列表会因为多出那条线而整体位移，指针下的行随之变，
+   落点又重算——又回到抖的老路。 */
+.nav-row.ins-before { box-shadow: inset 0 2px 0 var(--ink); }
+.nav-row.ins-after { box-shadow: inset 0 -2px 0 var(--ink); }
+/* 拖动期间列表是静止的：行按原样待在原地（被拖的那行半透明），
+   所以这里不需要「悬停行高亮」——它只会和指示线抢注意力。 */
 .nav-row.is-hidden .name { color: var(--mid); }
 
 /* 容器内的行列表：行本身已有 1px 底线，这里只做包裹 */

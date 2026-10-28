@@ -36,7 +36,9 @@ export default function SettingsView() {
   useEffect(() => { load(); }, [load]);
 
   const problems = useMemo(() => (form ? nav.validate(navCfg, sectionIds) : []), [navCfg, sectionIds, form]);
-  const dirty = !!baseline && (nav.isDirty(navCfg, baseline.navCfg) || nav.isDirty(form, baseline.form));
+  // 导航按「结构」判脏：拖出去又拖回原位不算改动（order 里会留下一串脚印，但不影响长相）；
+  // 其余设置项逐键比
+  const dirty = !!baseline && (!nav.sameStructure(navCfg, baseline.navCfg, sectionIds) || nav.isDirty(form, baseline.form));
 
   // 一次保存全部设置：标量项 + 导航（分组 / 隐藏）。分成两块各存各的，
   // 用户就得记住「刚才那块存了没」——统一保存 + 统一的脏值提示才是清晰的。

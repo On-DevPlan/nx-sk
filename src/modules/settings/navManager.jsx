@@ -7,15 +7,21 @@
 //
 // **受控组件**：数据（cfg）与保存都在设置页；这里只管画与调 onChange。
 // 所有数据操作走 navModel 的纯函数（可单测），组件里不做状态体操。
-import { useMemo, useState } from 'react';
+//
+// **拖动时列表本身不动**。早前这里是「实时预览」：拖动过程中就把被拖的行挪到落点上。
+// 那条路必然抖，原因很硬——预览一挪行，指针底下的元素就换了、下面的容器也整体位移一行
+// （28px），dragover 于是算出另一个落点，再挪，再算……自己推自己，屏幕上就是闪屏；
+// 跨容器时位移最大，闪得最厉害。
+// 现在改为：行按**原样**待在原地（被拖的那行半透明），落点用一条**不占布局**的指示线
+// （inset 阴影压在行边上）表示。列表在拖动期间是静止的 → 指针与行的对应关系恒定，
+// 落点只随指针单调变化，怎么晃都不会跳。松手一次性提交，结果就是指示线指的位置。
+import { useState } from 'react';
 import * as nav from '../../web/frontend/components/navModel.js';
 
 export default function NavManager({ sections, value, onChange }) {
   const [drag, setDrag] = useState(null); // { kind:'section', sid } | { kind:'group', gi }
-  const [over, setOver] = useState(null); // { key, index }：当前拖到哪个容器的第几位
+  const [over, setOver] = useState(null); // { key, index }：落在哪个容器的第几行之前；组合 { key, group:true }
 
-  // 注意顺序：preview 的依赖里用到 allIds / preview 的计算也用到预览配置，
-  // const 声明晚于使用就是 TDZ 崩（"Cannot access … before initialization"）
   const allIds = sections.map((s) => s.id);
   const sectionOf = (id) => sections.find((s) => s.id === id) || null;
 
@@ -26,62 +32,91 @@ export default function NavManager({ sections, value, onChange }) {
     return Number.isFinite(gi) ? { kind: 'group', gi } : null;
   };
 
-  /**
-   * **实时预览**：拖动过程中就把落点算出来渲染，松手前就看到最终顺序（所见即所得）。
-   * 插入位由 nav.insertionIndex 换算（同容器内往下拖要让位）——那条逻辑在模型里，有单测。
-   */
-  const preview = useMemo(() => {
-    if (drag?.kind !== 'section' || !over) return value;
-    const target = keyToTarget(over.key);
-    if (!target) return value;
-    const index = nav.insertionIndex(value, drag.sid, target, over.index, allIds);
-    return nav.moveToContainer(value, drag.sid, target, index, allIds);
-  }, [value, drag, over, allIds]);
-
   const draggingSid = drag?.kind === 'section' ? drag.sid : null;
   // 平铺容器的内容与顺序都来自模型：显式排过的（order）优先，其余按栏目自身顺序
-  const pool = nav.ungroupedIds(preview, allIds);
+  const pool = nav.ungroupedIds(value, allIds);
 
   const endDrag = () => { setDrag(null); setOver(null); };
 
-  /** 松手即提交预览里的顺序（预览就是结果，不再重新算一遍）。 */
-  const commit = () => { if (preview !== value) onChange(preview); endDrag(); };
-
   // 只在落点**真的变了**才 setState：dragover 每次鼠标移动都触发，
-  // 不做这层去重就是每次移动都重排一遍整页 → 抖
+  // 不做这层去重就是每次移动都重算一遍整页 → 抖
   const setOverIfChanged = (next) => setOver((o) => (o && o.key === next.key && o.index === next.index ? o : next));
 
-  // 容器外壳：接住「拖到空白处 = 追加到末尾」，并显示落点高亮
+  /**
+   * 指针在容器里落在第几行之前（0..n）。
+   * 行位置每帧现取（行高/换行会随窗口变），判据交给 nav.slotAt：只比**中线**。
+   * 于是行的上下边缘、行间缝隙、容器内边距都归到最近的一侧，不再出现
+   * 「压在行上是一个落点、挪进缝隙变成追加到末尾」这种整列表跳位。
+   */
+  const slotOf = (el, y) => nav.slotAt(
+    [...el.querySelectorAll('[data-nav-row]')].map((row) => {
+      const r = row.getBoundingClientRect();
+      return r.top + r.height / 2;
+    }),
+    y,
+  );
+
+  /** 松手：按当前指示线落位。结构没变就不提交（否则拖一下就提示「有未保存的改动」）。 */
+  const commit = () => {
+    const target = over ? keyToTarget(over.key) : null;
+    if (drag?.kind === 'group') {
+      // 分组只能落到分组卡上（落到平铺 / 隐藏里没有意义，那两处不是「第几个分组」）
+      if (target?.kind === 'group') {
+        const next = nav.moveGroupTo(value, drag.gi, target.gi);
+        if (next !== value) onChange(next);
+      }
+      endDrag();
+      return;
+    }
+    if (draggingSid && target) {
+      const index = nav.insertionIndex(value, draggingSid, target, over.index, allIds);
+      const next = nav.moveToContainer(value, draggingSid, target, index, allIds);
+      if (!nav.sameStructure(next, value, allIds)) onChange(next);
+    }
+    endDrag();
+  };
+
+  // 容器：整块都是落点（含空白处 / 说明文字 / 分组头）。
+  // 拖栏目时落点位置由行中线算出；拖分组时整张分组卡都是落点——
+  // 只认那 28px 的分组头的话，手要瞄得很准，松手稍偏就白拖了。
   const zone = (key, base = '') => ({
     className: `${base} ${over?.key === key ? 'drop-target' : ''}`,
-    onDragOver: (e) => { if (draggingSid) { e.preventDefault(); setOverIfChanged({ key, index: null }); } },
-    onDragLeave: () => setOver((o) => (o?.key === key && o.index === null ? null : o)),
+    onDragOver: (e) => {
+      if (drag?.kind === 'group') {
+        if (keyToTarget(key)?.kind !== 'group') { setOver(null); return; }
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        setOverIfChanged({ key, group: true });
+        return;
+      }
+      if (!draggingSid) return;
+      e.preventDefault(); // 不拦就没有 drop
+      e.dataTransfer.dropEffect = 'move';
+      setOverIfChanged({ key, index: slotOf(e.currentTarget, e.clientY) });
+    },
     onDrop: (e) => { e.preventDefault(); commit(); },
   });
 
   /**
-   * 行的落点判定。两条防抖铁律：
-   *   ① 行内事件**就地拦下**（preventDefault + stopPropagation）：一旦冒泡到容器，
-   *      容器会把它当成「拖到空白处」翻成「追加到末尾」——指针正好压在被拖的行上时，
-   *      两个判断来回切，页面就抖。
-   *   ② 插入位取自**原始配置**里的位置（不随预览漂移）+ 指针在上半/下半决定前后。
-   *      若反过来用「预览后的行号」，预览一重排索引就变，等于自己推自己。
+   * 拖起一行。拖影取**整行**而不是那个 10px 的把手——把手小到看不出在拖什么，
+   * 松手前心里没底。setData 是给 Firefox 的：不设就不算启动拖拽。
    */
-  const rowProps = (key, sid) => ({
-    onDragOver: (e) => {
-      if (!draggingSid) return;
-      e.preventDefault();
-      e.stopPropagation();
-      if (draggingSid === sid) return; // 悬停在自己身上：保持当前落点，不重算
-      const rect = e.currentTarget.getBoundingClientRect();
-      const below = e.clientY > rect.top + rect.height / 2;
-      const at = nav.containerOf(value, sid, allIds);
-      const index = (typeof at.index === 'number' ? at.index : 0) + (below ? 1 : 0);
-      setOverIfChanged({ key, index });
-    },
-    onDrop: (e) => { e.preventDefault(); e.stopPropagation(); commit(); },
-    onDragStart: () => setDrag({ kind: 'section', sid }),
-  });
+  const startSectionDrag = (e, sid) => {
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', sid);
+    const row = e.currentTarget.closest('.nav-row');
+    if (row) e.dataTransfer.setDragImage(row, 14, 14);
+    setDrag({ kind: 'section', sid });
+    setOver(null);
+  };
+
+  /** 行的落点指示：落在第 i 行之前画上边，落在末尾画最后一行的下边。 */
+  const markOf = (key, i, n) => {
+    if (over?.key !== key || typeof over.index !== 'number') return '';
+    if (over.index === i) return 'ins-before';
+    if (i === n - 1 && over.index >= n) return 'ins-after';
+    return '';
+  };
 
   return (
     <div className="stack">
@@ -90,10 +125,11 @@ export default function NavManager({ sections, value, onChange }) {
         <div className="hint">平铺：不进分组也不隐藏的栏目，直接显示在头部（拖到这里 = 移出分组 / 取消隐藏）</div>
         {pool.length ? (
           <div className="nav-list">
-            {pool.map((sid) => (
+            {pool.map((sid, i) => (
               <SectionRow key={sid} section={sectionOf(sid)} sid={sid}
                 dragging={draggingSid === sid}
-                {...rowProps('pool', sid)}
+                mark={markOf('pool', i, pool.length)}
+                onDragStart={(e) => startSectionDrag(e, sid)}
                 onDragEnd={endDrag}
                 actions={null} />
             ))}
@@ -102,19 +138,17 @@ export default function NavManager({ sections, value, onChange }) {
       </section>
 
       {/* ② 分组：组名可改、组间可拖把手换位 */}
-      {preview.groups.map((g, gi) => (
+      {value.groups.map((g, gi) => (
         <section key={gi} {...zone(`g${gi}`, 'card nav-group')}>
-          <div
-            className={`colhead ${over?.key === `g${gi}` && over.group ? 'drop-target' : ''}`}
-            onDragOver={(e) => { if (drag?.kind === 'group') { e.preventDefault(); setOver({ key: `g${gi}`, group: true }); } }}
-            onDrop={(e) => {
-              e.preventDefault();
-              if (drag?.kind === 'group' && drag.gi !== gi) onChange(nav.moveGroup(value, drag.gi, gi - drag.gi));
-              endDrag();
-            }}
-          >
+          <div className={`colhead ${over?.key === `g${gi}` && over.group ? 'drop-target' : ''}`}>
             <span className="grip" title="拖动调整分组顺序" draggable
-              onDragStart={() => setDrag({ kind: 'group', gi })} onDragEnd={endDrag} />
+              onDragStart={(e) => {
+                e.dataTransfer.effectAllowed = 'move';
+                e.dataTransfer.setData('text/plain', `g${gi}`);
+                setDrag({ kind: 'group', gi });
+                setOver(null);
+              }}
+              onDragEnd={endDrag} />
             <input className="nav-title" placeholder="组名，如「求职」" value={g.title}
               onChange={(e) => onChange(nav.renameGroup(value, gi, e.target.value))} />
             <span className="muted">{g.sections.length} 个栏目</span>
@@ -124,10 +158,11 @@ export default function NavManager({ sections, value, onChange }) {
           </div>
           {g.sections.length ? (
             <div className="nav-list">
-              {g.sections.map((sid) => (
+              {g.sections.map((sid, i) => (
                 <SectionRow key={sid} section={sectionOf(sid)} sid={sid}
                   dragging={draggingSid === sid}
-                  {...rowProps(`g${gi}`, sid)}
+                  mark={markOf(`g${gi}`, i, g.sections.length)}
+                  onDragStart={(e) => startSectionDrag(e, sid)}
                   onDragEnd={endDrag}
                   actions={<button className="btn small ghost" onClick={() => onChange(nav.ungroupSection(value, sid))}>移出</button>} />
               ))}
@@ -140,15 +175,16 @@ export default function NavManager({ sections, value, onChange }) {
       <section {...zone('hidden', 'card nav-group nav-hidden')}>
         <div className="colhead">
           隐藏
-          <span className="muted">{preview.hidden.length} 个栏目</span>
+          <span className="muted">{value.hidden.length} 个栏目</span>
           <span className="right muted">不进头部 · #/栏目id 直达仍可用</span>
         </div>
-        {preview.hidden.length ? (
+        {value.hidden.length ? (
           <div className="nav-list">
-            {preview.hidden.map((sid) => (
+            {value.hidden.map((sid, i) => (
               <SectionRow key={sid} section={sectionOf(sid)} sid={sid}
                 dragging={draggingSid === sid}
-                {...rowProps('hidden', sid)}
+                mark={markOf('hidden', i, value.hidden.length)}
+                onDragStart={(e) => startSectionDrag(e, sid)}
                 onDragEnd={endDrag}
                 actions={<button className="btn small ghost" onClick={() => onChange(nav.ungroupSection(value, sid))}>移出</button>} />
             ))}
@@ -165,9 +201,9 @@ export default function NavManager({ sections, value, onChange }) {
 }
 
 /** 一行栏目：把手（拖）+ 名称 + 计数 + 容器自己的动作（移出 / 无）。 */
-function SectionRow({ section, sid, dragging, actions, onDragStart, onDragEnd, onDragOver, onDrop }) {
+function SectionRow({ section, sid, dragging, mark, actions, onDragStart, onDragEnd }) {
   return (
-    <div className={`row nav-row ${dragging ? 'dragging' : ''}`} onDragOver={onDragOver} onDrop={onDrop}>
+    <div className={`row nav-row ${dragging ? 'dragging' : ''} ${mark}`} data-nav-row data-sid={sid}>
       <span className="grip" title="拖动：换位 / 换容器" draggable onDragStart={onDragStart} onDragEnd={onDragEnd} />
       <span className="name">{section ? section.title : `栏目已删除（${sid}）`}</span>
       <span className="desc">{section ? `${section.entries} 条` : '保存前请移出'}</span>
@@ -175,4 +211,3 @@ function SectionRow({ section, sid, dragging, actions, onDragStart, onDragEnd, o
     </div>
   );
 }
-
