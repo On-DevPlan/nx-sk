@@ -160,7 +160,7 @@ nx-sk section dump <栏目> --json         # 完整度与未填清单（袋子�
 ## 常见坑
 
 - **同名条目**：一个栏目里两条同名时 `entry get` 会报 CONFLICT，用 id 定位。
-- **袋里没有 source 字段**：老栏目是模板实例化时建的，source 字段是后加的 → `nx-sk source ensure` 补齐。
+- **袋里没有 source 字段**：老栏目是模板实例化时建的，source 字段是后加的 → 读一次 store 即自愈，或显式 `nx-sk source ensure` 补齐。
 - **KV 栏目（密钥）没有袋**：它的形状就是一行一个键值对，加字段会散掉。密钥走 `nx-sk key set`。
 - **`--mapped` 是数组**：可以 `--mapped a,b`（逗号分隔），也可以重复给。
 - **别用 `entry update --set source=...` 手写整袋 JSON**：那是给程序用的口子，人用 `source add` 更安全（少写错一个括号就毁掉整袋）。

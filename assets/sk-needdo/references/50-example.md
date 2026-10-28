@@ -37,7 +37,7 @@ nx-sk section list --json
   类型    select   必填  待办 / 资料
   截止    date     可选  过期就不显眼
   正文    md       可选  细节、链接、截图
-  来源    text     可选  贴来的 / 链接（去重用）
+  （原始资料 source 每个栏目自带，不用设计；杂乱原文先丢袋里）
 ```
 
 `groups.json`：
@@ -46,18 +46,19 @@ nx-sk section list --json
 [{ "id": "main", "title": "基本信息" }, { "id": "detail", "title": "细节" }]
 ```
 
-`fields.json`：
+`fields.json`（只写「整理之后」的字段；`source` 袋建栏目时自动附在末尾，不用写）：
 
 ```json
 [
   { "key": "name", "label": "名称", "type": "text", "group": "main" },
   { "key": "kind", "label": "类型", "type": "select", "group": "main", "options": ["待办", "资料"] },
   { "key": "due", "label": "截止", "type": "date", "group": "main", "fill": "optional" },
-  { "key": "body", "label": "正文", "type": "md", "group": "detail", "fill": "optional" },
-  { "key": "source", "label": "来源", "type": "text", "group": "detail", "fill": "optional",
-    "hint": "贴来的 / 链接 / 文件路径，用于去重" }
+  { "key": "body", "label": "正文", "type": "md", "group": "detail", "fill": "optional" }
 ]
 ```
+
+> 去重 / 来源留痕不再单建 text 字段：原始内容原样进自带的「原始资料」袋，
+> 袋里每条自带 `addedAt` 与可标 `mapped`（已整理到哪），重跑时按袋查即可。
 
 ## 第 3 步：拍板
 
@@ -91,8 +92,7 @@ nx-sk section update memo --titleField name
   "name": "季度复盘会",
   "kind": "待办",
   "due": "2026-10-19",
-  "body": "明天下午三点，3 楼会议室。\n\n- [ ] 带 Q4 预算表",
-  "source": "贴来的 2026-10-18"
+  "body": "明天下午三点，3 楼会议室。\n\n- [ ] 带 Q4 预算表"
 }
 ```
 
@@ -102,9 +102,15 @@ nx-sk section update memo --titleField name
 {
   "name": "Q4 计划",
   "kind": "资料",
-  "body": "https://example.com/2026-q4-plan",
-  "source": "链接 2026-10-18"
+  "body": "https://example.com/2026-q4-plan"
 }
+```
+
+原始的四段输入在整理前先入袋（以第 1、4 条为例）：
+
+```bash
+nx-sk source add <条目id> --text "明天下午三点在 3 楼会议室开季度复盘会，记得带 Q4 预算表"
+nx-sk source add <条目id> --url "https://example.com/2026-q4-plan"
 ```
 
 ```bash

@@ -213,5 +213,7 @@ test('normalizeSection 收口自愈：groups 为空但字段有引用时，读�
     entries: [],
   });
   const sec = store.sections.find((s) => s.id === 'servers');
-  assert.deepEqual(sec.groups.map((g) => g.id), ['basic']);
+  assert.deepEqual(sec.groups.map((g) => g.id), ['basic', 'source']);
+  // 自带的「原始资料」袋也一并补齐
+  assert.ok(sec.fields.some((f) => f.type === 'source' && f.key === 'source'));
 });

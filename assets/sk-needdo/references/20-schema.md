@@ -3,6 +3,10 @@
 字段台账（section.fields）是**数据不是代码**：它随栏目存在 store 里，面板、CLI、agent 看到的是同一份。
 所以字段一旦写下去，就是"这个栏目长什么样"的长期承诺。
 
+> **例外（不用设计、也删不掉）**：每个非 KV 栏目都自带 `source` 字段（label「原始资料」，
+> 独立一组，`fill: optional`）——杂乱输入先原样入袋、再整理，它是结构的一部分。
+> 设计字段时不要重复加「来源/原文/备注」袋；老栏目缺袋跑 `nx-sk source ensure`。
+
 ## 先定 titleField
 
 `section add` 一定要带 `--titleField <字段key>`（和 `--titleLabel <中文名>`）：
@@ -102,7 +106,7 @@ nx-sk section add memo --title "备忘" --titleField name --titleLabel 名称 \
   类型      select   必填   待办 / 通知 / 资料
   截止      date     可选   过期就不显眼
   正文      md       可选   截图、步骤、清单
-  来源      text     可选   贴来的 / 链接 / 文件路径（去重用）
+  原始资料  source   自带   乱输入先入袋（不计完整度，不用设计）
 ```
 
 用户看得懂这张表，看不懂 JSON。
