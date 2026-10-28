@@ -517,16 +517,31 @@ export const SOURCE_FIELD = Object.freeze({
 
 export const SOURCE_GROUP = Object.freeze({ id: 'source', title: '原始资料' });
 
+/**
+ * 「原始资料」字段的**唯一内置规则**：每个非 KV 栏目都自带 source 袋，缺了就补。
+ *
+ * 与 `syncSectionGroups` 同属「栏目不变量」，三处入口（instantiateTemplate /
+ * addSection / normalizeSection）都只调它，内置规则不可能有第二份——
+ * 这正是「每个结构自带」的含义：不是模板里的一个可选字段，而是**结构本身的一部分**。
+ *
+ * @param {{kv?: boolean}} [opts] KV 表不加：它的形状就是「一行一个键值对」，多一个字段就散了
+ */
+export function ensureSourceBuiltin(groups, fields, { kv } = {}) {
+  const outGroups = [...(groups || [])];
+  const outFields = [...(fields || [])];
+  if (kv === true) return { groups: outGroups, fields: outFields };
+  if (!outGroups.some((g) => g.id === SOURCE_GROUP.id)) outGroups.push({ ...SOURCE_GROUP });
+  if (!outFields.some((f) => f.key === SOURCE_FIELD.key)) outFields.push({ ...SOURCE_FIELD });
+  return { groups: outGroups, fields: outFields };
+}
+
 export function instantiateTemplate(templateId, overrides = {}) {
   const t = getTemplate(templateId);
   if (!t) return null;
-  const groups = t.groups.map((g) => ({ ...g }));
-  const fields = t.fields.map((x) => ({ ...x }));
-  // KV 表不加：它的形状就是「一行一个键值对」，多一个字段就散了
-  if (t.kv !== true) {
-    if (!groups.some((g) => g.id === SOURCE_GROUP.id)) groups.push({ ...SOURCE_GROUP });
-    if (!fields.some((f) => f.key === SOURCE_FIELD.key)) fields.push({ ...SOURCE_FIELD });
-  }
+  const baseGroups = t.groups.map((g) => ({ ...g }));
+  const baseFields = t.fields.map((x) => ({ ...x }));
+  // 每个非 KV 栏目都自带「原始资料」袋（规则只此一份，见 ensureSourceBuiltin）
+  const { groups, fields } = ensureSourceBuiltin(baseGroups, baseFields, { kv: t.kv });
   return {
     id: overrides.id,
     title: overrides.title || t.label,

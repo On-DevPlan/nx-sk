@@ -33,8 +33,8 @@ nx-sk entry list --section memo --q "值班" --json   # 先查
 nx-sk entry update <条目id> --data @item-1.json     # 有就改
 ```
 
-**幂等靠两件事**：标题稳定 + 一个 `source` 字段（记"贴来的/链接/文件路径/日期"）。
-重跑时先按 source 查，命中就 update，没命中才 add。
+**幂等靠两件事**：标题稳定 + 自带的「原始资料」袋（原文入袋，袋里每条带 `addedAt`、
+可标 `mapped`）。重跑时先按袋里的内容查（`source get`），命中就 update，没命中才 add。
 
 ## 附件：先入库，再引用
 

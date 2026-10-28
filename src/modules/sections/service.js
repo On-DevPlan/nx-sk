@@ -3,7 +3,7 @@
 import { loadStore, mutateStore } from '../../core/store.js';
 import { assertFieldKey, assertSafeId } from '../../core/paths.js';
 import { badInput, blocked, conflict, notFound } from '../../core/errors.js';
-import { FILL_POLICIES, FIELD_TYPES, SOURCE_FIELD, SOURCE_GROUP, findSection, getTemplate, groupFields, instantiateTemplate, mergeTemplate, sectionNames, syncSectionGroups, templateSummaries } from '../../core/fields.js';
+import { FILL_POLICIES, FIELD_TYPES, ensureSourceBuiltin, findSection, getTemplate, groupFields, instantiateTemplate, mergeTemplate, sectionNames, syncSectionGroups, templateSummaries } from '../../core/fields.js';
 import { dumpSection, formatValue } from '../../core/render.js';
 import { sensitiveViewer } from '../../core/vault.js';
 import { nowIso } from '../../core/ids.js';
@@ -130,8 +130,9 @@ export async function addSection({ id, title, template, description, order, fiel
     }
     draft = t;
   } else {
-    // 自定义栏目也自带「原始资料」袋：每个栏目都该有乱入的地方（见 core/fields.js 的说明）
-    draft = { id: sid, title: title || sid, description: description || '', order: Number.isFinite(order) ? order : 50, template: null, kv: false, titleField: null, titleLabel: '名称', groups: [{ ...SOURCE_GROUP }], fields: [{ ...SOURCE_FIELD }] };
+    // 自定义栏目。groups/fields 先空着——用户的 --fields/--groups 应用完，
+    // 再由 ensureSourceBuiltin 统一补上自带的「原始资料」袋（见下方）。
+    draft = { id: sid, title: title || sid, description: description || '', order: Number.isFinite(order) ? order : 50, template: null, kv: false, titleField: null, titleLabel: '名称', groups: [], fields: [] };
   }
   if (Array.isArray(groups)) draft.groups = groups.map(validateGroupDef);
   if (Array.isArray(fields)) {
@@ -141,6 +142,11 @@ export async function addSection({ id, title, template, description, order, fiel
   // 与 normalize 同一条规则：--fields 引用了 --groups 没声明的分组时自动补上，
   // 否则面板按声明数组渲染会整组消失（CLI 从字段推导所以看不出来）。
   draft.groups = syncSectionGroups(draft.groups, draft.fields);
+  // 「每个结构自带」：无论模板实例还是自定义栏目（也无论是否传了 --fields/--groups），
+  // 非 KV 栏目都自带「原始资料」袋——杂乱资料先原样入袋，再按字段字典整理。
+  const ensured = ensureSourceBuiltin(draft.groups, draft.fields, { kv: draft.kv });
+  draft.groups = ensured.groups;
+  draft.fields = ensured.fields;
   draft.createdAt = nowIso();
   draft.updatedAt = draft.createdAt;
 

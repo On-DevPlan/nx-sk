@@ -4,7 +4,7 @@ import fsp from 'node:fs/promises';
 import { join } from 'node:path';
 import { displayPath, migrationDir, storeFile } from './paths.js';
 import { ensureDir, pathExists, writeAtomic } from './fsx.js';
-import { instantiateTemplate, seedSections, syncSectionGroups } from './fields.js';
+import { ensureSourceBuiltin, instantiateTemplate, seedSections, syncSectionGroups } from './fields.js';
 import { normalizeFileRecord } from './attachments.js';
 import { nowIso, stamp } from './ids.js';
 
@@ -55,6 +55,11 @@ function normalizeSection(raw) {
   // 会整组消失（真实事故：servers 栏目 groups 为空，Web 端白屏而 CLI 正常）。
   // 放在 normalize 收口——每条读写路径都会过这里，存量数据读一次就自愈。
   out.groups = syncSectionGroups(out.groups, out.fields);
+  // 「原始资料」袋是每个非 KV 栏目自带的结构（不是可选字段）：存量栏目缺了
+  // 读一次就补上，与上面的分组自愈同一条收口路径。规则只此一份，见 ensureSourceBuiltin。
+  const ensured = ensureSourceBuiltin(out.groups, out.fields, { kv: out.kv });
+  out.groups = ensured.groups;
+  out.fields = ensured.fields;
   return out;
 }
 
