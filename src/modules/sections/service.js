@@ -4,7 +4,8 @@ import { loadStore, mutateStore } from '../../core/store.js';
 import { assertFieldKey, assertSafeId } from '../../core/paths.js';
 import { badInput, blocked, conflict, notFound } from '../../core/errors.js';
 import { FILL_POLICIES, FIELD_TYPES, ensureSourceBuiltin, findSection, getTemplate, groupFields, instantiateTemplate, mergeTemplate, sectionNames, syncSectionGroups, templateSummaries } from '../../core/fields.js';
-import { dumpSection, formatValue } from '../../core/render.js';
+import { computeTable, sanitizeColumns, sanitizeTotals } from '../../shared/table.js';
+import { completeness, dumpSection, formatValue } from '../../core/render.js';
 import { sensitiveViewer } from '../../core/vault.js';
 import { nowIso } from '../../core/ids.js';
 
@@ -48,7 +49,7 @@ export function validateFieldDef(raw, { allowGroup } = {}) {
     group: String(raw.group || allowGroup || 'other'),
   };
   // entrylist（结构清单）的列就是它自己的小字典：不声明列就没法渲染、没法校验。
-  // 其它类型声明 fields 一律拒绝——字典里不该有「定义了也用不上」的键。
+  // 其它类型声明 fields/columns 一律拒绝——字典里不该有「定义了也用不上」的键。
   if (type === 'entrylist') {
     if (!Array.isArray(raw.fields) || !raw.fields.length) {
       throw badInput(`字段 ${key} 是 entrylist（结构清单），必须声明子字段 fields。`
@@ -65,8 +66,47 @@ export function validateFieldDef(raw, { allowGroup } = {}) {
       if (s.hint) out.hint = String(s.hint);
       return out;
     });
-  } else if (raw.fields !== undefined) {
-    throw badInput(`字段 ${key} 不是 entrylist，不能声明子字段 fields（只有结构清单有清单列）`);
+  } else if (type === 'table') {
+    // 表格：**结构归数据**。字段定义里只放「初始列」（新建条目时表格长什么样），
+    // 条目自己的 columns 才是权威 —— 编辑时加一列不必回去改所有条目共用的 schema。
+    // 所以 columns 在这里是**可选**的；给了就要合法（key 唯一、下拉有选项、公式能编译）。
+    const cols = Array.isArray(raw.columns) ? raw.columns : raw.fields;
+    if (raw.fields !== undefined && raw.columns !== undefined) {
+      throw badInput(`字段 ${key}：columns 与 fields 是同一个东西的两种写法，只留一个。`);
+    }
+    if (cols !== undefined) {
+      if (!Array.isArray(cols)) throw badInput(`字段 ${key} 的 columns 必须是数组`);
+      // 空数组 = 不设初始列（表格完全由数据自己定义）。不落盘，免得字典里多一个空键。
+      if (cols.length) {
+        try {
+          def.columns = sanitizeColumns(cols, { where: `字段 ${key}` });
+        } catch (e) {
+          throw badInput(e.message);
+        }
+      }
+    }
+    if (raw.totals !== undefined) {
+      // 没有初始列时没法核对 agg 里的列名（列在数据里）；这时先原样存下，
+      // 渲染时对不上的格子会自己报「没有这一列」，不会静默算错。
+      if (!Array.isArray(raw.totals)) throw badInput(`字段 ${key} 的 totals 必须是数组`);
+      if (def.columns?.length) {
+        try {
+          def.totals = sanitizeTotals(raw.totals, def.columns, { where: `字段 ${key}` });
+        } catch (e) {
+          throw badInput(e.message);
+        }
+      } else {
+        def.totals = raw.totals.map((t) => ({ ...t }));
+      }
+    }
+    if (raw.summary === false) def.summary = false;
+    if (raw.maxRows !== undefined) {
+      const n = Number(raw.maxRows);
+      if (!Number.isFinite(n) || n <= 0) throw badInput(`字段 ${key} 的 maxRows 要是正数`);
+      def.maxRows = Math.floor(n);
+    }
+  } else if (raw.fields !== undefined || raw.columns !== undefined) {
+    throw badInput(`字段 ${key} 不是 entrylist / table，不能声明 ${raw.columns !== undefined ? 'columns' : 'fields'}（只有清单类字段有列）`);
   }
   if (raw.hint) def.hint = String(raw.hint);
   if (Array.isArray(raw.options) && raw.options.length) def.options = raw.options.map(String);
@@ -331,6 +371,15 @@ export async function dump(ref, { mask } = {}) {
   const mine = store.entries.filter((e) => e.section === s.id);
   const decrypt = await sensitiveViewer(s, mine);
   const data = dumpSection(s, store.entries, { mask: !!mask, decrypt });
+  // 表格字段的**现值**：计算列与统计行都在读的时候现算（不落盘），
+  // 所以 `section dump --json` 拿到的合计与面板上看到的合计是同一个数。
+  for (const e of data.entries) {
+    const tables = {};
+    for (const f of s.fields) {
+      if (f.type === 'table') tables[f.key] = computeTable(f, e.values?.[f.key]);
+    }
+    if (Object.keys(tables).length) e.tables = tables;
+  }
   return {
     ...data,
     generatedAt: nowIso(),
@@ -407,6 +456,114 @@ function driftNote(changed, { indent = '' } = {}) {
     `${shown.join('\n')}\n` +
     `${indent}要换成模板的新定义：section update <栏目> --fields '<整份字段数组>'（或先 --remove-field 再 --add-field）。`
   );
+}
+
+/**
+ * 栏目树：栏目 → 条目的一层结构，供面板的「栏目管理」用。
+ *
+ * 为什么不让面板逐个 `section dump` 自己拼：那样 N 个栏目就是 N 次请求，
+ * 而且面板会拿到每个条目的**全部字段值**——树只需要名字和完整度，多传的都是噪音。
+ * 这里一次给齐：栏目摘要 + 它的条目索引（id / 名称 / 完整度）。
+ */
+export async function tree() {
+  const store = await loadStore();
+  return {
+    count: store.sections.length,
+    totalEntries: store.entries.length,
+    sections: store.sections.map((s) => {
+      const mine = store.entries.filter((e) => e.section === s.id);
+      return {
+        ...summarize(store, s),
+        // entryList 而不是 entries：summarize 里的 entries 已经是**数量**，
+        // 两个字段同名会让「3 条」和「三条记录」在某处悄悄互换。
+        entryList: mine.map((e) => {
+          const c = completeness(s, e);
+          return {
+            id: e.id,
+            title: e.title,
+            ratio: c.ratio,
+            filled: c.filled,
+            total: c.total,
+            updatedAt: e.updatedAt || null,
+          };
+        }),
+      };
+    }),
+  };
+}
+
+/**
+ * 批量删栏目 —— 语义等同「删文件夹」：连带里面的条目。
+ *
+ * 三条与单个删除不同的地方，都是「一批」带来的：
+ *   - **要么全删要么全不动**：有任何一个栏目非空且没给 force，整批拒绝（不删一半）；
+ *   - **找不到的记在 missing 里**，其余照删（status: 'partial'），因为批量删除时
+ *     「另一个标签页刚删掉一个」比整批失败更常见；
+ *   - 重复的引用（同时给了 id 和标题）去重，不会删第二遍。
+ */
+export async function removeMany(refs, { force, 'dry-run': dryRun } = {}) {
+  const list = (Array.isArray(refs) ? refs : String(refs ?? '').split(','))
+    .map((x) => String(x ?? '').trim()).filter(Boolean);
+  if (!list.length) throw badInput('没有要删的栏目（用 --ids 或位置参数给 id / 标题，逗号分隔）');
+
+  const store = await loadStore();
+  const targets = [];
+  const missing = [];
+  for (const ref of list) {
+    const s = findSection(store, ref);
+    if (!s) { missing.push(ref); continue; }
+    if (!targets.some((t) => t.id === s.id)) targets.push(s);
+  }
+  if (!targets.length) {
+    throw notFound(`这些栏目都不存在: ${list.join(', ')} —— 现有: ${sectionNames(store)}`);
+  }
+
+  const owned = (s) => store.entries.filter((e) => e.section === s.id);
+  const totalEntries = targets.reduce((n, s) => n + owned(s).length, 0);
+  const nonEmpty = targets.filter((s) => owned(s).length);
+  if (nonEmpty.length && !force) {
+    throw blocked(
+      `这批里有 ${nonEmpty.length} 个栏目非空（共 ${totalEntries} 条条目），删除会一并删掉：`
+      + `${nonEmpty.slice(0, 5).map((s) => `${s.title}(${owned(s).length})`).join('、')}`
+      + `${nonEmpty.length > 5 ? ' 等' : ''}。确认就加 --force。`,
+    );
+  }
+
+  const plan = targets.map((s) => ({ id: s.id, title: s.title, entries: owned(s).length }));
+  if (dryRun) return { status: 'skipped', dryRun: true, wouldRemove: plan, count: plan.length, missing };
+
+  await mutateStore((st) => {
+    const ids = new Set(targets.map((t) => t.id));
+    st.sections = st.sections.filter((x) => !ids.has(x.id));
+    st.entries = st.entries.filter((e) => !ids.has(e.section));
+  });
+  return {
+    status: missing.length ? 'partial' : 'ok',
+    removed: plan,
+    count: plan.length,
+    removedEntries: totalEntries,
+    missing,
+  };
+}
+
+export function renderSectionTree(d) {
+  const lines = [`${d.count} 个栏目 · 共 ${d.totalEntries} 条条目`];
+  for (const s of d.sections) {
+    const tag = s.kv ? '[KV] ' : '';
+    lines.push(`  ${tag}${s.title}（${s.id}）　${s.fields} 字段 · ${s.entries} 条目`);
+    for (const e of s.entryList) lines.push(`      - ${e.title || '（无名）'}  ${e.ratio}%  ${e.id}`);
+  }
+  return lines.join('\n');
+}
+
+export function renderSectionRemoveMany(d) {
+  const head = d.status === 'skipped'
+    ? `试运行（未落盘）：将删除 ${d.count} 个栏目`
+    : `已删除 ${d.count} 个栏目${d.removedEntries ? `（连带 ${d.removedEntries} 条条目）` : ''}`;
+  const lines = [head];
+  for (const s of d.removed || d.wouldRemove || []) lines.push(`  ${s.title}（${s.id}）　${s.entries} 条目`);
+  if (d.missing?.length) lines.push(`未找到（已跳过）: ${d.missing.join('、')}`);
+  return lines.join('\n');
 }
 
 export function renderSectionChange(d) {

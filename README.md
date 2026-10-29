@@ -102,22 +102,35 @@ ln -s "$(pwd)/assets/nx-sk" "$HOME/.workbuddy/skills/nx-sk"
 一个「本机工具类」项目的标准骨架实现（server-cli-web）：**serve 驱动 CLI 与 Web，
 CLI 与 API 同源，skill 驱动 agent**。落到具体功能上：
 
-| 栏目 | id | 内容 |
+**首次运行只播种一个「字段样例」栏目**（`demo`），连一条示例条目一起——把能力直接摆给你看：
+
+| 组 | 字段 |
+| --- | --- |
+| 基本字段（标量） | 单行文本 / 多行文本 / 数字 / 是否 / 下拉框 / 日期 / 月份 / 标签 |
+| 组合字段（值有形状） | **结构清单**（变长行 + 密文列）、**表格**（列在数据里 + 计算列 + 表尾合计/平均/计数） |
+| 富内容 | **图文**（markdown + 贴图 + 待办）、**附件**、**密钥**（AES-256-GCM 密文） |
+
+外加每个栏目自带的「原始资料」袋。示例条目把这些都填好了——打开面板就能试，
+改坏了自己删（`section remove demo`），或整栏重建（`section add demo --template demo`）。
+
+**其它 8 个模板不再自动播种**，要用时建（模板只是**建议清单**，`--set 任意键=值` 直接写）：
+
+| 模板 | id | 内容 |
 | --- | --- | --- |
-| 求职 | `job` | 求职用的个人信息档案：10 个分组 / 80 个字段（姓名、学历、联系方式、求职意向、紧急联系人…）。模板只是**建议清单**，`--set 任意键=值` 直接写 |
+| 求职 | `job` | 求职用的个人信息档案：10 个分组 / 80 个字段（姓名、学历、联系方式、求职意向、紧急联系人…） |
 | 项目经历 | `projects` | 一个项目一个条目：名称 / 角色 / 时间 / 技术栈 / 职责与亮点 |
 | 实习/工作经历 | `internships` | 一段经历一个条目：公司 / 岗位 / 时间 / 职责 |
 | 校内职务/实践 | `campus` | 一条职务或实践一个条目：职务 / 组织 / 时间 / 职责 |
-| 密钥 | `secret` | **一张 KV 表**（`kv: true`）：面板上就是两列表格（名称 / 值），一行一个键。落盘是 **AES-256-GCM** 密文，读出来默认是原文（`--mask` 才打码）。只放**跨场景通用**的 key |
+| 密钥 | `secret` | **一张 KV 表**（`kv: true`）：面板上就是两列表格（名称 / 值），一行一个键。落盘是 **AES-256-GCM** 密文，读出来默认是原文（`--mask` 才打码）。第一次 `key set` 没有它时会自动补建 |
 | 部署配置 | `deploy` | **一份配置文件一个条目**（Dockerfile / docker-compose / k8s 清单）：正文即文件原文，外加「放哪 / 哪些值要替换 / **这个场景自己的凭据清单** / 何时用」，好让它在别的项目里照着用 |
 
-上表是**首次运行从 6 个内置模板播种出来的默认值，不是固定清单**：栏目不是写死的——
+栏目不是写死的——
 字段字典是**数据**，加字段（`section update --add-field`，或 `entry update --set 任意键=值` 自动登记）、
 加栏目（`section add`，不给模板就是空栏目全自定义）、删栏目都不用改代码。
 模板在实例化时被**深拷贝**，此后各栏目独立演化；模板后来的新增用 `section sync` 补（只增不改不删，
 有差异时会把「模板已改、栏目保留原值」的字段列出来提示）。
 
-内置模板共 **8 个**——除上面 6 个外还有 `platform`（容器平台：控制台链接 / 账号 / 密码 / 镜像）
+内置模板共 **9 个**——除 `demo` 与上面 6 个外还有 `platform`（容器平台：控制台链接 / 账号 / 密码 / 镜像）
 与 `thesis`（毕业论文规范字段化），需要时 `section add <id> --template platform|thesis` 建。
 
 ## 三条核心不变量
@@ -150,6 +163,9 @@ CLI 与 API 同源，skill 驱动 agent**。落到具体功能上：
 | `nx-sk routes [--module M] [--http "POST /api/entries"]` | 命令 ↔ 路由双向对照 |
 | `nx-sk section list \| get \| add \| update \| remove` | 栏目 CRUD |
 | `nx-sk section dump <id> [--mask]` | **一个栏目的全部信息**：字段台账 + 全部条目 + 每个条目的未填清单 |
+| `nx-sk section tree` | **栏目树**：每个栏目 + 它的条目索引（名称 / 完整度）——面板「栏目管理」一次拿齐，不必逐个 dump |
+| `nx-sk section remove-many <ids> [--force]` | 批量删栏目（等同删文件夹，连带条目；有非空栏目必须 `--force`）。找不到的跳过并报告 |
+| `nx-sk entry remove-many <ids>` | 批量删条目（ids 逗号分隔）；找不到的跳过并报告，一个都找不到才报错 |
 | `nx-sk section templates` | 内置模板（job / secret / projects / internships / campus / deploy / platform / thesis） |
 | `nx-sk section sync <id> [--dry-run]` | 按模板**补齐**本栏目缺的分组与字段（只增不改不删）——模板演进后让老栏目追上 |
 | `nx-sk entry list \| get \| add \| update \| remove` | 条目 CRUD（PATCH 语义） |
@@ -292,6 +308,70 @@ nx-sk setting set --set 'navGroups=[]'   # 清空 = 全部栏目恢复平铺
 ```
 
 分组只是**显示配置**（存在 `settings.navGroups`）：不动栏目与条目的数据，删掉栏目时头部自动略过。
+
+### 表格字段（table）：结构在**数据里**的表单表格
+
+`entrylist`（结构清单）是「变长的几列文本」。**表格字段**再往前一步：每格有类型
+（勾选 / 下拉 / 数字 / 日期），还能有**计算列**和**表尾统计**——但**列定义、行、公式、
+统计配置全在条目数据里**，不在栏目字典里。所以「这条想多一列」不必改 schema，
+也不会影响同一栏目下的其它条目。
+
+```bash
+# 建字段：只给类型 + **初始列**（新建条目时表格长什么样；初始列也可以不写）
+nx-sk section update mysec --add-field '{"key":"tasks","label":"任务表","type":"table","group":"main","columns":[
+  {"key":"task","label":"任务"},
+  {"key":"done","label":"已办","type":"bool"},
+  {"key":"hours","label":"工时","type":"number","total":"sum"},
+  {"key":"rate","label":"单价","type":"number","total":"none"},
+  {"key":"cost","label":"费用","formula":"hours * rate","unit":"元"}]}'
+
+# 写入：值是一份自描述文档（列 + 行）。计算列不用给值——给了也不落盘，读的时候现算
+nx-sk entry update 周报 --data '{"任务表":{"columns":[…],"rows":[
+  {"task":"写文档","done":true,"hours":2,"rate":100},
+  {"task":"评审","done":false,"hours":3,"rate":100}]}}'
+
+# 只看这张表：表头 + 数据 + 合计 + 公式报错（只读，现算）
+nx-sk entry table 周报 --field 任务表
+```
+
+```
+  任务    已办  工时  单价  费用(算)
+  ------  ----  ----  ----  --------
+  写文档  是       2   100    200 元
+  评审    否       3   100    300 元
+  合计    1/2      5           500 元
+```
+
+**公式就是 JS 表达式**（不发明语法），只包成 `return ( … )`，所以 `for` / `var` 这类语句写不进来：
+
+| 想写什么 | 怎么写 |
+| --- | --- |
+| 同行计算 | `hours * rate`　`工时 * 单价`（**列 key 与中文列名都能当变量**） |
+| 取原值 / 整表 | `row.hours`（空格子是 null）　`rows` / `表`（整张表）　`i` 行号　`n` 行数 |
+| 取一列 | `col("单价")`　`sum(col("单价"))` |
+| 聚合 | `sum / avg / min / max / count / countTrue / countFalse / distinct / median / first / last / join` |
+| 数值 | `round / floor / ceil / abs / pct / ratio / clamp`　外加 `Math`、`Number`、`JSON`… |
+| 判空 | `isBlank(row.hours)`　`ifEmpty(x, 0)`　`toNum(x)` |
+
+- **计算列按声明顺序算**：只能引用排在它前面的列，天然不循环。算错会给出能照着改的话
+  （「公式里用了不存在的名字『qty』，可用的名字：a、b…」）。
+- **空格子当 0 / false / ''**（`hours * rate` 不会因为空格子变 NaN）；要判「到底填没填」用 `isBlank(row.x)`。
+- **统计两层**：列上的 `total`（`sum|avg|min|max|count|countTrue|countFalse|distinct|median|none`，
+  不写就按类型默认：数字求和、勾选计是）决定表尾那一格；整表表达式写在数据的 `totals` 里
+  （`{"label":"完成率","expr":"pct(countTrue(col(\"done\")), n)","unit":"%"}`），`summary: false` 关掉表尾。
+  统计**不落盘**，每次读现算——不会出现「存下来的合计和现在的数据对不上」。
+- 面板上直接**加行 / 加列**、改列类型与公式（「列设置」），改完就是这条数据的一部分。
+  敏感列（`sensitive: true`）与顶层敏感字段同一条边界：密文落盘、默认原文、`--mask` 打码。
+- **写入即体检**：每条公式在保存前拿一行空值当探针跑一遍，只拦**与数据无关**的错
+  （语法错 / 列名解析不到 / 结果不是单值），除零这类「这条数据不巧」留到渲染时逐格报。
+  跑不起来就不保存 —— 定义阶段的错误停在定义阶段。
+- **空与默认**：`--set 表=` / `[]` / `{}` 都能清空（有初始列时 `[]` 留下「列在、行空」的骨架）；
+  列可以带 `default`（新增行时的初值，`0` / `false` 都算数）；数字列默认求和、勾选列默认计是。
+- 求值作用域用 `with` + Proxy 封死：`window` / `document` / `process` / `fetch` 都取不到。
+  这不是安全沙箱（公式是数据所有者自己写的），而是**把写错的边界前移**。
+
+形状、列的每个键、公式内建表、错误对照表：`nx-sk skill get nx-sk 15-special-fields`
+（同一篇也讲了 `entrylist` / `md` / `file` / `source` / `secret` 这几种「值不是标量」的字段）。
 
 ### 全局导出 / 导入（多栏目）
 

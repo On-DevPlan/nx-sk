@@ -6,7 +6,8 @@ await useTempHome();
 
 const { applySpec, argSpecsOf, cliPathsOf, compileRoute, compareRoutes, flagSpecsOf, usageOf } = await import('../../src/runtime/spec.js');
 const { loadStore, migrationNote, normalize } = await import('../../src/core/store.js');
-const { seedSections } = await import('../../src/core/fields.js');
+const { FIELD_TYPES, seedEntries, seedSections } = await import('../../src/core/fields.js');
+const { computeTable } = await import('../../src/shared/table.js');
 
 const FAKE = {
   id: 'x.y',
@@ -85,10 +86,13 @@ test('compareRoutes：字面量段优先，声明顺序不影响匹配（遮蔽�
   assert.equal(naive.path, '/api/sections/:ref', '这就是不加排序会踩的坑');
 });
 
-test('normalize：store 文件不存在才播种；文件在但栏目为空时不复活', () => {
+test('normalize：store 文件不存在才播种（只播「字段样例」一个栏目 + 一条示例条目）；删光了不复活', () => {
   const fresh = normalize(null);
-  assert.ok(fresh.sections.length >= 2, '首次运行应播种默认栏目');
-  assert.equal(fresh.sections[0].id, 'job', '第一个栏目必须是求职');
+  assert.equal(fresh.sections.length, 1, '不再播种一堆场景栏目——第一屏是「字段样例」说明书');
+  assert.equal(fresh.sections[0].id, 'demo');
+  assert.equal(fresh.entries.length, 1, '示例条目跟着播种，否则那些字段只是空格子');
+  assert.equal(fresh.entries[0].section, 'demo');
+  assert.equal(fresh.settings.defaultSection, 'demo');
 
   const emptied = normalize({ version: 1, settings: {}, sections: [], entries: [] });
   assert.deepEqual(emptied.sections, [], '用户删光了栏目就不该再播种——否则等于删不掉');
@@ -102,18 +106,31 @@ test('loadStore：损坏的 store.json 会被挪走，而不是被下次写入�
   await fsp.writeFile(p, '{ 这不是合法 JSON', 'utf8');
 
   const store = await loadStore();
-  assert.deepEqual(store.entries, []);
+  assert.equal(store.entries.length, 1, '恢复 = 重新播种：字段样例 + 它的示例条目');
   const files = await fsp.readdir(dir);
   assert.ok(files.some((f) => f.includes('.corrupt-')), `损坏文件应被保留一份：${files.join(', ')}`);
   assert.ok(!files.includes('store.json'), '损坏文件应从原位置移走');
 });
 
-test('seedSections：默认栏目字段字典非空且带分组', () => {
-  const [job] = seedSections('2026-01-01T00:00:00.000Z');
-  assert.equal(job.id, 'job');
-  assert.ok(job.fields.length > 50, `求职栏目字段应足够全，实际 ${job.fields.length}`);
-  assert.ok(job.groups.length >= 5);
-  assert.equal(job.titleField, 'name');
+test('seedSections：只播「字段样例」，且把**每种**字段类型都摆出来', () => {
+  const [demo] = seedSections('2026-01-01T00:00:00.000Z');
+  assert.equal(demo.id, 'demo');
+  const types = new Set(demo.fields.map((x) => x.type));
+  for (const t of FIELD_TYPES) {
+    if (t === 'secret') continue; // 密文要密钥，播种给不了真值，但类型仍要出现
+    assert.ok(types.has(t), `样例栏目应包含 ${t} 字段`);
+  }
+  assert.ok(types.has('secret'), 'secret 也在（值留空）');
+  assert.ok(demo.fields.length >= FIELD_TYPES.length, `至少每种类型一个，实际 ${demo.fields.length}`);
+  assert.equal(demo.titleField, 'name');
+
+  // 示例条目的表格值要能真的算起来（播种直接写 store，不走写入校验）
+  const sheet = demo.fields.find((x) => x.key === 'sheet');
+  const entry = seedEntries('2026-01-01T00:00:00.000Z')[0];
+  const t = computeTable(sheet, entry.values.sheet);
+  assert.equal(t.errorCount, 0, `示例表格不该有公式错误：${JSON.stringify(t.errors)}`);
+  assert.equal(t.count, 2);
+  assert.ok(t.totals.length >= 1, '表尾要有统计');
 });
 
 test('v1 → v3 迁移：密钥栏目缩成 KV 表，旧值不删，且先留原始快照', async () => {

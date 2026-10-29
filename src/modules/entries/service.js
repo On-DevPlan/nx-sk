@@ -8,7 +8,7 @@
 import { loadStore, mutateStore } from '../../core/store.js';
 import { assertFieldKey } from '../../core/paths.js';
 import { badInput, conflict, notFound } from '../../core/errors.js';
-import { BOOL_FALSE, BOOL_TRUE, SOURCE_FIELD, SOURCE_GROUP, findKvSection, findSection, isSensitiveField, looksSecretish, sectionNames } from '../../core/fields.js';
+import { BOOL_FALSE, BOOL_TRUE, SOURCE_FIELD, SOURCE_GROUP, findKvSection, findSection, instantiateTemplate, isSensitiveField, looksSecretish, sectionNames } from '../../core/fields.js';
 import { completeness, displaySensitive, isBlank, serializeEntry } from '../../core/render.js';
 import { newId, nowIso } from '../../core/ids.js';
 import { decryptValue, encryptValue, isCipherBlob, maskValue } from '../../core/crypto.js';
@@ -17,9 +17,18 @@ import * as att from '../../core/attachments.js';
 import { mdImageIds, rewriteMdImages } from '../../core/mdimages.js';
 import { looksLikeSourceList, normalizeSourceItem, normalizeSourceItems, resolveSourceConflicts, sourceItemSummary, sourceItemTimeLabel } from '../../core/source.js';
 import { displayPath } from '../../core/paths.js';
+import { coerceCell, columnToDef, computeTable, normalizeSpec, renderTableText, sanitizeColumns, sanitizeTotals } from '../../shared/table.js';
 
-export function mustFindSection(store, ref) {
-  const s = findSection(store, ref);
+/**
+ * 「这一格拿到的是打码占位吗」。
+ *
+ * maskValue 对**短值**（≤10 字符）返回全星，对长值返回「前 4 + 6 个星 + 后 4」——
+ * 只认「连续 6 个星」会把短密码的打码值（3 位密码 → `***`）当成新密码加密存进去，
+ * 下一次读就是 `***`，而且没有任何报错。
+ */
+const looksMasked = (text) => /^\*{3,}$/.test(String(text ?? '')) || String(text ?? '').includes('******');
+
+export function mustFindSection(store, ref) {  const s = findSection(store, ref);
   if (!s) throw notFound(`找不到栏目: ${ref} —— 现有: ${sectionNames(store)}`);
   return s;
 }
@@ -128,6 +137,23 @@ function normalizeValue(def, raw) {
     }
     return normalizeRows(def, list);
   }
+  if (type === 'table') {
+    // 表格：形状与 entrylist 一样是「行对象数组」，区别在列有类型、还能有计算列。
+    // 入口也一致：--data 给数组，--set 给 JSON 串。
+    let list = raw;
+    if (typeof raw === 'string') {
+      if (!raw.trim()) return null;
+      try { list = JSON.parse(raw); } catch { list = null; }
+      if (!Array.isArray(list)) {
+        throw badInput(`字段「${def.label}」是表格（table），值要是行数组的 JSON，`
+          + `例如 '[{"任务":"写文档","已办":true,"工时":2}]'`);
+      }
+    }
+    if (!Array.isArray(list)) {
+      throw badInput(`字段「${def.label}」是表格（table），值要是行数组（JSON），收到 ${JSON.stringify(raw).slice(0, 80)}`);
+    }
+    return normalizeTable(def, list);
+  }
   if (type === 'source') {
     // 原始资料袋：值 = 一组 item（文字/附件/网址）。形状与归一规则见 core/source.js。
     // 三种入口都认：数组（面板/JSON）、JSON 串（--set）、一段普通文字（--set 随手记）。
@@ -200,6 +226,84 @@ function isPlainRow(x) {
 }
 
 /**
+ * 表格的写入归一：把「字段定义 + 传进来的值」合成一份**自描述的表格文档**：
+ *
+ *   { v: 1, columns: [...], rows: [...], totals?: [...], summary?: false }
+ *
+ * 三种输入都认（都落成上面那一份）：
+ *   - 行数组 `[{...}, {...}]`     ← CLI / 手写最省事，列取字段默认列或从行推断
+ *   - 文档 `{columns, rows, …}`   ← 面板保存的形状，列以**数据里的**为准
+ *   - 上面两者的 JSON 串          ← `--set 表='…'`
+ *
+ * 为什么列一定要落进数据：栏目的字段字典是**所有条目共用**的，而一张表的列常常
+ * 只对这一条有意义。「编辑时加一列」不该等于「改 schema，影响所有条目」。
+ *
+ * 强转失败**不许静默兜底**：`工时: "两小时"` 存成 null 的话，合计会悄悄少一截。
+ * 收集完所有格子的问题再一次性报，比逐条报更容易一次改对。
+ */
+function normalizeTable(def, input) {
+  const spec = normalizeSpec(def, input);
+  let columns;
+  try {
+    columns = sanitizeColumns(spec.columns, { where: `字段「${def.label}」` });
+  } catch (e) {
+    throw badInput(e.message);
+  }
+  if (!columns.length) {
+    // **空表是合法的**：没列也没数据就是「还没开始」。存成 null（= 这个字段空着），
+    // 让 `--set 表=`、`[]`、`{}` 这几条「清空」的路都走得通，而不是被「必须给列」挡回来。
+    if (!spec.rows.length) return null;
+    throw badInput(`字段「${def.label}」有 ${spec.rows.length} 行数据却没有任何列 —— `
+      + '把 columns 一起写进值里，或在面板的「列设置」里加列');
+  }
+
+  const given = Array.isArray(input) ? null : (input && typeof input === 'object' ? input : null);
+  const problems = [];
+  const rows = [];
+  spec.rows.forEach((item, i) => {
+    const row = {};
+    for (const [k, v] of Object.entries(item)) {
+      const col = columns.find((c) => c.key === k) || columns.find((c) => c.label === k);
+      if (!col) {
+        throw badInput(`字段「${def.label}」没有列「${k}」（现有列: ${columns.map((c) => c.label).join('、')}）。`
+          + '表格的列也存在数据里：加列用面板的「列设置」，或把 columns 一起写进值里');
+      }
+      // 计算列由公式算，传进来的值不落盘（注意这里用 formula 判定：sanitizeColumns
+      // 返回的是**可落盘的紧凑定义**，不带 computed 这种运行时字段）
+      if (col.formula) continue;
+      // 密文对象原样保留：导入/还原会把已经加密的格子原样送回来
+      if (v && typeof v === 'object' && col.sensitive) { row[col.key] = v; continue; }
+      const cell = coerceCell(col, v);
+      if (cell.error) { problems.push(`第 ${i + 1} 行「${col.label}」${cell.error}`); continue; }
+      if (cell.value === null || cell.value === undefined) continue;
+      if (Array.isArray(cell.value) && !cell.value.length) continue;
+      row[col.key] = cell.value;
+    }
+    if (Object.keys(row).length) rows.push(row);
+  });
+  if (problems.length) {
+    throw badInput(`字段「${def.label}」有填错的值：${problems.slice(0, 4).join('；')}`
+      + (problems.length > 4 ? `；等 ${problems.length} 处` : ''));
+  }
+  if (def.maxRows && rows.length > def.maxRows) {
+    throw badInput(`字段「${def.label}」最多 ${def.maxRows} 行，收到 ${rows.length} 行`);
+  }
+
+  const doc = { v: 1, columns: columns.map((c) => columnToDef(c)), rows };
+  // 统计行：数据里显式写了就校验后存下；没写就用字段定义的（都没写则渲染时按类型自动）
+  if (given && given.totals !== undefined) {
+    try {
+      doc.totals = sanitizeTotals(given.totals, columns, { where: `字段「${def.label}」` });
+    } catch (e) {
+      throw badInput(e.message);
+    }
+  }
+  if (given && given.summary === false) doc.summary = false;
+  else if (!given && def.summary === false) doc.summary = false;
+  return doc;
+}
+
+/**
  * 结构清单的写入：normalize 之后，敏感子值与顶层敏感字段同一条边界——
  * 密文落盘；面板把打码占位原样回传时保留原密文（不把掩码当新密码存进去）。
  * 打码占位与现有密文对不上时必须报错：那多半是「想改密码但只拷了打码值」。
@@ -216,7 +320,7 @@ async function prepareEntryList(def, raw, current) {
     for (const s of subs) {
       const text = row[s.key];
       if (text === undefined) continue;
-      if (String(text).includes('******')) {
+      if (looksMasked(text)) {
         const cur = curRows[i]?.[s.key];
         if (isCipherBlob(cur)) {
           try {
@@ -234,8 +338,79 @@ async function prepareEntryList(def, raw, current) {
   return out;
 }
 
+/**
+ * 表格的写入：归一之后，敏感**列**与顶层敏感字段同一条边界——密文落盘。
+ *
+ * 与 entrylist 的一处改进：打码占位先按**同一行**找原密文，找不到再按**整列**找。
+ * 表格是能上下拖动排序的，只按行号对齐会在拖过一次之后把「密码」认到别人头上——
+ * 那种错不报错、只是悄悄换了一个人的密码，比直接报错难查得多。
+ */
+async function prepareTable(def, raw, current) {
+  const doc = normalizeTable(def, raw);
+  if (!doc) return null; // 空表：清空这个字段
+  const cols = doc.columns.filter((c) => c.sensitive && !c.formula);
+  if (!cols.length) return doc;
+  const curDoc = Array.isArray(current) ? { rows: current } : (current && typeof current === 'object' ? current : {});
+  const cur = Array.isArray(curDoc.rows) ? curDoc.rows : [];
+  const plainByBlob = new Map();
+
+  const decryptBlob = async (blob) => {
+    if (!isCipherBlob(blob)) return null;
+    if (plainByBlob.has(blob)) return plainByBlob.get(blob);
+    let plain = null;
+    try {
+      const { key } = await resolveVaultKey();
+      plain = decryptValue(key, blob);
+    } catch { /* 解不开（换过密钥）就当作对不上 */ }
+    plainByBlob.set(blob, plain);
+    return plain;
+  };
+
+
+  const rows = [];
+  for (let i = 0; i < doc.rows.length; i += 1) {
+    const row = { ...doc.rows[i] };
+    for (const c of cols) {
+      const text = row[c.key];
+      if (text === undefined || text === null) continue;
+      if (typeof text === 'object') continue; // 已是密文对象（导入/还原）
+      const s = String(text);
+      if (!looksMasked(s)) {
+        const { key } = await resolveVaultKey();
+        row[c.key] = encryptValue(key, s);
+        continue;
+      }
+      // 打码占位 = 「这一格没改」。不能只按行号对齐：表格能上下拖动排序，
+      // 拖过一次就会把密码认到别人头上。
+      //   先按**打码值**认（能唯一命中就正确，与行序无关）；
+      //   认不出来（这一列有多个格子打码后长得一样，短密码全是星）时退回**行号**兜底——
+      //   这就是 entrylist 一直以来的行为，也是这条路唯一的已知限制：
+      //   打码状态下拖动行，且两格打码值相同，就无法区分谁是谁。
+      const cands = [];
+      for (const blob of [cur[i]?.[c.key], ...cur.map((r) => r?.[c.key])]) {
+        if (!blob || !isCipherBlob(blob) || cands.includes(blob)) continue;
+        const plain = await decryptBlob(blob);
+        if (plain !== null && maskValue(plain) === s) cands.push(blob);
+      }
+      if (cands.length === 1) { row[c.key] = cands[0]; continue; }
+      // 兜底：同一行原来的密文。没拖动过时这是对的；拖动过且打码值相同则无法区分
+      //（打码值本身不携带身份信息，短密码全是星）——这是这条路上唯一的已知限制。
+      const here = cur[i]?.[c.key];
+      if (here && isCipherBlob(here)) {
+        const plain = await decryptBlob(here);
+        if (plain !== null && maskValue(plain) === s) { row[c.key] = here; continue; }
+      }
+      throw badInput(`字段「${def.label}」第 ${i + 1} 行「${c.label}」收到的是打码占位而非明文。`
+        + '给完整值，或把这一格清掉重填（取消「打码显示」后保存也可以）。');
+    }
+    rows.push(row);
+  }
+  return { ...doc, rows };
+}
+
 async function prepareValue(section, def, raw, current) {
   if (def.type === 'entrylist') return prepareEntryList(def, raw, current);
+  if (def.type === 'table') return prepareTable(def, raw, current);
   if (!isSensitiveField(section, def.key)) return normalizeValue(def, raw);
   if (raw === null || raw === undefined || String(raw).trim() === '') return null;
   const text = String(raw);
@@ -246,7 +421,7 @@ async function prepareValue(section, def, raw, current) {
       if (maskValue(decryptValue(key, current)) === text) return current;
     } catch { /* 解不开就按新值处理 */ }
   }
-  if (text.includes('******')) {
+  if (looksMasked(text)) {
     throw badInput(`字段「${def.label}」收到的是打码占位而非明文。给完整值，或用 --unset ${def.key} 清空。`);
   }
   const { key } = await resolveVaultKey();
@@ -344,10 +519,11 @@ export async function listEntries({ section, q } = {}) {
   return { count: out.length, total: store.entries.length, entries: out };
 }
 
-/** 搜索文本：行对象（entrylist）摊成 JSON 才能按里面的账号/链接搜到条目。 */
+/** 搜索文本：行对象（entrylist）与表格文档要摊成 JSON 才能按里面的账号/链接搜到条目。 */
 function hayText(v) {
   if (v === null || v === undefined) return '';
   if (Array.isArray(v)) return v.map((x) => (isPlainRow(x) ? JSON.stringify(x) : String(x))).join(',');
+  if (typeof v === 'object') return JSON.stringify(v);
   return String(v);
 }
 
@@ -395,7 +571,14 @@ export async function getEntry(ref, { mask, section } = {}) {
       entryFields[f.key] = (f.fields || []).map((s) => ({ key: s.key, label: s.label, sensitive: s.sensitive === true }));
     }
   }
-  return { ...serialized, sectionTitle: sec.title, mask: !!mask, files, fieldTypes, entryFields };
+  // 表格的**现值**：计算列与统计行在读的时候现算，不落盘 ——
+  // 所以「存的数字」和「算出来的合计」永远同源，不会出现「合计是上个月的值」。
+  const tables = {};
+  for (const f of sec.fields) {
+    if (f.type !== 'table') continue;
+    tables[f.key] = computeTable(f, serialized.values[f.key]);
+  }
+  return { ...serialized, sectionTitle: sec.title, mask: !!mask, files, fieldTypes, entryFields, tables };
 }
 
 export async function addEntry({ section, title, set, data, tags, 'dry-run': dryRun } = {}) {
@@ -529,6 +712,10 @@ export async function fieldDictionary({ section } = {}) {
       kind: x.kind || '',
       // 结构清单的列跟着字典出去：agent 写行之前得知道行里允许哪些键
       fields: x.fields || null,
+      // 表格的列（带类型/公式）与统计行同理
+      columns: x.columns || null,
+      totals: x.totals || null,
+      maxRows: x.maxRows || null,
       hint: x.hint || '', options: x.options || null, sensitive: isSensitiveField(sec, x.key),
     })),
   });
@@ -618,12 +805,32 @@ export async function keyGet(name, { mask, section } = {}) {
  * 这与 `entry add` 的「重名报 CONFLICT」是刻意不同的——`set` 这个名字本身就说明是覆盖，
  * 返回值里带 `created` 让调用方知道到底发生了哪一种。
  */
+/**
+ * KV 的 SET 语义：不存在就建，存在就**覆盖**。
+ * 这与 `entry add` 的「重名报 CONFLICT」是刻意不同的——`set` 这个名字本身就说明是覆盖，
+ * 返回值里带 `created` 让调用方知道到底发生了哪一种。
+ *
+ * 播种不再自带密钥栏目之后，「第一次 `key set`」会撞上「还没有 KV 栏目」。
+ * 写路径在这里**自动补建**一个（与 `section add --template secret` 同一模板、同一形状）：
+ * `key set` 的语义是「我要存」，被挡回来只会让人去抄一遍建栏目的命令。
+ * 读路径（get / list）不建——读不到就是读不到，悄悄建一个空栏目是噪音。
+ */
 export async function keySet(name, value, { section, 'dry-run': dryRun } = {}) {
   const key = assertKeyName(name);
   const raw = value === undefined || value === null ? '' : String(value);
   if (!raw.trim()) throw badInput(`密钥值不能为空：nx-sk key set ${key} <值>`);
 
-  const store = await loadStore();
+  let store = await loadStore();
+  let createdKv = false;
+  if (!section && !findKvSection(store)) {
+    await mutateStore((s) => {
+      const sec = { ...instantiateTemplate('secret', { id: 'secret', title: '密钥', order: 90 }), createdAt: nowIso(), updatedAt: nowIso() };
+      s.sections.push(sec);
+      s.sections.sort((a, b) => a.order - b.order);
+    });
+    store = await loadStore();
+    createdKv = true;
+  }
   const { sec, valueKey } = await kvTarget(store, section);
 
   const existing = store.entries.find((e) => e.section === sec.id && e.title === key);
@@ -636,18 +843,18 @@ export async function keySet(name, value, { section, 'dry-run': dryRun } = {}) {
       try {
         const plain = String(decrypt(existing.values?.[valueKey]));
         if (plain === raw || maskValue(plain) === raw) {
-          return { status: 'skipped', created: false, unchanged: true, name: key, section: sec.id, id: existing.id };
+          return { status: 'skipped', created: false, unchanged: true, name: key, section: sec.id, id: existing.id, createdKv };
         }
       } catch { /* 解不开（换过密钥）就按覆盖处理 */ }
     }
     const r = await updateEntry(existing.title, { set: { [valueKey]: raw }, section: sec.id, 'dry-run': dryRun });
-    if (r.status === 'skipped') return { ...r, name: key, created: false, section: sec.id };
-    return { status: 'ok', created: false, replaced: true, name: key, section: sec.id, id: r.id };
+    if (r.status === 'skipped') return { ...r, name: key, created: false, section: sec.id, createdKv };
+    return { status: 'ok', created: false, replaced: true, name: key, section: sec.id, id: r.id, createdKv };
   }
 
   const r = await addEntry({ section: sec.id, title: key, set: { [valueKey]: raw }, 'dry-run': dryRun });
-  if (r.status === 'skipped') return { ...r, name: key, created: true, section: sec.id };
-  return { status: 'ok', created: true, replaced: false, name: key, section: sec.id, id: r.id };
+  if (r.status === 'skipped') return { ...r, name: key, created: true, section: sec.id, createdKv };
+  return { status: 'ok', created: true, replaced: false, name: key, section: sec.id, id: r.id, createdKv };
 }
 
 export async function keyRemove(name, { section, 'dry-run': dryRun } = {}) {
@@ -985,6 +1192,9 @@ export function renderEntryList(d) {
 function valueLines(d, v, key) {
   const type = d.fieldTypes?.[key];
   const asFile = (x) => (d.files && d.files[x] ? `${d.files[x].name}　${d.files[x].path}` : null);
+  // 表格整张印出来（表头 + 数据 + 统计行 + 公式报错）。不这么做的话，一行表格只会被压成
+  // 一条 `k=v · k=v`，合计和计算列全看不见 —— 而「看一眼合计」正是这类表最常见的用途。
+  if (type === 'table' && d.tables?.[key]) return renderTableText(d.tables[key], { indent: '' }).split('\n');
   if (Array.isArray(v) && v.length && v.every((x) => asFile(x))) return v.map(asFile);
   const one = asFile(v);
   if (one) return [one];
@@ -1047,6 +1257,57 @@ export function renderEntryGet(d) {
   return lines.join('\n');
 }
 
+/**
+ * 批量删条目 —— 面板上「勾一堆条目按删除」的后端。
+ *
+ * 与单个删除的差别：
+ *   - 找不到的**跳过并记在 missing 里**（status: 'partial'），不让整批失败；
+ *     批量操作里「另一个标签页刚删掉一条」比「全都没删」常见得多，整批回滚只会让人重来。
+ *   - 一个都找不到才算错（NOT_FOUND）——那时确实是 id 给错了。
+ *   - 只认 NOT_FOUND / CONFLICT 两种业务错，别的（比如解密失败）照常抛，不吞。
+ */
+export async function removeMany(refs, { section, 'dry-run': dryRun } = {}) {
+  const list = (Array.isArray(refs) ? refs : String(refs ?? '').split(','))
+    .map((x) => String(x ?? '').trim()).filter(Boolean);
+  if (!list.length) throw badInput('没有要删的条目（把 id 用逗号分隔，或重复传参）');
+
+  const store = await loadStore();
+  const ids = new Set();
+  const removed = [];
+  const missing = [];
+  for (const ref of list) {
+    let e = null;
+    try {
+      e = resolveEntry(store, ref, section);
+    } catch (err) {
+      if (err?.code !== 'NOT_FOUND' && err?.code !== 'CONFLICT') throw err;
+      e = null;
+    }
+    if (!e) { missing.push(ref); continue; }
+    if (ids.has(e.id)) continue;
+    ids.add(e.id);
+    removed.push({ id: e.id, title: e.title, section: e.section });
+  }
+  if (!ids.size) throw notFound(`这些条目都不存在: ${list.join(', ')}`);
+
+  if (dryRun) {
+    return { status: 'skipped', dryRun: true, wouldRemove: removed, count: removed.length, missing };
+  }
+  await mutateStore((s) => { s.entries = s.entries.filter((e) => !ids.has(e.id)); });
+  return { status: missing.length ? 'partial' : 'ok', removed, count: removed.length, missing };
+}
+
+export function renderEntryRemoveMany(d) {
+  const list = d.removed || d.wouldRemove || [];
+  const lines = [d.status === 'skipped'
+    ? `试运行（未落盘）：将删除 ${d.count} 条条目`
+    : `已删除 ${d.count} 条条目`];
+  for (const e of list.slice(0, 20)) lines.push(`  ${e.title || '（无名）'}（${e.id}）· ${e.section}`);
+  if (list.length > 20) lines.push(`  …另有 ${list.length - 20} 条`);
+  if (d.missing?.length) lines.push(`未找到（已跳过）: ${d.missing.join('、')}`);
+  return lines.join('\n');
+}
+
 export function renderEntryChange(d) {
   if (d.status === 'skipped') return `试运行（未落盘）：${JSON.stringify(d.wouldCreate || d.wouldChange || d.wouldRemove)}`;
   if (d.removed) return `已删除条目 ${d.removed.id}（${d.removed.title}）`;
@@ -1059,6 +1320,54 @@ export function renderEntryChange(d) {
   return `已更新条目 ${d.title}（${d.id}）· 改动 ${d.changed.join(', ')} · 完整度 ${c.filled}/${c.total} = ${c.ratio}%${extra}`;
 }
 
+// —— 表格字段（table）的现值 ——
+//
+// 为什么要一条专门的命令：`entry get` 会把整条条目都印出来，而表格常常是这个条目的主体；
+// 只想看「这张表现在多少、合计多少」时，一条命令给一张对齐的表比翻整条条目快得多。
+// 它**不写**任何东西：计算列与统计行都是现算的，没有第二份状态可以走偏。
+
+export async function getTable(ref, { field, mask, section } = {}) {
+  const store = await loadStore();
+  const entry = resolveEntry(store, ref, section);
+  const sec = mustFindSection(store, entry.section);
+  const defs = sec.fields.filter((f) => f.type === 'table');
+  if (!defs.length) {
+    throw notFound(`栏目「${sec.title}」没有表格字段（table）。现有字段: ${sec.fields.map((f) => `${f.label}(${f.type})`).join('、')}`);
+  }
+  const wanted = String(field ?? '').trim();
+  const def = wanted
+    ? (defs.find((f) => f.key === wanted || f.label === wanted) || null)
+    : defs[0];
+  if (!def) {
+    throw notFound(`栏目「${sec.title}」没有叫「${wanted}」的表格字段（有: ${defs.map((f) => `${f.label}(${f.key})`).join('、')}）`);
+  }
+  const decrypt = await sensitiveViewer(sec, [entry]);
+  const serialized = serializeEntry(sec, entry, { mask: !!mask, decrypt });
+  return {
+    id: entry.id,
+    title: entry.title,
+    section: sec.id,
+    sectionTitle: sec.title,
+    field: def.key,
+    fieldLabel: def.label,
+    mask: !!mask,
+    table: computeTable(def, serialized.values[def.key]),
+  };
+}
+
+export function renderTable(d) {
+  const t = d.table;
+  const head = `${d.title || d.id}（${d.id}）· 栏目 ${d.sectionTitle} · 表格「${d.fieldLabel}」${d.field} · ${t.count} 行`
+    + (t.errorCount ? ` · ${t.errorCount} 处公式错误` : '')
+    + (d.mask ? ' · 已打码' : '');
+  const totals = t.totals.length
+    ? `\n统计行: ${t.totals.map((x) => x.label).join(' / ')}（每列算不算、怎么算，看列定义的 total；整表表达式写在数据的 totals 里）`
+    : '';
+  const formulas = t.columns.filter((c) => c.computed);
+  const fx = formulas.length ? `\n计算列: ${formulas.map((c) => `${c.label} = ${c.formula}`).join('；')}` : '';
+  return `${head}\n${renderTableText(t)}${fx}${totals}`;
+}
+
 export function renderFields(d) {
   const lines = [`字段字典：${d.count} 个栏目`];
   for (const s of d.sections) {
@@ -1066,7 +1375,10 @@ export function renderFields(d) {
     for (const g of s.groups) {
       lines.push(`  ${g.title}（${g.id}）`);
       for (const x of s.fields.filter((f) => f.group === g.id)) {
-        lines.push(`    ${x.key.padEnd(22)} ${x.label}${x.sensitive ? '  [密文]' : ''}${x.options ? `  可选: ${x.options.join(' / ')}` : ''}${x.hint ? `　${x.hint}` : ''}`);
+        const cols = Array.isArray(x.columns)
+          ? `  列: ${x.columns.map((c) => `${c.label}[${c.type}${c.formula ? ' 算' : ''}]`).join(' / ')}`
+          : '';
+        lines.push(`    ${x.key.padEnd(22)} ${x.label}${x.sensitive ? '  [密文]' : ''}${x.options ? `  可选: ${x.options.join(' / ')}` : ''}${cols}${x.hint ? `　${x.hint}` : ''}`);
       }
     }
   }
@@ -1101,16 +1413,23 @@ export async function keysLedger({ section, q, reveal } = {}) {
         const raw = item.values?.[def.key];
         if (raw === undefined || raw === null || String(raw).trim() === '') continue;
 
-        // **结构清单要展开成行**：场景凭据现在住在清单的行里（deploy 的「凭据清单」），
-        // 只扫顶层字段的话，台账恰好看不见最该看见的那些 —— 「一条命令看全部凭据」
-        // 必须真的看得到全部。
-        if (def.type === 'entrylist' && Array.isArray(raw)) {
-          for (const row of raw) {
+        // **清单类字段要展开成行**：场景凭据住在清单的行里（deploy 的「凭据清单」、
+        // 表格里的「密码」列）—— 只扫顶层字段的话，台账恰好看不见最该看见的那些，
+        // 「一条命令看全部凭据」必须真的看得到全部。
+        const listRows = def.type === 'entrylist' && Array.isArray(raw)
+          ? raw
+          : (def.type === 'table' && raw && Array.isArray(raw.rows) ? raw.rows : null);
+        if (listRows) {
+          // 表格的列存在数据里（结构归数据），优先用数据里的那份
+          const subs = def.type === 'table'
+            ? (Array.isArray(raw.columns) && raw.columns.length ? raw.columns : (def.columns || []))
+            : (def.fields || []);
+          for (const row of listRows) {
             if (!row || typeof row !== 'object') continue;
-            const rowName = row.name ?? row.名称 ?? '';
+            const rowName = row.name ?? row.名称 ?? row.task ?? row.任务 ?? '';
             for (const [cellKey, cellVal] of Object.entries(row)) {
               if (cellVal === undefined || cellVal === null || String(cellVal).trim() === '') continue;
-              const sub = (def.fields || []).find((x) => x.key === cellKey);
+              const sub = subs.find((x) => x.key === cellKey);
               const cellLabel = sub?.label || cellKey;
               const secretish = sub?.sensitive === true
                 || KEY_SECRET_RE.test(cellKey) || KEY_SECRET_RE.test(cellLabel);

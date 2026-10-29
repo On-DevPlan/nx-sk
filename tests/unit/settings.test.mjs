@@ -7,7 +7,20 @@ import { useTempHome } from '../helpers.mjs';
 await useTempHome();
 
 const settings = await import('../../src/modules/settings/service.js');
+const sections = await import('../../src/modules/sections/service.js');
 const { loadStore, normalize, defaultSettings } = await import('../../src/core/store.js');
+
+// 播种不再自带那一堆场景栏目：这里把 navGroups / navHidden / navOrder 用例要引用的建出来。
+// 顺序刻意打乱——归一成真实 id 之后，组的语义不该依赖创建顺序。
+for (const [id, title, tpl] of [
+  ['job', '求职', 'job'],
+  ['projects', '项目经历', 'projects'],
+  ['internships', '实习', 'internships'],
+  ['campus', '校内', 'campus'],
+  ['secret', '密钥', 'secret'],
+]) {
+  await sections.addSection({ id, title, template: tpl });
+}
 
 test('默认设置含 navGroups: []，老 store（没有这个键）读一次自动补上', async () => {
   assert.deepEqual(defaultSettings().navGroups, [], '缺省 = 全部栏目平铺');

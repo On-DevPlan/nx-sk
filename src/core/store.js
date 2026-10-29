@@ -4,7 +4,7 @@ import fsp from 'node:fs/promises';
 import { join } from 'node:path';
 import { displayPath, migrationDir, storeFile } from './paths.js';
 import { ensureDir, pathExists, writeAtomic } from './fsx.js';
-import { ensureSourceBuiltin, instantiateTemplate, seedSections, syncSectionGroups } from './fields.js';
+import { ensureSourceBuiltin, instantiateTemplate, seedEntries, seedSections, syncSectionGroups } from './fields.js';
 import { normalizeFileRecord } from './attachments.js';
 import { nowIso, stamp } from './ids.js';
 
@@ -15,7 +15,7 @@ export const STORE_VERSION = 3;
 
 export function defaultSettings() {
   return {
-    defaultSection: 'job',
+    defaultSection: 'demo',
     // 头部导航分组：[{ title, sections: [栏目 id…] }]，数组顺序 = 显示顺序。
     // 缺省空数组 = 全部栏目平铺（保持老行为）；栏目建得多了再在设置页收拢。
     navGroups: [],
@@ -30,7 +30,9 @@ function emptyStore(seed) {
     // 只有「store 文件压根不存在」才播种。文件在、但 sections 为空
     // 说明用户自己删光了栏目——这时候再播种会把它变回来，等于删不掉。
     sections: seed ? seedSections(at) : [],
-    entries: [],
+    // 示例条目跟着「字段样例」栏目一起播种：没有它，那些字段就只是空格子，
+    // 「感受能力边界」就少了最有说服力的那部分。
+    entries: seed ? seedEntries(at) : [],
     files: [],
   };
 }

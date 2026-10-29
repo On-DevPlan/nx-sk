@@ -47,8 +47,9 @@ store.json（~/nx-sk/store.json 或 $NX_SK_STORE）
 
 内置模板 8 个：`job`（求职 / 个人信息，约 80 字段 / 10 分组——含「附件资料」组：简历附件 / 头像图片 / 成绩单 / 证书扫描件）、`projects`（项目经历）、`internships`（实习/工作经历）、`campus`（校内职务/实践）、`secret`（密钥，**单字段 KV**——细节见 `20-secrets`）、`deploy`（部署配置：Dockerfile / compose / k8s 清单，**一份文件一个条目**，自带「凭据清单」——细节见 `50-deploy`）、`platform`（容器平台：控制台链接 / 账号 / 密码 / 镜像，一个平台一个条目）、`thesis`（毕业论文规范字段化）。三类经历栏目（projects / internships / campus）**一个项目 / 一段经历 = 一个条目**，角色、时间、技术栈都是独立字段——不要往 job 栏目里塞经历。
 
-首次运行只**播种 6 个**（job / projects / internships / campus / secret / deploy），
-platform 与 thesis 需要时用 `section add <id> --template platform|thesis` 建。
+首次运行只**播种 1 个**：`demo`（字段样例 / 能力边界——每种字段一格、连示例条目一起，见 `15-special-fields`）。
+其余模板（job / projects / internships / campus / secret / deploy / platform / thesis）需要时用
+`section add <id> --template <模板id>` 建；没有 KV 栏目时第一次 `key set` 也会自动补建 `secret`。
 
 ## 三、条目命令
 
@@ -133,7 +134,7 @@ nx-sk section update job --remove-field blog
 nx-sk section update job --fields @fields.json
 ```
 
-字段定义支持：`key`（字母开头）、`label`、`type`（`text|textarea|number|date|month|bool|select|tags|entrylist|source|secret|file|md`）、
+字段定义支持：`key`（字母开头）、`label`、`type`（`text|textarea|number|date|month|bool|select|tags|entrylist|table|source|secret|file|md`）、
 `group`、`hint`、`options`（候选项）、`sensitive`（true 则密文落盘）、`maxItems`（tags / file 上限）、
 `fill`（填写策略，见下）。
 
@@ -164,6 +165,20 @@ nx-sk section update job --fields @fields.json
 > **列名用 key 或中文标签都认**（`密码` 与 `pass` 等价，与顶层 `--set` 同一口径）；
 > 没登记过的键直接写行数组会**自动登记**成 entrylist 并从行推断列。`entry get` 里清单一行一条：
 > `名称=主控台 · 链接=https://… · 账号=ops · 密码=…`（--mask 时密码列打码）。
+
+> `type: 'table'` 是**表格字段**：`entrylist` 的进阶版 —— 每格有类型（勾选 / 下拉 / 数字 / 日期），
+> 还能有**计算列**（JS 表达式）与**表尾统计**。最根本的差别是**结构归数据**：列定义、行、公式、
+> 统计配置全部存在**条目值里**（`{v, columns, rows, totals?, summary?}`），字段定义里的 `columns`
+> 只是「新建时的初始列」。所以「这一条想多一列」不必改 schema，也不影响同栏目其它条目。
+>
+> ```bash
+> nx-sk section update mysec --add-field '{"key":"tasks","label":"任务表","type":"table"}'
+> nx-sk entry update 周报 --data '{"任务表":{"columns":[…],"rows":[…]}}'
+> nx-sk entry table 周报 --field 任务表        # 只看这张表：数据 + 合计 + 公式报错
+> ```
+>
+> 形状、公式作用域与内建、统计两个轴、**写入即体检**（语法 / 列名 / 单值不通过就不保存）、
+> 空值与默认值、常见错对照表 —— 全在 [[15-special-fields]]，这里不重复一份（两份必然漂移）。
 
 > `type: 'source'` 是**原始资料袋**：每个栏目都自带一个的「乱入区」。值 = 一组资料条目
 > （`{id, kind, name, text|fileId|url, addedAt, note, mapped}`，kind = text/file/url）。
