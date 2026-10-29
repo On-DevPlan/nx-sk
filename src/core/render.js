@@ -6,16 +6,46 @@
 // 这样 render 保持纯函数，而「什么时候允许看明文」仍然只有一个决策点。
 import { isCipherBlob, maskValue } from './crypto.js';
 import { FILL_LABELS, fillPolicy, isExcludedField, isSensitiveField } from './fields.js';
+// 表格的「字段定义 + 数据」怎么合成一份自描述文档，只有一份实现（见 shared/table.js）。
+import { columnToDef, normalizeSpec } from '../shared/table.js';
 
 export function isBlank(v) {
   if (v === null || v === undefined) return true;
   if (Array.isArray(v)) return v.length === 0;
+  // 表格文档：一行都没有就算没填（有列没数据不算填了内容）。
+  // 密文对象没有 rows，不受这条影响。
+  if (typeof v === 'object' && Array.isArray(v.rows)) return v.rows.length === 0;
+  return String(v).trim() === '';
+}
+
+/**
+ * 「这个字段真的没有东西可带出去」—— 与 isBlank 的区别只在表格：
+ *
+ *   - `isBlank` 决定**完整度**：有列没行的表算「没填」（不然一张空表就把进度撑满了）。
+ *   - `isStoredEmpty` 决定**值要不要输出**：还有列就说明结构在，要带出去 ——
+ *     否则面板拿不到列，用户搭好的骨架（列 + 默认值）一保存就"消失"了。
+ */
+export function isStoredEmpty(v) {
+  if (v === null || v === undefined) return true;
+  if (Array.isArray(v)) return v.length === 0;
+  if (typeof v === 'object' && Array.isArray(v.rows)) {
+    return !v.rows.length && !(Array.isArray(v.columns) && v.columns.length);
+  }
   return String(v).trim() === '';
 }
 
 /** 值 → 人读字符串（bool / tags / 数组 / 标量 / entrylist 行）。 */
 export function formatValue(value) {
   if (isBlank(value)) return '';
+  // 表格文档：按「列名=值 · 列名=值；下一行」压成一行（section dump 的表格放不下多行版）
+  if (typeof value === 'object' && Array.isArray(value.rows)) {
+    const cols = Array.isArray(value.columns) ? value.columns : [];
+    const labelOf = (k) => cols.find((c) => c.key === k)?.label || k;
+    return value.rows.map((row) => Object.entries(row || {})
+      .filter(([, v]) => !isBlank(v))
+      .map(([k, v]) => `${labelOf(k)}=${typeof v === 'boolean' ? (v ? '是' : '否') : (Array.isArray(v) ? v.join('、') : v)}`)
+      .join(' · ')).filter(Boolean).join('；');
+  }
   if (Array.isArray(value)) {
     // 结构清单的行：`k=v · k=v；k=v` 压成一行——section dump 的表格里放不下多行版
     if (value.length && value.every((x) => isPlainRow(x))) {
@@ -35,12 +65,17 @@ function isPlainRow(x) {
 }
 
 /**
- * entrylist 的一行：敏感子值走与顶层敏感字段同一条 displaySensitive 边界
+ * 清单类字段（entrylist / table）的一行：敏感子值走与顶层敏感字段同一条 displaySensitive 边界
  * （默认原文 / mask 打码 / 有 decrypt 才解密）。非对象行（坏数据）原样放过。
+ *
+ * 两种字段的差别只在「列」叫什么：entrylist 用 fields，table 用 columns。
+ * 密文边界是同一条，所以这里只认「哪些子字段是 sensitive」，不关心是哪种清单。
  */
-function displayRow(def, row, opts) {
+function subFieldsOf(def) {
+  return def?.type === 'table' ? (def.columns || []) : (def.fields || []);
+}function displayRow(def, row, opts) {
   if (!isPlainRow(row)) return row;
-  const subs = (def.fields || []).filter((s) => s.sensitive);
+  const subs = subFieldsOf(def).filter((s) => s.sensitive);
   if (!subs.length) return row;
   const out = { ...row };
   for (const s of subs) {
@@ -82,9 +117,23 @@ export function serializeEntry(section, entry, { mask = false, decrypt } = {}) {
   const values = {};
   for (const def of section.fields) {
     const raw = entry.values?.[def.key];
-    if (isBlank(raw)) { values[def.key] = null; continue; }
+    // 这里用 isStoredEmpty 而不是 isBlank：空表（有列没行）要带出去，否则骨架丢失
+    if (isStoredEmpty(raw)) { values[def.key] = null; continue; }
     if (def.type === 'entrylist' && Array.isArray(raw)) {
       values[def.key] = raw.map((row) => displayRow(def, row, { mask, decrypt }));
+      continue;
+    }
+    // 表格读出去永远是**自描述的完整文档**：columns / rows / 可选 totals。
+    // 列存在数据里，所以读的人（面板、agent、导出）不必再去查栏目字典才知道有哪些列。
+    if (def.type === 'table') {
+      const spec = normalizeSpec(def, raw);
+      values[def.key] = {
+        v: spec.v,
+        columns: spec.columns.map((c) => columnToDef(c)),
+        rows: spec.rows.map((row) => displayRow({ type: 'table', columns: spec.columns }, row, { mask, decrypt })),
+        ...(Array.isArray(spec.totals) ? { totals: spec.totals } : {}),
+        ...(spec.summary === false ? { summary: false } : {}),
+      };
       continue;
     }
     values[def.key] = isSensitiveField(section, def.key)
@@ -167,6 +216,11 @@ export function dumpSection(section, entries, { mask = false, decrypt } = {}) {
       options: x.options || null,
       // 结构清单的列（子字段）必须跟着字典出去，否则面板渲染不出列、agent 不知道行里该有什么键
       fields: x.fields || null,
+      // 表格的列（带类型/公式）与统计行同理：不知道列定义，agent 只能瞎猜行里能写什么
+      columns: x.columns || null,
+      totals: x.totals || null,
+      summary: x.summary === false ? false : undefined,
+      maxRows: x.maxRows || null,
       kind: x.kind || '',
       sensitive: isSensitiveField(section, x.key),
       // 填写策略要跟着字段字典出去，否则面板与 agent 不知道哪个格子「不用填」

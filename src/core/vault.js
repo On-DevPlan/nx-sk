@@ -100,16 +100,25 @@ export async function currentKeyId() {
  */
 export async function sensitiveViewer(section, entries = []) {
   const sensitive = (section?.fields || []).filter((f) => f.sensitive || f.type === 'secret');
-  // 结构清单（entrylist）的敏感子值也是密文落盘：不探行内的话，清单里真有密文时
-  // viewer 不会被创建，读出来全变成「需要密钥才能解密」。
-  const entryLists = (section?.fields || []).filter((f) => f.type === 'entrylist');
-  if (!sensitive.length && !entryLists.length) return undefined;
+  // 清单类（结构清单 entrylist / 表格 table）的敏感**子值**也是密文落盘：
+  // 不探行内的话，清单里真有密文时 viewer 不会被创建，读出来全变成「需要密钥才能解密」。
+  const lists = (section?.fields || []).filter((f) => f.type === 'entrylist' || f.type === 'table');
+  if (!sensitive.length && !lists.length) return undefined;
   const keys = sensitive.map((f) => f.key);
-  const subKeysOf = (f) => (f.fields || []).filter((s) => s.sensitive).map((s) => s.key);
+  // 两种清单的「列」字段名不同（fields / columns），但密文边界的判据是同一个
+  const subKeysOf = (f) => (f.type === 'table' ? (f.columns || []) : (f.fields || []))
+    .filter((s) => s.sensitive).map((s) => s.key);
+  // 表格的值既可能是行数组，也可能是自描述文档 `{columns, rows}`
+  const rowsOf = (v) => (Array.isArray(v) ? v : (v && Array.isArray(v.rows) ? v.rows : []));
+  const rowHasBlob = (row, f) => {
+    if (!row || typeof row !== 'object') return false;
+    const subKeys = subKeysOf(f);
+    if (subKeys.length) return subKeys.some((k) => isCipherBlob(row[k]));
+    // 列存在数据里、字段定义没给列时：任何一格是密文都算（否则会锁死在不认识的结构上）
+    return Object.values(row).some((v) => isCipherBlob(v));
+  };
   const hasBlob = entries.some((e) => keys.some((k) => isCipherBlob(e?.values?.[k]))
-    || entryLists.some((f) => Array.isArray(e?.values?.[f.key]) && e.values[f.key].some((row) => (
-      !!row && typeof row === 'object' && subKeysOf(f).some((k) => isCipherBlob(row[k]))
-    ))));
+    || lists.some((f) => rowsOf(e?.values?.[f.key]).some((row) => rowHasBlob(row, f))));
   if (!hasBlob) return undefined;
   const { key } = await resolveVaultKey();
   return (blob) => decryptValue(key, blob);
