@@ -150,6 +150,36 @@ test('精确导出：只带走选中的条目与它们引用的附件', async ()
   assert.equal(got.files[got.values.doc[0]].name, 'a.txt');
 });
 
+// —— 资料袋里的附件也要随包 ——
+// 真实问题：袋里的 file item（kind='file'）不在 file/md 字段扫描范围里，
+// 导出的包看起来正常、附件清单却是空的——溯源用的原件在包里丢了。
+test('导出带上资料袋里的原件，导入后 fileId 重映射到新库', async () => {
+  await sections.addSection({ id: 'bagsec', title: '袋导出', template: 'projects' });
+  await entries.addEntry({ section: 'bagsec', title: '袋条目', set: { name: '袋条目' } });
+  // 造一个袋内附件：file add（Web 上传口）+ 直写 values（--set source=… 是程序入口）
+  const up = await files.addFile({
+    content: Buffer.from(`bag-export-${Date.now()}-${Math.random()}`).toString('base64'),
+    name: '袋内原件.png',
+  });
+  await entries.updateEntry('袋条目', {
+    section: 'bagsec',
+    data: { source: [{ kind: 'file', fileId: up.id, name: '发来的截图', addedAt: new Date().toISOString() }] },
+  });
+
+  const zip = await transfer.buildSectionZip('bagsec', {});
+  const man = manifestOf(zip.buffer);
+  assert.equal(man.files.length, 1, '袋里的原件必须随包');
+  assert.ok(readZip(zip.buffer).some((f) => f.name.startsWith('attachments/')), '原件应进包');
+
+  const r = await transfer.applyImport('bagdst', zip.buffer, { onConflict: 'skip' });
+  assert.equal(r.files.reused, 1, '同机 sha 相同应复用');
+  const got = await entries.getEntry('袋条目', { section: 'bagdst' });
+  const bag = got.values.source || [];
+  assert.equal(bag.length, 1);
+  assert.equal(bag[0].kind, 'file');
+  assert.equal(got.files[bag[0].fileId]?.name, '袋内原件.png', '袋里 item 的 fileId 应重映射到可解析的附件');
+});
+
 test('零配置导入：不指定栏目，按包内结构新建；重复导入自动加序号', async () => {
   const zip = await transfer.buildSectionZip('picksec');
   const first = await transfer.previewImport(null, zip.buffer, { fileName: 'x.zip' });

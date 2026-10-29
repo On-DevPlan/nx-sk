@@ -14,6 +14,9 @@ nx-sk source add <条目> --file "D:\资料\用户指南.pdf" --name "平台用�
 - 想要「原件搬进库里」那是 `nx-sk file add` 的语义（它默认移动）——两者别混。
 - 袋里的 `file` item 只存 `fileId`；读的时候用 `nx-sk file get <fileId>` 或
   `source get --json` 里的 `files[fileId].path` 找物理路径。
+- **袋里的文件算「已引用」**：`file cleanup` 不删它、`transfer export` 随包带走——
+  袋是溯源的锚点，整理错了随时能点开原件回看。所以文件先入袋没有代价；
+  不入袋的原件躺在库外，清理、移动、丢失都没有任何机制能拦。
 
 ## 各类资料的进法
 

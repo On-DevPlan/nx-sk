@@ -165,11 +165,14 @@ export function findFileRecord(store, ref) {
 /**
  * 反向链接：哪些条目的**哪些字段**引用了这个附件。
  *
- * 两种引用方式都要认，否则附件中心会把「只在正文里贴过」的图片判成未引用：
+ * 三种引用方式都要认，否则附件中心会把「只在正文里贴过」的图片、
+ * 或「躺在原始资料袋里」的原始文件判成未引用，然后被 cleanup 删掉：
  *   1. `file` 字段 —— 值是附件 id（或唯一文件名），一个字段可挂多个，
  *      按 `fileIdsOf` 逐个成员判断，**任一** id 命中即算。
  *   2. `md` 字段  —— 正文里的 `![说明](f_xxx)`（见 mdimages.mdImageIds）。
  *      图片是**内嵌在 markdown 里**的，和 file 字段一样是正式引用。
+ *   3. `source` 字段 —— 原始资料袋里 kind='file' 的 item（袋是溯源的锚点：
+ *      字段值是从这份原件整理出来的，原件被删，溯源就成了空话）。
  * 同一个（条目, 字段）只出一条。附件中心据此显示「被哪些栏目 / 条目 / 字段用到」。
  */
 export function fileReferences(store, rec) {
@@ -193,7 +196,8 @@ export function fileReferences(store, rec) {
     if (!entries.length) continue;
     const fileFields = (sec.fields || []).filter((f) => f.type === 'file');
     const mdFields = (sec.fields || []).filter((f) => f.type === 'md');
-    if (!fileFields.length && !mdFields.length) continue;
+    const sourceFields = (sec.fields || []).filter((f) => f.type === 'source');
+    if (!fileFields.length && !mdFields.length && !sourceFields.length) continue;
 
     for (const e of entries) {
       const push = (f) => out.push({
@@ -209,6 +213,14 @@ export function fileReferences(store, rec) {
         const ids = mdImageIds(e.values?.[f.key]);
         if (ids.length && hits(ids)) push(f);
       }
+      for (const f of sourceFields) {
+        // 袋值应是 item 数组（normalizeSourceItems 的产物）；形状不对就当没有，别炸引用扫描
+        const bag = Array.isArray(e.values?.[f.key]) ? e.values[f.key] : [];
+        const ids = bag
+          .filter((x) => x && typeof x === 'object' && x.kind === 'file' && x.fileId)
+          .map((x) => x.fileId);
+        if (ids.length && hits(ids)) push(f);
+      }
     }
   }
   return out;
@@ -217,11 +229,12 @@ export function fileReferences(store, rec) {
 /**
  * 附件中心的分组素材：哪些栏目**可能**引用附件。
  * 中心据此按栏目筛选 / 分组 —— 组织方式**完全由栏目驱动，不预定义任何分类或槽位**。
- * 带 `file` 或 `md` 字段的栏目都算数：md 字段正文里贴的图也是正式引用。
+ * 带 `file` / `md` 字段的栏目都算数：md 字段正文里贴的图也是正式引用；
+ * `source` 袋也算——袋里的原始文件是溯源的锚点，同样要能按栏目筛出来。
  */
 export function collectFileSections(store) {
   return (store.sections || [])
-    .filter((s) => (s.fields || []).some((f) => f.type === 'file' || f.type === 'md'))
+    .filter((s) => (s.fields || []).some((f) => ['file', 'md', 'source'].includes(f.type)))
     .map((s) => ({ id: s.id, title: s.title }));
 }
 
