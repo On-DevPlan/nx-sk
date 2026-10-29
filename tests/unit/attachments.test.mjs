@@ -12,6 +12,10 @@ const svc = await import('../../src/modules/files/service.js');
 const core = await import('../../src/core/attachments.js');
 const { filesDir } = await import('../../src/core/paths.js');
 const entries = await import('../../src/modules/entries/service.js');
+const sections = await import('../../src/modules/sections/service.js');
+
+// 播种不再自带 job：这里按模板建回来（同时顺带覆盖了「模板实例化」这条路径）
+await sections.addSection({ id: 'job', title: '求职', template: 'job' });
 
 async function makeSource(dir, name, content) {
   await fsp.mkdir(join(home, dir), { recursive: true });
@@ -395,11 +399,41 @@ test('外链图片不算引用（本来就不在附件库里）', async () => {
   assert.equal(orphan.files.some((f) => f.id === pic.id), true, '没被真正引用就该留在未引用列表');
 });
 
+// —— 原始资料袋里的 file item 也是正式引用 ——
+// 真实问题：袋是「字段值从哪份原件整理出来」的溯源锚点，但附件中心把它判成「未引用」，
+// 「清理未引用」一键就会把原件物理删掉——溯源链条当场断掉，且不可撤销。
+// 与 md 正文图片那次修复同一形状：只要正式引用方式还有一种没被反查到，就会误删。
+test('资料袋里的文件算已引用（cleanup 不删、usedBy 反查得到）', async () => {
+  const sections = await import('../../src/modules/sections/service.js');
+  const src = await makeSource('source-bag', '袋里的原件.pdf', `source-bag-${Date.now()}-${Math.random()}`);
+  const doc = await svc.addFile({ path: src, copy: true });
+
+  const sid = 'bagsrc';
+  await sections.addSection({ id: sid, title: '袋栏目', template: 'projects' });
+  const e = await entries.addEntry({ section: sid, title: '带原件的条目', set: { name: '带原件的条目' } });
+  await entries.addSourceItem(e.id, { section: sid, file: src, name: '发来的 PDF 原件' });
+
+  const st = await import('../../src/core/store.js');
+  const rec = (await svc.listFiles({ q: '袋里的原件' })).files[0];
+  const refs = core.fileReferences(await st.loadStore(), rec);
+  const hit = refs.find((r) => r.entryId === e.id);
+  assert.ok(hit, '袋里的 fileId 应能反查到');
+  assert.equal(hit.fieldKey, 'source');
+  assert.equal(hit.sectionId, sid);
+
+  // 未引用筛选与 cleanup 必须同一套判据：袋里的原件两边都算「已引用」
+  const orphan = await svc.listFiles({ section: 'none' });
+  assert.equal(orphan.files.some((f) => f.id === doc.id), false, '袋里的原件不应出现在未引用列表');
+  const dry = await svc.cleanupUnreferenced({ 'dry-run': true });
+  assert.ok(!dry.wouldRemove.some((r) => r.id === doc.id), 'cleanup 不能把袋里的原件删掉');
+});
+
 test('collectFileSections 把只有 md 字段的栏目也算进去', async () => {
   const store = await import('../../src/core/store.js');
   const ids = core.collectFileSections(await store.loadStore()).map((s) => s.id);
   assert.ok(ids.includes('mdsect'), '只有 md 字段的栏目也该出现在附件中心的栏目筛选里');
   assert.ok(ids.includes('mdsect2'));
+  assert.ok(ids.includes('bagsrc'), '每个非 KV 栏目自带 source 袋，都该出现在筛选里');
 });
 
 test('fileReferences 传加工过的副本也能命中（不靠对象引用比较）', async () => {
