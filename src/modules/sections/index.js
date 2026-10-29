@@ -18,6 +18,15 @@ export default {
       render: (d) => service.renderSectionList(d),
     },
     {
+      id: 'section.tree',
+      cli: ['section', 'tree'],
+      http: ['GET', '/api/sections/tree'],
+      summary: '栏目树：每个栏目 + 它的条目索引（名称 / 完整度）。面板「栏目管理」用它一次拿齐，不必逐个 dump',
+      flags: {},
+      run: () => service.tree(),
+      render: (d) => service.renderSectionTree(d),
+    },
+    {
       id: 'section.templates',
       cli: ['section', 'templates'],
       http: ['GET', '/api/sections/templates'],
@@ -109,6 +118,19 @@ export default {
       },
       run: (ctx) => service.removeSection(ctx.ref, ctx),
       render: (d) => service.renderSectionChange(d),
+    },
+    {
+      id: 'section.remove-many',
+      cli: ['section', 'remove-many'],
+      http: ['POST', '/api/sections/remove-many'],
+      summary: '批量删栏目（等同删文件夹，连带条目）。有非空栏目时必须加 --force；找不到的跳过并报告',
+      args: ['ids'],
+      flags: {
+        force: { type: 'boolean', hint: '确认连带删除这些栏目下的条目' },
+        'dry-run': { type: 'boolean' },
+      },
+      run: (ctx) => service.removeMany(ctx.ids, ctx),
+      render: (d) => service.renderSectionRemoveMany(d),
     },
   ],
 };

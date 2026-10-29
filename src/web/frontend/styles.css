@@ -957,6 +957,140 @@ a.file-name:hover { text-decoration: underline; }
 .entrylist-row input { padding: 3px 6px; font-size: 12px; }
 .entrylist-add { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
 
+/* ============ 栏目管理：栏目 → 条目的树 ============ */
+/* 一行一个节点，行高与全站一致（28px）；栏目行与条目行只差**缩进**和字重，
+ * 靠层次感区分「文件夹」与「文件」，不靠另一套颜色。 */
+.tree-search { width: 190px; }
+.tree-batch {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 6px 14px; border-top: var(--border); border-bottom: var(--border);
+  background: var(--soft);
+}
+.tree-batch .pickall { font-weight: 600; }
+.tree { border: var(--border); border-radius: var(--radius-btn); overflow: hidden; }
+.tree-head {
+  display: flex; align-items: center; gap: 6px;
+  padding: 3px 10px 3px 34px;
+  font-size: 11px; color: var(--mid);
+  border-bottom: var(--border); background: var(--paper);
+}
+.tree-col-name { flex: 1; min-width: 0; }
+.tree-col-meta { width: 118px; text-align: right; flex-shrink: 0; }
+.tree-col-acts { width: 156px; text-align: right; flex-shrink: 0; }
+
+.tree-row {
+  display: flex; align-items: center; gap: 6px;
+  min-height: var(--row-h); padding: 2px 10px;
+  border-bottom: 1px solid var(--soft-2);
+}
+.tree-row:last-child { border-bottom: 0; }
+.tree-sec:hover, .tree-ent:hover { background: var(--soft); }
+.tree-sec.on, .tree-ent.on { background: var(--soft-2); }
+/* 条目比栏目多缩进一个「展开箭头 + 间距」= 24px，两边的列才对得齐 */
+.tree-ent { padding-left: 34px; }
+
+.tree-chev {
+  width: 18px; height: 18px; padding: 0; flex-shrink: 0;
+  border: 0; border-radius: 4px; background: transparent;
+  color: var(--mid); font-size: 11px; line-height: 1; cursor: pointer;
+}
+.tree-chev:hover { background: var(--soft-2); color: var(--ink); }
+.tree-check { flex-shrink: 0; margin: 0; cursor: pointer; accent-color: var(--ink); }
+
+.tree-title { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; }
+.tree-link {
+  border: 0; background: transparent; padding: 0; margin: 0;
+  font: inherit; font-weight: 600; color: inherit; text-align: left; cursor: pointer;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
+}
+.tree-link:hover { text-decoration: underline; }
+.tree-id { font-size: 11px; flex-shrink: 0; }
+.tree-desc { font-size: 11px; color: var(--mid); min-width: 0; }
+.tree-meta {
+  width: 118px; flex-shrink: 0; text-align: right;
+  font-size: 11px; color: var(--mid); font-variant-numeric: tabular-nums;
+}
+.tree-acts { width: 156px; flex-shrink: 0; display: flex; gap: 2px; justify-content: flex-end; }
+.tree-empty { padding: 5px 10px 6px 34px; border-bottom: 1px solid var(--soft-2); }
+
+/* ============ 表格字段（table）：带类型的迷你表 + 统计行 ============ */
+/* 每行是一个独立 grid，列宽只由列定义决定 —— 内容再长也不会把某一行的列撑歪。
+ * 行宽下限由 JS 算好写在 .tf-body 的 min-width 上：列多了横向滚动，而不是把列压没。 */
+.tablefield { display: flex; flex-direction: column; gap: 5px; }
+.tf-scroll { overflow-x: auto; border: var(--border); border-radius: var(--radius-btn); background: var(--paper); }
+.tf-body { display: flex; flex-direction: column; width: 100%; }
+.tf-row { display: grid; align-items: stretch; border-bottom: var(--border); }
+.tf-row:last-child { border-bottom: 0; }
+.tf-row:not(.tf-head):not(.tf-total):hover { background: var(--soft); }
+
+.tf-head { background: var(--soft); border-bottom: 1px solid var(--soft-2); }
+.tf-th { display: flex; align-items: center; gap: 4px; min-width: 0; padding: 4px 7px; font-size: 11px; }
+.tf-th + .tf-th, .tf-th + .tf-th-acts { border-left: var(--border); }
+.tf-th-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; color: var(--ink); }
+.tf-th.right { justify-content: flex-end; }
+.tf-th.center { justify-content: center; }
+.tf-badge { flex-shrink: 0; padding: 0 4px; border-radius: 999px; background: var(--soft-2); color: var(--mid); font-size: 10px; line-height: 1.6; }
+.tf-badge.bad { color: var(--danger); }
+.tf-unit { flex-shrink: 0; color: var(--mid); font-size: 10px; }
+
+.tf-td { display: flex; align-items: center; min-width: 0; padding: 1px 3px; }
+.tf-td + .tf-td { border-left: var(--border); }
+.tf-td.right { justify-content: flex-end; }
+.tf-td.center { justify-content: center; }
+
+/* 输入框平时**无边框**（表格靠列线分隔就够了），悬停/聚焦才浮起来——
+ * 一格格都描边的话，一张 8 列的表看起来像 8 个表单拼起来的。 */
+.tf-input {
+  width: 100%; min-width: 0; padding: 3px 5px;
+  font: inherit; font-size: var(--fs-core); color: inherit;
+  background: transparent; border: 1px solid transparent; border-radius: 5px;
+}
+.tf-input:hover { border-color: var(--soft-2); }
+.tf-input:focus { outline: none; background: var(--paper); border-color: var(--mid); box-shadow: var(--shadow-relief-inset); }
+.tf-input.num, .tf-td.right .tf-input { text-align: right; font-variant-numeric: tabular-nums; }
+.tf-input::-webkit-outer-spin-button, .tf-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.tf-input[type=number] { -moz-appearance: textfield; appearance: textfield; }
+.tf-select { padding-right: 2px; }
+.tf-bool { display: flex; align-items: center; justify-content: center; width: 100%; min-height: 24px; cursor: pointer; }
+.tf-bool input { margin: 0; cursor: pointer; accent-color: var(--ink); }
+
+/* 计算列：底色与「已锁定」同义（不落盘、只能改公式），数字等宽对齐 */
+.tf-calc { background: var(--soft); padding: 4px 7px; color: var(--ink); font-variant-numeric: tabular-nums; }
+.tf-td.has-err { background: #fdf3f2; }
+.tf-err { color: var(--danger); font-variant-numeric: normal; }
+
+/* 统计行：一条实线把它和正文分开，数字加粗 —— 它是「结论」，不是又一行数据 */
+.tf-total { border-top: 1px solid var(--mid); background: var(--paper); font-weight: 600; }
+.tf-total .tf-td { padding: 4px 7px; font-variant-numeric: tabular-nums; }
+.tf-sum-label { color: var(--mid); font-weight: 600; margin-right: 6px; }
+.tf-sum-label + .tf-sum-val { color: var(--ink); }
+
+.tf-acts { display: flex; align-items: center; justify-content: flex-end; gap: 1px; padding: 0 4px; }
+.tf-mini {
+  width: 19px; height: 19px; padding: 0; line-height: 1;
+  font-size: 11px; color: var(--mid); background: transparent;
+  border: 0; border-radius: 4px; cursor: pointer;
+}
+.tf-mini:hover:not(:disabled) { background: var(--soft-2); color: var(--ink); }
+.tf-mini:disabled { opacity: .28; cursor: default; }
+
+.tf-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tf-errors { display: flex; flex-direction: column; gap: 1px; }
+.tf-empty { padding: 10px 12px; border: 1px dashed var(--soft-2); border-radius: var(--radius-btn); }
+
+/* 列设置：改动的是**这条数据自己的列**，所以用虚线框和上方的表格分开——
+ * 它不是字段字典（改字段字典会动到同栏目的所有条目）。 */
+.tf-cols {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 8px 10px; border: 1px dashed var(--soft-2); border-radius: var(--radius-btn);
+  background: var(--soft);
+}
+.tf-colrow { display: flex; flex-direction: column; gap: 3px; padding-bottom: 5px; border-bottom: 1px dashed var(--soft-2); }
+.tf-colrow:last-of-type { border-bottom: 0; }
+.tf-colrow-main { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.tf-colrow input, .tf-colrow select { font-size: 11px; padding: 2px 5px; }
+.btn.ghost.on { background: var(--soft-2); color: var(--ink); }
+
 /* ============ 左右栏拖宽（条目列表 ↔ 内容） ============ */
 /* margin: 0 -14px 让把手恰好骑在 .cols 的 14px 间隙上——间距节奏不变，命中区变成整条间隙 */
 .col-splitter {

@@ -141,3 +141,27 @@ test('entry keys 台账要看得见清单里的凭据（否则「一条命令看
   assert.equal(pass.sensitive, true);
   assert.match(pass.label, /控制台/, '标签要带上清单行的名称，看得出是哪一组');
 });
+
+// 播种不再自带密钥栏目：第一次 key set 自动补建一个（写路径建，读路径不建）。
+test('没有 KV 栏目时 key set 自动补建 secret（读命令不建）', async () => {
+  const before = await loadStore();
+  assert.equal(before.sections.some((s) => s.kv), false, '这个用例的前提：没有任何 KV 栏目');
+
+  // 读命令不建：报「还没有 KV 栏目」而不是悄悄建一个空栏目
+  await assert.rejects(() => entries.keyList({}), /还没有 KV 栏目/);
+  assert.equal((await loadStore()).sections.some((s) => s.kv), false);
+
+  // 写命令建：key set 的语义是「我要存」
+  const r = await entries.keySet('DEMO_KEY', 'sk-demo-123', {});
+  assert.equal(r.createdKv, true, '第一次 key set 应顺手把 KV 栏目建出来');
+  const after = await loadStore();
+  const kv = after.sections.find((s) => s.kv);
+  assert.equal(kv.id, 'secret');
+  assert.equal(kv.fields.length, 1, '与 secret 模板同形状（单字段 KV）');
+
+  // 值已经写进去了，且是密文
+  const got = await entries.keyGet('DEMO_KEY', {});
+  assert.equal(got.value, 'sk-demo-123');
+  const raw = after.entries.find((e) => e.section === kv.id);
+  assert.ok(isCipherBlob(raw.values.value), '密文落盘');
+});

@@ -93,6 +93,33 @@ export default {
       render: (d) => service.renderEntryChange(d),
     },
     {
+      id: 'entry.table',
+      cli: ['entry', 'table'],
+      http: ['GET', '/api/tables/:ref'],
+      summary: '看一个表格字段的现值：表头、数据、计算列与统计行（合计/平均/计数）。只读，公式现算',
+      args: ['ref'],
+      flags: {
+        field: { type: 'string', hint: '表格字段（key 或中文标签）；栏目里只有一个表格时可不填' },
+        mask: { type: 'boolean', hint: '密文列打码显示' },
+        section: { type: 'string', hint: '限定栏目，解决同名歧义' },
+      },
+      run: (ctx) => service.getTable(ctx.ref, ctx),
+      render: (d) => service.renderTable(d),
+    },
+    {
+      id: 'entry.remove-many',
+      cli: ['entry', 'remove-many'],
+      http: ['POST', '/api/entries/remove-many'],
+      summary: '批量删条目（ids 用逗号分隔）。找不到的跳过并报告；一个都找不到才报 NOT_FOUND',
+      args: ['ids'],
+      flags: {
+        section: { type: 'string', hint: '限定栏目，解决同名歧义' },
+        'dry-run': { type: 'boolean' },
+      },
+      run: (ctx) => service.removeMany(ctx.ids, ctx),
+      render: (d) => service.renderEntryRemoveMany(d),
+    },
+    {
       id: 'entry.remove',
       cli: ['entry', 'remove'],
       http: ['DELETE', '/api/entries/:ref'],

@@ -1,9 +1,11 @@
 // 字段字典：栏目的字段模板是**数据**，不是代码分支。
 // agent 与面板都从同一份声明渲染，所以「CLI 能填的字段」与「面板能填的字段」不可能分叉。
 //
-// type 取值：text | textarea | number | date | month | bool | select | tags | secret | file
+// type 取值：text | textarea | number | date | month | bool | select | tags | entrylist | table | source | secret | file | md
 
-export const FIELD_TYPES = ['text', 'textarea', 'number', 'date', 'month', 'bool', 'select', 'tags', 'entrylist', 'source', 'secret', 'file', 'md'];
+import { newId } from './ids.js';
+
+export const FIELD_TYPES = ['text', 'textarea', 'number', 'date', 'month', 'bool', 'select', 'tags', 'entrylist', 'table', 'source', 'secret', 'file', 'md'];
 
 /**
  * 类型的人读标签 —— 只用于**面板下拉框**。
@@ -21,6 +23,7 @@ export const FIELD_TYPE_LABELS = {
   select: '单选',
   tags: '多值标签',
   entrylist: '结构清单（变长行）',
+  table: '表格（勾选/下拉/计算）',
   source: '原始资料（乱入后整理）',
   secret: '密文',
   file: '附件',
@@ -373,7 +376,78 @@ const PLATFORM_GROUPS = [
   { id: 'extra', title: '其他' },
 ];
 
+// —— 字段样例（demo）：播种用的**唯一**栏目 ——
+//
+// 为什么单独做一个：新用户第一个问题不是「帮我建一个求职栏目」，而是
+// 「这个工具到底能存什么、能算到哪」。把答案直接摆出来——每种字段类型一格、
+// 连示例数据一起给——比让他们先建栏目再自己填一遍快得多。
+// 其它模板（job / secret / projects…）仍是模板，`section add --template` 随取随用，
+// 只是**不再播种**：第一屏是说明书，不是别人的表格。
+const DEMO_TABLE_COLUMNS = [
+  { key: 'item', label: '事项', type: 'text' },
+  { key: 'state', label: '状态', type: 'select', options: ['未开始', '进行中', '已完成'], default: '未开始' },
+  { key: 'done', label: '已办', type: 'bool' },
+  { key: 'hours', label: '工时', type: 'number' },
+  { key: 'rate', label: '单价', type: 'number', total: 'avg' },
+  { key: 'cost', label: '费用', formula: 'hours * rate', unit: '元' },
+];
+
+const DEMO_FIELDS = [
+  // —— 基本字段（每个都是标量）——
+  f('name', '名称', 'text', 'basic', { hint: '单行文本：所有字段的地基。这个字段被设为「条目名」，列表里显示的就是它' }),
+  f('desc', '描述', 'textarea', 'basic', { hint: '多行文本：换行原样保留' }),
+  f('count', '数量', 'number', 'basic', { hint: '数字。写「1,200」这种带千分位的也认' }),
+  f('ok', '完成', 'bool', 'basic', { hint: '是 / 否 勾选框' }),
+  f('state', '状态', 'select', 'basic', { options: ['未开始', '进行中', '已完成'], hint: '下拉框：值必须在候选里，写错会被拦下而不是悄悄存进去' }),
+  f('day', '日期', 'date', 'basic', { hint: '日期，形如 2026-10-30' }),
+  f('month', '月份', 'month', 'basic', { hint: '月份，形如 2026-10' }),
+  f('tags', '标签', 'tags', 'basic', { hint: '多值标签：顿号或逗号分隔' }),
+
+  // —— 组合字段（值有自己的形状）——
+  f('accounts', '凭据清单', 'entrylist', 'combo', {
+    hint: '结构清单：变长的行，一列一列填。密码列与顶层敏感字段同一条边界（密文落盘、--mask 打码）。示例行只是形状，密码自己填',
+    fields: [
+      { key: 'name', label: '名称' },
+      { key: 'user', label: '账号' },
+      { key: 'pass', label: '密码', sensitive: true },
+    ],
+  }),
+  f('sheet', '样例表格', 'table', 'combo', {
+    hint: '表格：列定义就在**这条数据里**（不在栏目字典），面板「列设置」可以直接加列。'
+      + '「费用」是计算列（公式 hours * rate，不落盘、读时现算）；表尾自动合计——数字求和、勾选计是',
+    columns: DEMO_TABLE_COLUMNS,
+    totals: [
+      { label: '合计', agg: { hours: 'sum', cost: 'sum', done: 'countTrue' } },
+      { label: '完成率', expr: 'pct(countTrue(col("done")), n)', unit: '%' },
+    ],
+  }),
+
+  // —— 富内容 ——
+  f('note', '图文笔记', 'md', 'rich', { hint: 'markdown 正文：标题 / 列表 / 代码块都能渲染；直接 Ctrl+V 贴截图（自动进附件库）；待办勾选就是改正文本身' }),
+  f('docs', '附件', 'file', 'rich', { kind: 'doc', hint: '附件字段：值是附件 id 的列表（不是路径）。在这里直接上传，或从附件库选' }),
+  f('apikey', '密钥', 'secret', 'rich', { hint: '密文字段：值以 AES-256-GCM 落盘，读出来默认原文，--mask 才打码' }),
+];
+
+const DEMO_GROUPS = [
+  { id: 'basic', title: '基本字段（标量）' },
+  { id: 'combo', title: '组合字段（值有形状）' },
+  { id: 'rich', title: '富内容' },
+];
+
+const DEMO_TPL = {
+  id: 'demo',
+  label: '字段样例 / 能力边界',
+  description:
+    '每种字段类型各来一份，连示例数据一起给：单行文本到表格、公式与统计。'
+    + '看完（或直接改）就知道 nx-sk 能存什么、算到哪一步。看完可以整栏删掉。',
+  titleField: 'name',
+  titleLabel: '条目名',
+  groups: DEMO_GROUPS,
+  fields: DEMO_FIELDS,
+};
+
 const TEMPLATES = {
+  demo: DEMO_TPL,
   job: {
     id: 'job',
     label: '求职 / 个人信息',
@@ -558,16 +632,58 @@ export function instantiateTemplate(templateId, overrides = {}) {
   };
 }
 
-/** 首次运行（store 文件不存在）时的默认栏目——第一个就是「求职」。 */
-export function seedSections(stamp) {
-  return [
-    { ...instantiateTemplate('job', { id: 'job', title: '求职', order: 10 }), createdAt: stamp, updatedAt: stamp },
-    { ...instantiateTemplate('projects', { id: 'projects', title: '项目经历', order: 11 }), createdAt: stamp, updatedAt: stamp },
-    { ...instantiateTemplate('internships', { id: 'internships', title: '实习/工作经历', order: 12 }), createdAt: stamp, updatedAt: stamp },
-    { ...instantiateTemplate('campus', { id: 'campus', title: '校内职务/实践', order: 13 }), createdAt: stamp, updatedAt: stamp },
-    { ...instantiateTemplate('secret', { id: 'secret', title: '密钥', order: 20 }), createdAt: stamp, updatedAt: stamp },
-    { ...instantiateTemplate('deploy', { id: 'deploy', title: '部署配置', order: 30 }), createdAt: stamp, updatedAt: stamp },
-  ];
+/**
+ * 首次运行（store 文件不存在）时播种的东西：**只有一个**「字段样例」栏目。
+ *
+ * 为什么不再播种求职 / 密钥 / 项目那一堆：那些是「某个具体场景」的栏目，
+ * 用户的第一栏多半不是它们；而「这个工具能存什么」是每个新用户都要问的问题。
+ * 把答案直接摆出来（每种字段一格、连示例数据一起），比让他们先建栏目再填一遍快得多。
+ * 其它模板仍是模板——`section templates` 看得到，`section add --template` 随取随用。
+ */
+export function seedSections(at) {
+  return [{ ...instantiateTemplate(DEMO_TPL.id, { id: DEMO_TPL.id, title: '字段样例', order: 10 }), createdAt: at, updatedAt: at }];
+}
+
+/**
+ * 播种的那条**示例条目**：每种字段都有内容可看（附件与密文除外——
+ * 附件要有真实文件、密文要有密钥，这两样播种时给不了，留空并在 hint 里说明）。
+ *
+ * 注意：播种直接写 store，不走写入校验——所以这里的形状必须与
+ * `normalizeSpec` / `serializeEntry` 认的一致（表格给行数组，列取字段定义里的）。
+ */
+export function seedEntries(at) {
+  const values = {
+    name: '示例条目',
+    desc: '这是一条示例条目：左（或上）边选中的就是它。直接改任何一格，保存后就成了你自己的数据。',
+    count: 3,
+    ok: true,
+    state: '进行中',
+    day: String(at).slice(0, 10),
+    month: String(at).slice(0, 7),
+    tags: ['样例', '能力边界'],
+    accounts: [{ name: '示例：主控台', user: 'ops@example.com' }],
+    sheet: [
+      { item: '设计', state: '已完成', done: true, hours: 2, rate: 200 },
+      { item: '开发', state: '进行中', done: false, hours: 5, rate: 200 },
+    ],
+    note: [
+      '# 图文字段',
+      '',
+      '- 支持 **markdown**：标题、列表、`行内代码`、表格都能渲染',
+      '- 裸网址会变成可点链接：https://github.com/ZHLX2005/nx-sk',
+      '- [ ] 截图直接 Ctrl+V 粘进来（自动进附件库，正文里插入引用）',
+      '- [ ] 勾选待办就是改正文本身，没有第二份勾选状态',
+    ].join('\n'),
+  };
+  return [{
+    id: newId('e'),
+    section: DEMO_TPL.id,
+    title: values.name,
+    tags: ['样例'],
+    values,
+    createdAt: at,
+    updatedAt: at,
+  }];
 }
 
 /** 由「字段定义 + 值」推导栏目的分组结构，供 render/面板用。 */
@@ -610,7 +726,8 @@ export function syncSectionGroups(groups, fields) {
  */
 // entrylist 的子字段也要参与漂移对比：清单列是结构的一部分，模板把「密码」列标了
 // sensitive 而栏目里没有，这种差异必须报出来——否则密文边界在两份定义间悄悄分叉。
-const FIELD_CMP_KEYS = ['label', 'type', 'group', 'hint', 'options', 'maxItems', 'sensitive', 'fill', 'fields'];
+// table 的列与统计行同理：列类型（勾选/下拉/数字）和公式改了，值的样子就变了。
+const FIELD_CMP_KEYS = ['label', 'type', 'group', 'hint', 'options', 'maxItems', 'sensitive', 'fill', 'fields', 'columns', 'totals'];
 
 function normalizedFieldDef(f) {
   return {
@@ -626,6 +743,14 @@ function normalizedFieldDef(f) {
     fields: Array.isArray(f?.fields)
       ? f.fields.map((s) => ({ key: String(s?.key || ''), label: String(s?.label || s?.key || ''), sensitive: s?.sensitive === true }))
       : null,
+    // 表格列：类型与公式决定「这一格怎么算」，改了一定要报
+    columns: Array.isArray(f?.columns)
+      ? f.columns.map((s) => ({
+        key: String(s?.key || ''), label: String(s?.label || s?.key || ''),
+        type: String(s?.type || 'text'), sensitive: s?.sensitive === true, formula: String(s?.formula || ''),
+      }))
+      : null,
+    totals: Array.isArray(f?.totals) ? f.totals : null,
   };
 }
 

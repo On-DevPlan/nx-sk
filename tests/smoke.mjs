@@ -75,9 +75,29 @@ function rawRequest(base, path, { method = 'GET', headers = {}, body } = {}) {
 process.stdout.write('\n[1] CLI\n');
 
 const boot = await cliJson(['bootstrap']);
-step('bootstrap 给出上下文', boot.app.name === 'nx-sk' && boot.counts.sections >= 2);
-step('第一个栏目是「求职」', boot.sections[0].id === 'job' && boot.sections[0].title === '求职', `${boot.sections.length} 个栏目`);
+step('bootstrap 给出上下文', boot.app.name === 'nx-sk' && boot.counts.sections >= 1);
+// 播种不再是那一堆场景栏目，而是**一个**「字段样例」栏目（连示例条目一起）：
+// 第一屏是说明书，不是别人的表格。场景栏目要用 `section add --template` 自己建（下面就有）。
+step('播种的是「字段样例」栏目 + 示例条目', boot.sections.length === 1
+  && boot.sections[0].id === 'demo' && boot.sections[0].title === '字段样例',
+  `${boot.sections.length} 个栏目 · ${boot.counts.entries} 条条目`);
 step('存储落在隔离的临时目录', boot.storePathRaw.startsWith(home), boot.storePath);
+
+// 场景栏目按模板建回来（后面条目 / 传输 / 附件的步骤都作用在它上面）
+await cli(['section', 'add', 'job', '--title', '求职', '--template', 'job']);
+await cli(['section', 'add', 'projects', '--title', '项目经历', '--template', 'projects']);
+await cli(['section', 'add', 'internships', '--title', '实习', '--template', 'internships']);
+const jobBoot = await cliJson(['bootstrap']);
+step('section add --template 建出场景栏目', ['job', 'projects', 'internships'].every((id) => jobBoot.sections.some((s) => s.id === id)), `${jobBoot.sections.length} 个栏目`);
+
+const tree = await cliJson(['section', 'tree']);
+const demoNode = tree.sections.find((s) => s.id === 'demo');
+step('section tree 给出栏目 + 条目索引', Array.isArray(tree.sections) && demoNode.entryList.length === 1
+  && demoNode.entryList[0].title === '示例条目', `${tree.count} 个栏目`);
+step('样例表格读出来就有合计（播种的示例数据直接可算）', await (async () => {
+  const got = await cliJson(['entry', 'table', '示例条目', '--field', '样例表格']);
+  return got.table.count === 2 && got.table.totals.some((x) => x.label === '合计');
+})(), '计算列 + 表尾统计');
 
 const ver = await cli(['version']);
 step('version 裸输出', /^\d+\.\d+\.\d+$/.test(ver.out), ver.out);
@@ -187,6 +207,11 @@ const stillThere = await cliJson(['entry', 'get', '冒烟测试']);
 step('试运行后条目还在', stillThere.id === got.id);
 
 // 密钥 = 极简 KV：名称 → 值。走 key 直通命令（= entry 的语法糖，作用在 kvSection 上）
+// 播种不再自带密钥栏目：**第一次 key set** 自动补建（读命令不建——读不到就是读不到）。
+const kvFirst = await cliJson(['key', 'set', 'KV_PROBE', 'sk-probe']);
+step('没有 KV 栏目时 key set 自动补建（播种不再自带密钥栏目）', kvFirst.createdKv === true
+  && (await cliJson(['bootstrap'])).sections.some((s) => s.id === 'secret' && s.kv === true));
+
 const secFields = await cliJson(['entry', 'fields', '--section', 'secret']);
 step('密钥栏目是单字段 KV', secFields.sections[0].fields.length === 1 && secFields.sections[0].titleField === null,
   `${secFields.sections[0].fields.length} 个字段`);
@@ -195,10 +220,6 @@ const secList = await cliJson(['section', 'list']);
 step('栏目带 kv 标记（面板据此渲染 KV 表格，不是条目列表）',
   secList.sections.find((s) => s.id === 'secret')?.kv === true
   && secList.sections.find((s) => s.id === 'job')?.kv === false);
-step('bootstrap 也要带 kv（它是 agent 的首选入口，不能让 agent 再猜一次）',
-  boot.sections.find((s) => s.id === 'secret')?.kv === true);
-
-await cliJson(['key', 'set', 'KV_PROBE', 'sk-probe']);
 const kvProbe = await cliJson(['key', 'list']);
 step('key list 报出 KV 栏目名', kvProbe.section === 'secret');
 const bySection = await cliJson(['key', 'list', '--section', 'secret']);
