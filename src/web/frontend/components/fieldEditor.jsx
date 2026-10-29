@@ -7,6 +7,7 @@ import { Copyable, copyText } from './ui.jsx';
 import { Lightbox } from './lightbox.jsx';
 import { MdView, imageRecord } from './mdView.jsx';
 import { SourceFieldControl } from './sourcePanel.jsx';
+import { TableFieldControl } from './tableField.jsx';
 import { imageRefs, linkCount } from '../mdInline.js';
 import { smartStats } from '../mdSmart.js';
 import { taskStats, toggleTaskAtLine } from '../mdSource.js';
@@ -631,6 +632,12 @@ export function FieldControl({ def, value, onChange, disabled, ctx }) {
     return <EntryListFieldControl def={def} value={v} onChange={onChange} />;
   }
 
+  // 表格：列有类型（勾选 / 下拉 / 数字 / 日期）、可带计算列与统计行。
+  // entrylist 是它的「纯文本前辈」——老栏目继续走 entrylist，不必迁移。
+  if (type === 'table') {
+    return <TableFieldControl def={def} value={v} onChange={onChange} />;
+  }
+
   if (type === 'bool') {
     const checked = v === true || v === 'true' || v === '是';
     return (
@@ -691,7 +698,7 @@ export function FieldGroup({ title, fields, draft, onPatch, sectionTitle, entryT
       <div className="pad">
         <div className="grid">
           {fields.map((def) => (
-            <div key={def.key} className={`field ${['textarea', 'file', 'md', 'entrylist', 'source'].includes(def.type) ? 'wide' : ''}`}>
+            <div key={def.key} className={`field ${['textarea', 'file', 'md', 'entrylist', 'table', 'source'].includes(def.type) ? 'wide' : ''}`}>
               <div className="flabel">
                 <span>{def.label}</span>
                 {def.sensitive ? <span className="tag bad">密文</span> : null}
