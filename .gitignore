@@ -31,3 +31,7 @@ seed/
 /*.zip
 workbuddy-ai/
 .workbuddy-ai/
+
+# 嵌套参考仓库（sl-git-standard：.claude/repo 半透明，仅 _self/ 入库）
+.claude/repo/*
+!.claude/repo/_self/
