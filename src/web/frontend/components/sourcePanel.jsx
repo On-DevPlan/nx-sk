@@ -14,7 +14,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api/client.js';
 import { fileToDataUrl, listAttachments, mergeFiles } from '../api/files.js';
-import { Copyable } from './ui.jsx';
+import { Copyable, copyText } from './ui.jsx';
+import { Lightbox } from './lightbox.jsx';
 import { MdView } from './mdView.jsx';
 import { useStore } from '../store.jsx';
 
@@ -35,8 +36,13 @@ function titleOf(item) {
   if (item.name) return item.name;
   if (item.kind === 'url') return item.url || '网址';
   if (item.kind === 'file') return '附件';
-  const first = String(item.text || '').split('\n').find((l) => l.trim()) || '';
-  return first.trim().slice(0, 40) || '一段文字';
+  // 与 core/source.js 的 inferName 同口径：逐行压掉图片语法（第一行常常只是一张图）
+  for (const line of String(item.text || '').split('\n')) {
+    if (!line.trim()) continue;
+    const stripped = line.replace(/!\[([^\]]*)\]\(\s*[^)\s]+\s*\)/g, '').trim();
+    if (stripped) return stripped.slice(0, 40);
+  }
+  return '一段文字';
 }
 
 /**
@@ -47,11 +53,20 @@ function SourceDrawer({ items, onChange, onClose, title, sectionTitle }) {
   const { toast, guard } = useStore();
   const [selId, setSelId] = useState(items[0]?.id || null);
   const [dragOver, setDragOver] = useState(false);
-  const [paste, setPaste] = useState('');
+  const [editorOver, setEditorOver] = useState(false);
   const [files, setFiles] = useState({});
+  const [zoom, setZoom] = useState(null);
+  // 编辑器一职两用：editId 为 null = 在**收集**新的一条；有值 = 在**改**某条 text。
+  // 原文不改写的纪律没有破——改动永远是人显式点了「保存」才发生。
+  const [editId, setEditId] = useState(null);
+  const [draft, setDraft] = useState('');
+  const [uploading, setUploading] = useState(0);
   const listRef = useRef(null);
   const fileRef = useRef(null);
+  const imgRef = useRef(null);
+  const taRef = useRef(null);
   const dragDepth = useRef(0);
+  const editorDepth = useRef(0);
   const triggerRef = useRef(null);
 
   const loadFiles = useCallback(async (force = false) => {
@@ -60,7 +75,7 @@ function SourceDrawer({ items, onChange, onClose, title, sectionTitle }) {
       const map = {};
       for (const f of d?.files || []) map[f.id] = f;
       setFiles(map);
-    } catch { /* 附件库读不到：仍可粘贴文字 */ }
+    } catch { /* 附件库读不到：仍可粘贴纯文字 */ }
   }, []);
   useEffect(() => { loadFiles(true); }, [loadFiles]);
 
@@ -69,6 +84,9 @@ function SourceDrawer({ items, onChange, onClose, title, sectionTitle }) {
     const first = listRef.current?.querySelector('button');
     first?.focus();
   }, []);
+
+  // MdView 的 byId 要 **Map**（imageRecord 用 .get() 取），对象查不到图片
+  const byId = useMemo(() => new Map(Object.entries(files)), [files]);
 
   const selected = useMemo(() => items.find((x) => x.id === selId) || items[0] || null, [items, selId]);
   // 冲突以新的为准、旧的留痕：当前版本与被取代的分开列。
@@ -81,6 +99,78 @@ function SourceDrawer({ items, onChange, onClose, title, sectionTitle }) {
     onChange(next);
     if (next.length) setSelId(next[next.length - 1].id);
   };
+
+  /** 光标处插入（未聚焦时追加到末尾）：图片和文字混排是聊天记录的常态。 */
+  const insertToDraft = (snippet) => {
+    const el = taRef.current;
+    const base = draft;
+    const at = el && el.selectionStart !== null ? el.selectionStart : base.length;
+    const before = base.slice(0, at);
+    const after = base.slice(at);
+    const padL = before && !/\s$/.test(before) ? '\n' : '';
+    setDraft(`${before}${padL}${snippet}${after}`);
+    requestAnimationFrame(() => {
+      const t = taRef.current;
+      if (!t) return;
+      t.focus();
+      const pos = before.length + padL.length + snippet.length;
+      t.setSelectionRange(pos, pos);
+    });
+  };
+
+  /**
+   * 把文件插进**正文**：图片 → `![名](f_xxx)`（内嵌显示）；其它 → `[名](f_xxx)`
+   * （可点开的附件链接）。这是「图文混排存一条」的入口——图和文不分家。
+   */
+  const uploadIntoDraft = guard(async (fileList) => {
+    const picked = [...(fileList || [])].filter(Boolean);
+    if (!picked.length) return;
+    setUploading(picked.length);
+    try {
+      const parts = [];
+      for (const file of picked) {
+        try {
+          const content = await fileToDataUrl(file);
+          const r = await api('/api/files', { method: 'POST', body: { content, name: file.name } });
+          const name = r.name || file.name;
+          parts.push(/^image\//i.test(file.type || '') || /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(name)
+            ? `![${name}](${r.id})`
+            : `[${name}](${r.id})`);
+        } catch (e) {
+          toast(`上传失败：${e.message || e}`, 'bad');
+        }
+      }
+      if (parts.length) insertToDraft(parts.join('\n'));
+    } finally {
+      setUploading(0);
+    }
+  });
+
+  // 粘贴：剪贴板里有图（截图的常态）就上传并插进正文；纯文字走浏览器默认粘贴
+  const onEditorPaste = guard(async (e) => {
+    const dt = e.clipboardData;
+    if (!dt) return;
+    const imgs = [];
+    for (const it of dt.items || []) {
+      if (it.kind !== 'file') continue;
+      if (!String(it.type || '').startsWith('image/')) continue;
+      const f = it.getAsFile();
+      if (f) imgs.push(f);
+    }
+    if (!imgs.length) return;
+    e.preventDefault();
+    await uploadIntoDraft(imgs);
+  });
+
+  // 拖拽进编辑器 = 插进正文（拖到左栏才是「入袋成 file item」，两条路语义不同）
+  const onEditorDrop = guard(async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    editorDepth.current = 0;
+    setEditorOver(false);
+    const list = [...(e.dataTransfer?.files || [])];
+    if (list.length) await uploadIntoDraft(list);
+  });
 
   const upload = guard(async (fileList) => {
     const picked = [...(fileList || [])].filter(Boolean);
@@ -102,28 +192,46 @@ function SourceDrawer({ items, onChange, onClose, title, sectionTitle }) {
       }
     }
     if (added.length) {
-      addItems([...items, ...added]);
+      onChange([...items, ...added]);
       setFiles((prev) => mergeFiles(Object.values(prev).map((f) => ({ ...f })), added.map((a) => ({ id: a.fileId, name: a.name, url: '', isImage: false }))));
       loadFiles(true);
       toast(`已加入 ${added.length} 个文件`);
     }
   });
 
-  const addText = () => {
-    const text = paste.trim();
+  /** text 的底层是 markdown：标题从第一条非空行推断，图片语法压掉（`![截图](f_x)` 当不了标题）。 */
+  const commitText = () => {
+    const text = draft.trim();
     if (!text) return;
+    const name = text.split('\n').find((l) => l.trim())?.replace(/!\[([^\]]*)\]\(\s*[^)\s]+\s*\)/g, '').trim().slice(0, 40) || '一段文字';
+    if (editId) {
+      onChange(items.map((x) => (x.id === editId ? { ...x, text, name } : x)));
+      setSelId(editId);
+      setEditId(null);
+      setDraft('');
+      toast('已保存（原条就地更新——是你自己点的保存）');
+      return;
+    }
     addItems([...items, {
       id: `s_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
       kind: 'text',
-      name: text.split('\n').find((l) => l.trim())?.trim().slice(0, 40) || '一段文字',
+      name,
       text,
       addedAt: new Date().toISOString(),
     }]);
-    setPaste('');
+    setDraft('');
+  };
+
+  const startEdit = (item) => {
+    setEditId(item.id);
+    setDraft(item.text || '');
+    setSelId(item.id);
+    requestAnimationFrame(() => taRef.current?.focus());
   };
 
   const removeSel = () => {
     if (!selected) return;
+    if (editId === selected.id) { setEditId(null); setDraft(''); }
     const next = items.filter((x) => x.id !== selected.id);
     onChange(next);
     setSelId(next[0]?.id || null);
@@ -139,6 +247,7 @@ function SourceDrawer({ items, onChange, onClose, title, sectionTitle }) {
   });
 
   const fileRec = selected?.kind === 'file' ? files[selected.fileId] : null;
+  const editing = editId !== null;
 
   return (
     <div
@@ -182,18 +291,53 @@ function SourceDrawer({ items, onChange, onClose, title, sectionTitle }) {
                   if (list.length) upload(list);
                 }}
               />
-              <span className="hint">或把文件拖到这一栏</span>
+              <span className="hint">拖到这一栏 = 入袋成附件条目</span>
             </div>
 
-            <div className="source-paste">
+            <div
+              className={`source-paste${editorOver ? ' drag' : ''}`}
+              onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); editorDepth.current += 1; setEditorOver(true); }}
+              onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+              onDragLeave={() => { editorDepth.current -= 1; if (editorDepth.current <= 0) { editorDepth.current = 0; setEditorOver(false); } }}
+              onDrop={onEditorDrop}
+            >
+              <div className="rowgap" style={{ gap: 4 }}>
+                <span className="hint nowrap">
+                  {editing ? `正在编辑一条文字（保存后就地更新）` : '新的一条（markdown）'}
+                </span>
+                <span className="grow" />
+                {uploading ? <span className="hint nowrap">上传中 {uploading}…</span> : null}
+                <button type="button" className="btn small ghost" onClick={() => imgRef.current?.click()} title="选图片/文件插进正文">插入图片</button>
+                <input
+                  ref={imgRef}
+                  type="file"
+                  multiple
+                  style={{ display: 'none' }}
+                  onChange={(e) => {
+                    const list = [...(e.target.files || [])];
+                    e.target.value = '';
+                    if (list.length) uploadIntoDraft(list);
+                  }}
+                />
+                {editing ? (
+                  <button type="button" className="btn small ghost" onClick={() => { setEditId(null); setDraft(''); }}>取消编辑</button>
+                ) : null}
+              </div>
               <textarea
-                value={paste}
-                onChange={(e) => setPaste(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) addText(); }}
-                placeholder="粘贴一段文字（Ctrl+Enter 加入）"
-                rows={3}
+                ref={taRef}
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) commitText(); }}
+                onPaste={onEditorPaste}
+                placeholder={'聊天记录直接贴（支持 markdown）：图片 Ctrl+V / 拖进来就内嵌；网图写 ![说明](https://…)。Ctrl+Enter 入袋'}
+                rows={5}
               />
-              <button type="button" className="btn small" onClick={addText} disabled={!paste.trim()}>加入</button>
+              <div className="rowgap">
+                <button type="button" className="btn small" onClick={commitText} disabled={!draft.trim()}>
+                  {editing ? '保存修改' : '加入（Ctrl+Enter）'}
+                </button>
+                <span className="hint">图和文存在**同一条**里，不会分开</span>
+              </div>
             </div>
 
             <div className="source-items" ref={listRef}>
@@ -209,7 +353,7 @@ function SourceDrawer({ items, onChange, onClose, title, sectionTitle }) {
                   {it.at ? <span className="source-item-time">{fmtTime(it.at)}</span> : null}
                 </button>
               )) : (
-                <div className="hint pad">袋子是空的。粘贴文字，或把文件拖进来。</div>
+                <div className="hint pad">袋子是空的。写一段文字（可带图），或把文件拖到这一栏。</div>
               )}
 
               {olds.length ? (
@@ -235,7 +379,7 @@ function SourceDrawer({ items, onChange, onClose, title, sectionTitle }) {
             </div>
           </div>
 
-          {/* 中：选中那条的正文 */}
+          {/* 中：选中那条的正文（text 按 markdown 渲染，图片从附件库解析 / 外链直连） */}
           <div className="source-view-pane">
             {!selected ? (
               <div className="hint pad">左边选一条看内容。</div>
@@ -247,7 +391,10 @@ function SourceDrawer({ items, onChange, onClose, title, sectionTitle }) {
                   {selected.superseded ? <span className="tag bad">已被取代</span> : null}
                   {selected.addedAt ? <span className="muted nowrap">{fmtTime(selected.at || selected.addedAt)}</span> : null}
                   {selected.kind === 'text' ? (
-                    <Copyable className="tag" text={selected.text || ''} title="点击复制原文">复制</Copyable>
+                    <>
+                      <Copyable className="tag" text={selected.text || ''} title="点击复制 markdown 原文">复制</Copyable>
+                      <button type="button" className="btn small ghost" onClick={() => startEdit(selected)}>编辑</button>
+                    </>
                   ) : null}
                   <button type="button" className="btn small ghost" onClick={removeSel}>移除</button>
                 </div>
@@ -255,7 +402,15 @@ function SourceDrawer({ items, onChange, onClose, title, sectionTitle }) {
                 <div className="source-view-body">
                   {selected.kind === 'text' ? (
                     <div className="md-preview reading">
-                      <MdView text={selected.text || ''} />
+                      <MdView
+                        text={selected.text || ''}
+                        byId={byId}
+                        onOpenImage={setZoom}
+                        onCopy={async (value) => {
+                          const ok = await copyText(value);
+                          toast(ok ? `已复制 ${value}` : '复制失败：浏览器拒绝了剪贴板访问', ok ? 'ok' : 'bad');
+                        }}
+                      />
                     </div>
                   ) : null}
 
@@ -294,6 +449,8 @@ function SourceDrawer({ items, onChange, onClose, title, sectionTitle }) {
           </div>
         </div>
       </aside>
+
+      {zoom ? <Lightbox item={zoom} onClose={() => setZoom(null)} /> : null}
     </div>
   );
 }
