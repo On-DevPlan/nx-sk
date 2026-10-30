@@ -35,3 +35,10 @@ workbuddy-ai/
 # 嵌套参考仓库（sl-git-standard：.claude/repo 半透明，仅 _self/ 入库）
 .claude/repo/*
 !.claude/repo/_self/
+.claude/settings.local.json
+
+# 原型构建产物（plan/ 下的 vite 构建输出）
+plan/**/dist/
+
+# agent 会话的临时探针输出（PowerShell stdout 捕获不可靠，一律落盘再读）
+/tmp-*

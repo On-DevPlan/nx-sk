@@ -6,12 +6,22 @@ import { displayPath, migrationDir, storeFile } from './paths.js';
 import { ensureDir, pathExists, writeAtomic } from './fsx.js';
 import { ensureSourceBuiltin, instantiateTemplate, seedEntries, seedSections, syncSectionGroups } from './fields.js';
 import { normalizeFileRecord } from './attachments.js';
+// 块（entry.body）的归一在 shared/blocks.js —— 与 shared/table.js 同一条理由：
+// 面板不许 import core，而「块怎么算合法」只允许有一份实现。core→shared 允许（见 eslint 注释）。
+import { normalizeBlocks } from '../shared/blocks.js';
+// 视图配置（section.views）的归一同样在 shared —— 理由同上：面板不许 import core，
+// 而「什么算合法视图」只能有一份实现。
+import { normalizeViews } from '../shared/views.js';
+import { blocked } from './errors.js';
 import { nowIso, stamp } from './ids.js';
 
 /** v2：密钥栏目从 8 字段模板改成单字段 KV（名称 → 值）。
  *  v3：栏目有了 `kv` 标记——KV 栏目是一张表（面板渲染成表格，key 命令默认作用在它上面），
- *      并去掉 `settings.kvSection` 这个冗余概念。 */
-export const STORE_VERSION = 3;
+ *      并去掉 `settings.kvSection` 这个冗余概念。
+ *  v4：条目有了 `body?: Block[]`（块正文，递归）。**只加可选键**，没有迁移函数——
+ *      老条目没有 body 就是没有；normalize 会把非法块丢掉，存量数据读一次即安全。
+ *      反方向的降级没有保护：老代码读 v4 会把 body 丢掉（白名单重建），所以 v4 必须**拒绝老代码写**。 */
+export const STORE_VERSION = 4;
 
 export function defaultSettings() {
   return {
@@ -62,12 +72,20 @@ function normalizeSection(raw) {
   const ensured = ensureSourceBuiltin(out.groups, out.fields, { kv: out.kv });
   out.groups = ensured.groups;
   out.fields = ensured.fields;
+  // 数据库视图（v4 同批）：同样是**可选键**。缺席 = 还没配过，读路径推断一套缺省视图
+  // （不落盘，见 shared/views.js 的文件头）。空数组等价于缺席——存一个 `views: []`
+  // 只会让「还没配过」和「配过又删光」两件事看起来不一样，实际行为必须一样。
+  const views = normalizeViews(raw.views);
+  if (views.length) out.views = views;
+  // defaultView 必须指向一个**真的存在**的视图；指向空气就丢掉（读的时候退回第一个），
+  // 否则面板切到缺省视图时会拿到一个不存在的 id。
+  if (raw.defaultView && views.some((v) => v.id === raw.defaultView)) out.defaultView = String(raw.defaultView);
   return out;
 }
 
 function normalizeEntry(raw) {
   if (!raw || typeof raw !== 'object' || !raw.id) return null;
-  return {
+  const out = {
     id: String(raw.id),
     section: String(raw.section || ''),
     title: String(raw.title || ''),
@@ -76,6 +94,10 @@ function normalizeEntry(raw) {
     createdAt: raw.createdAt || null,
     updatedAt: raw.updatedAt || null,
   };
+  // 块正文（v4）：**可选键**，缺席就是没有（不补一个空数组，否则老条目会被无意义地改写）。
+  // 非法块在这里丢掉 —— normalize 是每条读写路径的必经点，坏数据读一次即安全。
+  if (Array.isArray(raw.body)) out.body = normalizeBlocks(raw.body);
+  return out;
 }
 
 // v1 的密钥模板字段。迁移时**不动 values 里这些键**——只把 keyValue 搬到 value，
@@ -196,6 +218,14 @@ let cachePath = null;
 let cacheMtime = -1;
 let cacheCorruptNote = null;
 let cacheMigrationNote = null;
+// 磁盘上那份 store 的版本号 —— 它可以**大于** STORE_VERSION（用户降级跑老代码）。
+// normalize 会把版本抹成当前值，所以磁盘版本必须在这里单独记，否则降级守卫就无从判断。
+let cacheDiskVersion = STORE_VERSION;
+
+/** 最近一次读盘时的磁盘版本（bootstrap / health 展示「store 由更新版本写入」用）。 */
+export function diskVersion() {
+  return cacheDiskVersion;
+}
 
 export function storePathInUse() {
   return storeFile();
@@ -229,6 +259,7 @@ export async function loadStore(explicitPath) {
       cacheCorruptNote = { from: p, to: corrupt, error: String(e && e.message) };
     }
     const oldVersion = Number((parsed && parsed.version) || 1);
+    cacheDiskVersion = oldVersion;
     const next = normalize(parsed);
 
     if (!corrupt && oldVersion < STORE_VERSION && next._migration) {
@@ -245,6 +276,7 @@ export async function loadStore(explicitPath) {
       };
       delete next._migration;
       // 就地落盘：version 写进去之后就不会再迁移（幂等）
+      cacheDiskVersion = STORE_VERSION;
       await saveStore(next, p);
       return next;
     }
@@ -259,12 +291,22 @@ export async function loadStore(explicitPath) {
     cache = emptyStore(true);
     cachePath = p;
     cacheMtime = -1;
+    cacheDiskVersion = STORE_VERSION;
     return cache;
   }
 }
 
 export async function saveStore(next, explicitPath) {
   const p = explicitPath || storeFile();
+  // **降级守卫**（设计 §十一 11.4）：磁盘上的 store 由更新版本写入时，拒绝一切写入。
+  // 否则老代码的白名单 normalize 会把新版本才有的键（比如 v4 的 body）**静默丢掉**——
+  // 用户降级跑一次、保存一次，块正文就永久没了，而且没有任何报错。
+  if (cacheDiskVersion > STORE_VERSION) {
+    throw blocked(
+      `这份 store 由更新版本的 nx-sk 写入（磁盘版本 v${cacheDiskVersion} > 当前 v${STORE_VERSION}）。`
+      + '为避免丢掉新版本才有的数据（块正文等），已拒绝写入。请升级 nx-sk 后再修改。',
+    );
+  }
   const data = normalize(next);
   delete data._migration;
   await ensureDir(join(p, '..'));

@@ -5,9 +5,10 @@ import { assertFieldKey, assertSafeId } from '../../core/paths.js';
 import { badInput, blocked, conflict, notFound } from '../../core/errors.js';
 import { FILL_POLICIES, FIELD_TYPES, ensureSourceBuiltin, findSection, getTemplate, groupFields, instantiateTemplate, mergeTemplate, sectionNames, syncSectionGroups, templateSummaries } from '../../core/fields.js';
 import { computeTable, sanitizeColumns, sanitizeTotals } from '../../shared/table.js';
+import { VIEW_LABELS, VIEW_TYPES, effectiveDefaultViewId, effectiveViews, isViewId } from '../../shared/views.js';
 import { completeness, dumpSection, formatValue } from '../../core/render.js';
 import { sensitiveViewer } from '../../core/vault.js';
-import { nowIso } from '../../core/ids.js';
+import { newId, nowIso } from '../../core/ids.js';
 
 // 定位方式放宽：内部 id 与用户手上的标题都接受（实现在 core/fields.js，避免模块互依）。
 export { findSection };
@@ -392,6 +393,265 @@ export async function dump(ref, { mask } = {}) {
   };
 }
 
+// —— 数据库视图（section.views，S2）——
+//
+// 三条纪律（设计 §19 / §八 8.2）：
+//   ① **缺省视图只在读路径推断**（shared/views.js），用户第一次改视图才落盘；
+//   ② 投影只存 key / width / hidden —— 标签、类型、候选值一律回查字段字典（单一事实源）；
+//   ③ 「视图配置」是数据（section.views），「当前选中哪个视图」是视图态（settings.ui）。
+
+/** 字段引用索引：key 与 label 都能定位（CLI 里人更愿意写「求职状态」而不是 jobStatus）。 */
+function fieldIndex(section) {
+  const byRef = new Map();
+  for (const f of section.fields || []) {
+    byRef.set(f.key, f);
+    if (f.label) byRef.set(String(f.label), f);
+  }
+  return byRef;
+}
+
+function resolveFieldRef(section, ref, { where }) {
+  const hit = fieldIndex(section).get(String(ref));
+  if (!hit) {
+    throw badInput(`${where} 引用了不存在的字段: ${ref}（用 'nx-sk section get ${section.id}' 看字段 key / 标签）`);
+  }
+  return hit.key;
+}
+
+function resolveViewId(raw) {
+  const id = String(raw ?? '').trim();
+  if (!isViewId(id)) {
+    throw badInput(`视图 id 非法: ${JSON.stringify(raw)}（只收字母数字与 _ . : -，最长 64；建议 v_xxx）`);
+  }
+  return id;
+}
+
+/** columns 收三种写法：['姓名'] / [{key:'姓名'}] / [{key,width,hidden}]。 */
+function validateViewColumns(section, raw) {
+  const list = Array.isArray(raw) ? raw : [raw];
+  const byRef = fieldIndex(section);
+  const seen = new Set();
+  const out = [];
+  for (const c of list) {
+    const refRaw = typeof c === 'string' || typeof c === 'number' ? c : (c && (c.key ?? c.ref));
+    const ref = String(refRaw ?? '').trim();
+    if (!ref) continue;
+    const def = byRef.get(ref);
+    if (!def) {
+      throw badInput(`columns 里没有这个字段: ${ref}（投影只认字段字典里的 key 或标签）`);
+    }
+    if (seen.has(def.key)) continue;
+    seen.add(def.key);
+    const col = { key: def.key };
+    const width = Number(c && c.width);
+    if (c && c.width !== undefined && c.width !== null && c.width !== '' && Number.isFinite(width)) {
+      col.width = Math.round(Math.min(800, Math.max(40, width)));
+    }
+    if (c && c.hidden === true) col.hidden = true;
+    out.push(col);
+  }
+  if (!out.length) throw badInput('columns 不能是空数组（空 = 没有列；要「全部列」就别传 --columns）');
+  return out;
+}
+
+function validateSort(section, raw) {
+  if (raw === null || raw === '') return null;
+  // CLI 惯用 `字段:desc`；也收 JSON {key,dir}
+  if (typeof raw === 'string') {
+    const i = raw.lastIndexOf(':');
+    const ref = i > 0 ? raw.slice(0, i) : raw;
+    const dir = i > 0 ? raw.slice(i + 1) : 'asc';
+    if (dir !== 'asc' && dir !== 'desc') throw badInput(`--sort 的方向只能是 asc / desc，收到 ${dir}`);
+    return { key: resolveFieldRef(section, ref, { where: '--sort' }), dir };
+  }
+  if (!raw || typeof raw !== 'object' || !raw.key) throw badInput('--sort 要用 字段[:asc|desc] 或 {"key":"…","dir":"asc"}');
+  return {
+    key: resolveFieldRef(section, raw.key, { where: '--sort' }),
+    dir: raw.dir === 'desc' ? 'desc' : 'asc',
+  };
+}
+
+function validateViewType(section, raw) {
+  const type = String(raw || 'table');
+  if (!VIEW_TYPES.includes(type)) throw badInput(`视图类型非法: ${type}（可用: ${VIEW_TYPES.join(' / ')}）`);
+  if (section.kv === true && type !== 'kv') {
+    throw badInput('KV 栏目的视图只能是 kv 类型（D1：KV 栏目就是一张表，没有别的读法）');
+  }
+  if (section.kv !== true && type === 'kv') {
+    throw badInput('只有 KV 栏目能建 kv 视图；普通栏目用 table / board');
+  }
+  return type;
+}
+
+/**
+ * 把「当前实际生效的视图」固化成显式配置 —— 第一次改视图时调用。
+ *
+ * 为什么不是「只把用户新建的那一个写进去」：用户改之前看到的是推断出来的
+ * 表格 / 精简 / 看板；只写一条会让其余 chips **凭空消失**，看起来像丢了配置。
+ * 固化 = 把他正在看的这一套变成他的，之后字典加字段也不会再自动进列（视图是显式选择）。
+ */
+function materializeViews(section) {
+  return effectiveViews(section).views.map(({ provisional: _provisional, ...v }) => v);
+}
+
+export async function listViews(ref) {
+  const store = await loadStore();
+  const s = mustFind(store, ref);
+  const { views, provisional } = effectiveViews(s);
+  const def = effectiveDefaultViewId(s, views);
+  return {
+    status: 'ok',
+    section: { id: s.id, title: s.title, kv: s.kv === true },
+    count: views.length,
+    // 推断结果也列出来，并明确标 provisional —— 让调用方知道「这套是系统给的、没落盘」
+    provisional,
+    default: def,
+    views,
+  };
+}
+
+export async function addView(ref, { id, type, title, columns, groupby, sort, 'dry-run': dryRun } = {}) {
+  const store = await loadStore();
+  const s = mustFind(store, ref);
+  const t = validateViewType(s, type);
+  const viewId = id ? resolveViewId(id) : newId('v');
+  const current = materializeViews(s);
+  if (current.some((v) => v.id === viewId)) {
+    throw conflict(`视图已存在: ${viewId}（改它用 section view update；重复创建不会静默覆盖）`);
+  }
+
+  const view = { id: viewId, type: t, title: String(title || VIEW_LABELS[t]) };
+  if (columns !== undefined) view.columns = validateViewColumns(s, columns);
+  if (groupby !== undefined) {
+    if (t !== 'board') throw badInput('--groupby 只对看板视图有意义（表格/精简是同一批数据的列投影）');
+    view.groupBy = resolveFieldRef(s, groupby, { where: '--groupby' });
+  }
+  if (t === 'board' && !view.groupBy) {
+    throw badInput('看板视图必须给 --groupby <字段>（按哪个 select 字段分组）');
+  }
+  if (sort !== undefined) {
+    const parsed = validateSort(s, sort);
+    if (parsed) view.sort = parsed;
+  }
+
+  if (dryRun) return { status: 'skipped', dryRun: true, wouldAdd: view };
+
+  const next = [...current, view];
+  await mutateStore((st) => {
+    const target = mustFind(st, ref);
+    target.views = next;
+    target.updatedAt = nowIso();
+  });
+  return { status: 'ok', added: true, view, views: next.length };
+}
+
+export async function updateView(ref, viewId, patch = {}) {
+  const dryRun = patch['dry-run'];
+  const store = await loadStore();
+  const s = mustFind(store, ref);
+  const wantId = resolveViewId(viewId);
+  const current = materializeViews(s);
+  const idx = current.findIndex((v) => v.id === wantId);
+  if (idx < 0) {
+    throw notFound(`视图不存在: ${wantId}（现有: ${current.map((v) => v.id).join(', ') || '无'}）`);
+  }
+  const view = { ...current[idx] };
+  const changed = [];
+
+  if (patch.type !== undefined && String(patch.type) !== view.type) {
+    throw badInput('视图类型不能原地改（table / board / kv 的语义不同）——删掉重建一个更清楚');
+  }
+  if (patch.title !== undefined) { view.title = String(patch.title); changed.push('title'); }
+  if (patch.columns !== undefined) { view.columns = validateViewColumns(s, patch.columns); changed.push('columns'); }
+  if (patch.groupby !== undefined) {
+    if (view.type !== 'board') throw badInput('--groupby 只对看板视图有意义');
+    view.groupBy = resolveFieldRef(s, patch.groupby, { where: '--groupby' });
+    changed.push('groupBy');
+  }
+  if (patch.sort !== undefined) {
+    const parsed = validateSort(s, patch.sort);
+    if (parsed) view.sort = parsed; else delete view.sort;
+    changed.push('sort');
+  }
+  // `--set col.字段.width=120`：列宽拖拽结束 = 一次 update（拖动中是本地 state，listW 先例）
+  if (patch.set !== undefined) {
+    if (!patch.set || typeof patch.set !== 'object' || Array.isArray(patch.set)) {
+      throw badInput('--set 要用 col.字段.属性=值的写法，例如 --set col.姓名.width=120');
+    }
+    const cols = [...(view.columns || [])];
+    for (const [k, v] of Object.entries(patch.set)) {
+      const m = /^col\.(.+)\.(width|hidden)$/.exec(String(k));
+      if (!m) throw badInput(`--set 只支持 col.<字段>.width / col.<字段>.hidden，收到 ${k}`);
+      const key = resolveFieldRef(s, m[1], { where: '--set' });
+      const at = cols.findIndex((c) => c.key === key);
+      if (at < 0) throw badInput(`列 ${m[1]} 不在这个视图的投影里（先 --columns 把它加进来）`);
+      const col = { ...cols[at] };
+      if (m[2] === 'width') {
+        const n = Number(v);
+        if (!Number.isFinite(n)) throw badInput(`col.${m[1]}.width 要是数字，收到 ${JSON.stringify(v)}`);
+        col.width = Math.round(Math.min(800, Math.max(40, n)));
+      } else {
+        if (v === true || String(v) === 'true') col.hidden = true; else delete col.hidden;
+      }
+      cols[at] = col;
+    }
+    view.columns = cols;
+    changed.push('columns');
+  }
+
+  if (!changed.length) throw badInput('没有要修改的内容（可改 title / columns / sort / groupby / set）');
+  if (dryRun) return { status: 'skipped', dryRun: true, wouldChange: view, changed };
+
+  const next = current.map((v, i) => (i === idx ? view : v));
+  await mutateStore((st) => {
+    const target = mustFind(st, ref);
+    target.views = next;
+    target.updatedAt = nowIso();
+  });
+  return { status: 'ok', id: wantId, changed: [...new Set(changed)], view };
+}
+
+export async function removeView(ref, viewId, { 'dry-run': dryRun } = {}) {
+  const store = await loadStore();
+  const s = mustFind(store, ref);
+  const wantId = resolveViewId(viewId);
+  const current = materializeViews(s);
+  const hit = current.find((v) => v.id === wantId);
+  if (!hit) throw notFound(`视图不存在: ${wantId}（现有: ${current.map((v) => v.id).join(', ') || '无'}）`);
+
+  if (dryRun) return { status: 'skipped', dryRun: true, wouldRemove: hit };
+
+  const next = current.filter((v) => v.id !== wantId);
+  await mutateStore((st) => {
+    const target = mustFind(st, ref);
+    if (next.length) target.views = next; else delete target.views;
+    // 删光 = 回到缺省推断态：defaultView 必须跟着清，否则它会指向一个不存在的 id
+    if (!next.length || target.defaultView === wantId) delete target.defaultView;
+    target.updatedAt = nowIso();
+  });
+  return { status: 'ok', removed: hit, remaining: next.length, backToProvisional: next.length === 0 };
+}
+
+export async function setDefaultView(ref, viewId, { 'dry-run': dryRun } = {}) {
+  const store = await loadStore();
+  const s = mustFind(store, ref);
+  const wantId = resolveViewId(viewId);
+  const { views } = effectiveViews(s);
+  if (!views.some((v) => v.id === wantId)) {
+    throw notFound(`视图不存在: ${wantId}（现有: ${views.map((v) => v.id).join(', ')}）`);
+  }
+  if (dryRun) return { status: 'skipped', dryRun: true, wouldSetDefault: wantId };
+
+  const current = materializeViews(s);
+  await mutateStore((st) => {
+    const target = mustFind(st, ref);
+    target.views = current;
+    target.defaultView = wantId;
+    target.updatedAt = nowIso();
+  });
+  return { status: 'ok', default: wantId };
+}
+
 // —— CLI 人读渲染 ——
 export function renderSectionList(d) {
   const lines = [`${d.count} 个栏目 · 共 ${d.totalEntries} 条条目`];
@@ -597,4 +857,33 @@ export function renderSectionChange(d) {
     d.fillChanged?.length ? `填写策略 ${d.fillChanged.join(', ')}` : '',
   ].filter(Boolean).join('；');
   return `已更新栏目 ${d.id}：${d.changed.join(', ')}${extra ? `\n${extra}` : ''}`;
+}
+
+export function renderViewList(d) {
+  const head = `栏目 ${d.section.id} · ${d.section.title}　${d.count} 个视图`
+    + (d.provisional ? '（缺省推断，未落盘 —— 改一次视图才会写进 section.views）' : '');
+  const lines = [head];
+  for (const v of d.views) {
+    const mark = v.id === d.default ? '　← 缺省' : '';
+    const cols = v.type === 'board'
+      ? `按「${v.groupBy || '未分组'}」分`
+      : (Array.isArray(v.columns) && v.columns.length ? `${v.columns.length} 列` : '全部列');
+    lines.push(`  ${v.id.padEnd(18)} ${VIEW_LABELS[v.type]}　${v.title}　${cols}${mark}`);
+  }
+  lines.push('', '切换视图是面板的事；CLI 只改配置：section view add / update / remove / set-default');
+  return lines.join('\n');
+}
+
+export function renderViewChange(d) {
+  if (d.status === 'skipped') {
+    return `试运行（未落盘）：${JSON.stringify(d.wouldAdd || d.wouldChange || d.wouldRemove || d.wouldSetDefault)}`;
+  }
+  if (d.added) return `已新增视图 ${d.view.id}（${VIEW_LABELS[d.view.type]} · ${d.view.title}）　现有 ${d.views} 个`;
+  if (d.removed) {
+    const tail = d.backToProvisional ? '；视图已删光，回到缺省推断态' : `；剩余 ${d.remaining} 个`;
+    return `已删除视图 ${d.removed.id}（${d.removed.title}）${tail}`;
+  }
+  if (d.default) return `已把 ${d.default} 设为缺省视图`;
+  if (d.changed) return `已更新视图 ${d.id}：${d.changed.join(', ')}`;
+  return '未做任何修改';
 }

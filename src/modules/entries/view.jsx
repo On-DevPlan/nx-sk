@@ -4,7 +4,11 @@ import { checkZipFile, fmtBytes, isNeedPassphraseError, postZip } from '../../we
 import { useStore } from '../../web/frontend/store.jsx';
 import { CliHints, Empty, Modal, Tag } from '../../web/frontend/components/ui.jsx';
 import { FieldGroup } from '../../web/frontend/components/fieldEditor.jsx';
+import ViewChips from '../../web/frontend/components/viewChips.jsx';
+import { resolveViewColumns } from '../../shared/views.js';
 import KvTable from './kvTable.jsx';
+import EntriesTable from './entriesTable.jsx';
+import BlockPanel from './blockPanel.jsx';
 
 // 脏值比较用：对象/数组（tags、entrylist 的行）必须走 JSON 序列化——
 // String(obj) 恒为 '[object Object]'，会把「没改」误判成「每处都改了」
@@ -51,6 +55,21 @@ export default function SectionView({ sectionId }) {
   const zipInput = useRef(null);
   const moreRef = useRef(null);
   const mask = !!ui.mask;
+
+  // —— 数据库视图（S2）——
+  // 视图配置是**数据**（section.views，CLI 也能改）；「当前选哪个」是**视图态**（ui.viewId）。
+  // 缺省视图是后端在读路径推断的（不落盘），所以每次进页面重新问一次 —— 顺带拿到 provisional。
+  const [viewsInfo, setViewsInfo] = useState(null);
+  const loadViews = useCallback(async () => {
+    try {
+      const d = await api(`/api/sections/${encodeURIComponent(sectionId)}/views`);
+      setViewsInfo(d);
+    } catch {
+      // 视图读不出来不该让整页空白：退回「没有视图」= 只剩条目列表（老版式）
+      setViewsInfo(null);
+    }
+  }, [sectionId]);
+  useEffect(() => { loadViews(); }, [loadViews]);
 
   // —— 左右栏拖宽：条目列表 ↔ 内容 ——
   // 宽度持久化在 ui.listW（patchUi 对新键照存）。拖动过程只改**本地** state，
@@ -139,6 +158,24 @@ export default function SectionView({ sectionId }) {
     if (!data) return [];
     return data.groups.map((g) => ({ ...g, fields: data.fields.filter((f) => f.group === g.id) })).filter((g) => g.fields.length);
   }, [data]);
+
+  // 当前视图：ui.viewId 指得到就用它；指不到（换了栏目 / 视图被删）退回后端给的缺省
+  const viewList = useMemo(() => viewsInfo?.views || [], [viewsInfo]);
+  const activeViewId = useMemo(() => {
+    if (!viewList.length) return null;
+    if (ui.viewId && viewList.some((v) => v.id === ui.viewId)) return ui.viewId;
+    return viewsInfo?.default || viewList[0].id;
+  }, [viewList, ui.viewId, viewsInfo]);
+  const activeView = useMemo(
+    () => viewList.find((v) => v.id === activeViewId) || null,
+    [viewList, activeViewId],
+  );
+  // 表格视图：列 = 视图投影。字段被删掉的列**仍在**（渲染「已删字段」+「—」），不静默消失。
+  const tableMode = activeView?.type === 'table';
+  const tableColumns = useMemo(
+    () => (tableMode && data ? resolveViewColumns({ ...data.section, fields: data.fields }, activeView) : []),
+    [tableMode, data, activeView],
+  );
 
   const patchField = (key, value) => setDraft((d) => (d ? { ...d, values: { ...d.values, [key]: value } } : d));
 
@@ -400,13 +437,21 @@ export default function SectionView({ sectionId }) {
         <button className="btn small" onClick={addEntry}>新建条目</button>
       </div>
 
-      <div className="cols" ref={colsRef}>
-        <div className="col" style={{ flex: `0 0 ${listW}px` }}>
+      {/* 视图切换：同一批数据的多种投影。看板在 S2 只有配置，渲染随 S3（chip 置灰并说明原因） */}
+      <ViewChips
+        views={viewList}
+        active={activeViewId}
+        provisional={!!viewsInfo?.provisional}
+        onPick={(id) => patchUi({ viewId: id })}
+      />
+
+      <div className={`cols${tableMode ? ' table-mode' : ''}`} ref={colsRef}>
+        <div className="col" style={tableMode ? { flex: '1 1 auto', minWidth: 380 } : { flex: `0 0 ${listW}px` }}>
           <div className="card">
             <div className="colhead">
               <label className="inline pickall" title="全选 / 取消全选（只影响导出与批量操作）">
                 <input type="checkbox" checked={allPicked} onChange={toggleAll} />
-                <span>条目列表</span>
+                <span>{tableMode ? `${activeView.title}　${tableColumns.length} 列` : '条目列表'}</span>
               </label>
               <span className="right muted">
                 {selected.size ? `已选 ${selected.size} / ${data.count}` : data.count}
@@ -414,7 +459,22 @@ export default function SectionView({ sectionId }) {
               </span>
             </div>
             <div className="colbody">
-              {data.entries.length ? data.entries.map((e) => (
+              {tableMode ? (
+                <EntriesTable
+                  entries={data.entries}
+                  columns={tableColumns}
+                  mask={mask}
+                  sort={activeView.sort || null}
+                  selected={selected}
+                  onTogglePick={togglePick}
+                  activeId={draft?.id || null}
+                  onPick={(id) => {
+                    patchUi({ entry: id });
+                    const hit = data.entries.find((e) => e.id === id);
+                    if (hit) setDraft({ id: hit.id, title: hit.title, values: { ...hit.values } });
+                  }}
+                />
+              ) : data.entries.length ? data.entries.map((e) => (
                 <div
                   key={e.id}
                   className={`row selectable ${e.id === draft?.id ? 'selected' : ''}`}
@@ -451,7 +511,7 @@ export default function SectionView({ sectionId }) {
           onDoubleClick={resetColDrag}
         />
 
-        <div className="col">
+        <div className="col" style={tableMode ? { flex: '0 1 520px' } : undefined}>
           {!draft ? (
             <div className="card"><Empty>左边选一条，或新建一条</Empty></div>
           ) : (
@@ -504,6 +564,10 @@ export default function SectionView({ sectionId }) {
               {groups.map((g) => (
                 <FieldGroup key={g.id} title={g.title} fields={g.fields} draft={draft.values} onPatch={patchField} sectionTitle={data.section.title} entryTitle={current?.title || draft.title} />
               ))}
+
+              {/* 正文区（entry.body）：属性区在上、块正文在下，同一条数据同一个编辑面。
+                  body 是可选键——老条目没有正文，这里就是一句空态 + 一个「加块」。 */}
+              <BlockPanel key={draft.id} entryId={draft.id} mask={mask} />
 
               <div className="rowgap pad">
                 <button className="btn" onClick={save} disabled={!dirty.count}>保存{dirty.count ? `（${dirty.count} 处改动）` : ''}</button>

@@ -137,6 +137,27 @@ const ledger = await cliJson(['entry', 'fields', '--section', 'job']);
 step('新字段进了台账（已知字段 = 模板建议 + 写过的）', ledger.sections[0].fields.some((f) => f.key === '技术博客'));
 step('中文键直接可用（不必记英文别名）', ledger.sections[0].fields.some((f) => f.key === '是否有offer'));
 
+// ─── 数据库视图（S2）────────────────────────────────────────────
+// 缺省视图是**推断**的（不落盘）；第一次改视图才固化 —— 这条语义在单测里钉过，
+// 这里验的是「CLI 真能改、改完真落盘、导出包真带走」。
+const vInfer = await cliJson(['section', 'view', 'list', 'job']);
+step('视图缺省推断：表格 / 精简 / 看板三条，标 provisional', vInfer.provisional === true && vInfer.views.length === 3, `${vInfer.views.length} 个`);
+
+const vAdd = await cliJson(['section', 'view', 'add', 'job', '--type', 'table', '--title', '只看状态', '--columns', '姓名,目标岗位']);
+step('view add 把推断视图一并固化（chips 不会凭空消失）', vAdd.added === true && vAdd.views === 4, `${vAdd.views} 个`);
+
+const vAfter = await cliJson(['section', 'view', 'list', 'job']);
+step('落盘后 provisional 变 false', vAfter.provisional === false && vAfter.count === 4);
+
+const vUpd = await cliJson(['section', 'view', 'update', 'job', vAdd.view.id, '--set', 'col.name.width=160', '--sort', 'name:desc']);
+step('view update 改列宽 + 排序（列宽拖拽结束 = 一次 update）', vUpd.changed.includes('columns') && vUpd.changed.includes('sort'), vUpd.changed.join(','));
+
+const vBad = await cliError(['section', 'view', 'add', 'job', '--type', 'table', '--columns', '不存在的字段']);
+step('view add 引用不存在的字段报 INVALID_INPUT', vBad.code === 'INVALID_INPUT');
+
+const vDef = await cliJson(['section', 'view', 'set-default', 'job', vAdd.view.id]);
+step('view set-default 写 section.defaultView', vDef.default === vAdd.view.id);
+
 // ─── 栏目 ZIP 导出 / 导入 ─────────────────────────────────────
 const zipPath = join(home, 'job-export.zip');
 const exp = await cliJson(['transfer', 'export', 'job', '--out', zipPath]);
@@ -150,6 +171,9 @@ step('transfer import 新建栏目并导入条目', zimp.section.created === tru
 
 const zgot = await cliJson(['entry', 'get', '冒烟测试', '--section', 'jobcopy']);
 step('导入后的条目可读（字段与值都在）', zgot.values.name === '冒烟测试' && zgot.values.phone === '13800000000');
+
+const zimViews = await cliJson(['section', 'view', 'list', 'jobcopy']);
+step('导出→导入：视图配置跟着包走（profiles 不是推断出来的）', zimViews.provisional === false && zimViews.count === 4, `count=${zimViews.count}`);
 
 const zskip = await cliJson(['transfer', 'import', 'jobcopy', '--file', zipPath, '--on-conflict', 'skip']);
 step('重复导入默认跳过冲突', zskip.entries.skipped === exp.entries && zskip.entries.added === 0);
@@ -315,6 +339,85 @@ const mf2Detail = await cliJson(['file', 'get', mf2.id]);
 step('第二个附件也反查到「被引用」', mf2Detail.usedBy.some((u) => u.fieldKey === 'resumeFile'));
 const bySecond = await cliJson(['entry', 'list', '--section', 'job', '--q', 'r2.pdf']);
 step('按第二个附件的名字也能搜到条目', bySecond.entries.some((e) => e.title === '冒烟测试'));
+
+// ── 块正文（entry.body，v4）────────────────────────────────
+// 块 = 条目自己的正文序列；类型自带值形状（与同名字段共用一套机器）。
+const blkP = await cliJson(['entry', 'block', 'add', '冒烟测试', '--type', 'paragraph', '--data', '{"text":"第一段正文"}']);
+step('entry block add 建块（id 带 b_ 前缀）', blkP.status === 'ok' && /^b_/.test(blkP.blockId), blkP.blockId);
+
+const blkH = await cliJson(['entry', 'block', 'add', '冒烟测试', '--type', 'heading', '--data', '{"text":"小标题","level":3}']);
+step('heading 块带 level', blkH.status === 'ok' && blkH.type === 'heading');
+
+// 文件块：值 = 附件 id 列表（引用必须计入正式引用，否则 cleanup 会误删）
+const blkF = await cliJson(['entry', 'block', 'add', '冒烟测试', '--type', 'file', '--data', `{"files":["${mf1.id}"]}`]);
+step('file 块落的是附件 id 列表', blkF.status === 'ok');
+const mf1Detail = await cliJson(['file', 'get', mf1.id]);
+step('file 块的引用被附件反查看见（cleanup 不会误删）',
+  mf1Detail.usedBy.some((u) => u.fieldKey === 'body'), JSON.stringify(mf1Detail.usedBy));
+
+// 表格块：列/行是自描述文档（与 table 字段同一台机器）
+const blkT = await cliJson(['entry', 'block', 'add', '冒烟测试', '--type', 'table',
+  '--data', '{"columns":[{"key":"a","label":"甲","type":"number"},{"key":"b","label":"乙","type":"number"}],"rows":[{"a":1,"b":2}]}']);
+step('table 块按自描述文档落盘', blkT.status === 'ok');
+
+// secret 块：明文进、密文落、读回原文、--mask 打码
+const blkS = await cliJson(['entry', 'block', 'add', '冒烟测试', '--type', 'secret',
+  '--data', '{"label":"BLOCK_KEY","value":"sk-block-1234567890abcd"}']);
+step('secret 块写入成功', blkS.status === 'ok');
+const rawWithBlocks = await readFile(join(home, 'store.json'), 'utf8');
+step('secret 块的明文不落盘', !rawWithBlocks.includes('sk-block-1234567890abcd'));
+const blkList = await cliJson(['entry', 'block', 'list', '冒烟测试']);
+step('entry block list 给全部块（5 块）', blkList.count === 5, `count=${blkList.count}`);
+step('secret 块默认读原文', blkList.blocks.find((b) => b.id === blkS.blockId)?.value === 'sk-block-1234567890abcd');
+const blkMasked = await cliJson(['entry', 'block', 'list', '冒烟测试', '--mask']);
+step('secret 块 --mask 打码（≤10 全星 / >10 前4+6星+后4）',
+  blkMasked.blocks.find((b) => b.id === blkS.blockId)?.value === 'sk-b******abcd');
+
+// 打码值写回：认领得上 = 没改（跳过），认领不上 = 拒收
+const maskKeep = await cliJson(['entry', 'block', 'update', '冒烟测试', blkS.blockId, '--data', '{"value":"sk-b******abcd"}']);
+step('写回「当前值的掩码」视为未改动', maskKeep.status === 'ok');
+const afterKeep = await cliJson(['entry', 'block', 'list', '冒烟测试']);
+step('掩码写回没有把密文换成星号', afterKeep.blocks.find((b) => b.id === blkS.blockId)?.value === 'sk-block-1234567890abcd');
+const maskRefuse = await cliError(['entry', 'block', 'update', '冒烟测试', blkS.blockId, '--data', '{"value":"zz-1******zzzz"}']);
+step('认领不上的打码占位被拒收（不静默存星号）', maskRefuse.code === 'INVALID_INPUT');
+
+// PATCH / 转类型 / 移动 / 删除
+const blkEdit = await cliJson(['entry', 'block', 'update', '冒烟测试', blkP.blockId, '--data', '{"text":"改过的第一段"}']);
+step('entry block update 改文本', blkEdit.status === 'ok');
+const afterEdit = await cliJson(['entry', 'block', 'list', '冒烟测试']);
+step('改动生效', afterEdit.blocks.find((b) => b.id === blkP.blockId)?.text === '改过的第一段');
+const blkConv = await cliJson(['entry', 'block', 'update', '冒烟测试', blkP.blockId, '--data', '{"type":"heading","text":"改过的第一段"}']);
+step('转类型 = update 一份新形状（保留文本）',
+  blkConv.converted === true && blkConv.type === 'heading');
+const afterConv = await cliJson(['entry', 'block', 'list', '冒烟测试']);
+const convBlock = afterConv.blocks.find((b) => b.id === blkP.blockId);
+step('转类型是**整块替换**（旧类型的键不残留）',
+  convBlock.type === 'heading' && convBlock.text === '改过的第一段' && convBlock.rows === undefined);
+
+const blkMove = await cliJson(['entry', 'block', 'move', '冒烟测试', blkH.blockId, '--to', '0']);
+step('entry block move 改顺序', blkMove.status === 'ok' && blkMove.to === 0);
+const afterMove = await cliJson(['entry', 'block', 'list', '冒烟测试']);
+step('移动后顺序正确（heading 到首位）', afterMove.blocks[0].id === blkH.blockId);
+
+const blkBad = await cliError(['entry', 'block', 'add', '冒烟测试', '--type', 'nope']);
+step('未知块类型报 INVALID_INPUT', blkBad.code === 'INVALID_INPUT');
+const blkMissing = await cliError(['entry', 'block', 'remove', '冒烟测试', 'b_nope']);
+step('删不存在的块报 NOT_FOUND', blkMissing.code === 'NOT_FOUND');
+
+// 块正文随包走：导出 → 零配置导入 → 块还在（secret 用目标机密钥重新加密）
+const blkZip = join(home, 'job-blocks.zip');
+await cliJson(['transfer', 'export', 'job', '--entries', '冒烟测试', '--out', blkZip]);
+const blkImp = await cliJson(['transfer', 'import-new', '--file', blkZip]);
+const impBlocks = await cliJson(['entry', 'block', 'list', '冒烟测试', '--section', blkImp.section.id]);
+step('导出 → 导入：块正文跟着条目走', impBlocks.count === 5, `count=${impBlocks.count}`);
+step('导入后 secret 块仍能读出原文（已用本机密钥重新加密）',
+  impBlocks.blocks.find((b) => b.type === 'secret')?.value === 'sk-block-1234567890abcd');
+await cliJson(['section', 'remove', blkImp.section.id, '--force']);
+
+// 删块：能找到就删，找不到的跳过并报 partial
+const blkDel = await cliJson(['entry', 'block', 'remove-many', '冒烟测试', `${blkT.blockId},b_nope`]);
+step('remove-many 部分命中报 partial 并列出跳过项',
+  blkDel.status === 'partial' && blkDel.removed.includes(blkT.blockId) && blkDel.skipped.includes('b_nope'));
 
 // 可读导出（JSON / Markdown）已删除：备份与它都是「往本机目录留副本」，
 // 与 transfer 的 ZIP 导出重复。这里钉住**命令确实没了**，别哪天又被加回来。
@@ -490,6 +593,31 @@ step('POST /api/entries', apiAdd.status === 200 && apiAdd.body.data.created === 
 
 const apiPatch = await j(`/api/entries/${apiAdd.body.data.id}`, { method: 'PATCH', body: { set: { 目标岗位: '全栈开发' } } });
 step('PATCH /api/entries/:ref（PATCH 语义）', apiPatch.status === 200 && apiPatch.body.data.status === 'ok');
+
+// 块正文的 HTTP 面：与 CLI 是**同一组 action**（断言两端行为一致，不只断言 200）
+const apiEntryId = apiAdd.body.data.id;
+const apiBlocksEmpty = await j(`/api/entries/${apiEntryId}/blocks`);
+step('GET /api/entries/:ref/blocks：没有正文时是空序列（不是 404）',
+  apiBlocksEmpty.status === 200 && apiBlocksEmpty.body.data.count === 0);
+
+const apiBlockAdd = await j(`/api/entries/${apiEntryId}/blocks`, { method: 'POST', body: { type: 'paragraph', data: { text: 'HTTP 加的块' } } });
+step('POST /api/entries/:ref/blocks', apiBlockAdd.status === 200 && apiBlockAdd.body.data.status === 'ok');
+const apiBlockId = apiBlockAdd.body.data.blockId;
+
+const apiBlockText = await j(`/api/entries/${apiEntryId}/blocks`);
+step('块默认追加到尾部', apiBlockText.body.data.blocks[0]?.text === 'HTTP 加的块');
+
+const apiBlockPatch = await j(`/api/entries/${apiEntryId}/blocks/${apiBlockId}`, { method: 'PATCH', body: { data: { text: 'HTTP 改过' } } });
+step('PATCH /api/entries/:ref/blocks/:blockId', apiBlockPatch.status === 200 && apiBlockPatch.body.data.status === 'ok');
+
+const apiBlockMove = await j(`/api/entries/${apiEntryId}/blocks/${apiBlockId}/move`, { method: 'POST', body: { to: 0 } });
+step('POST /api/entries/:ref/blocks/:blockId/move', apiBlockMove.status === 200);
+
+const apiBlockDel = await j(`/api/entries/${apiEntryId}/blocks/${apiBlockId}`, { method: 'DELETE', body: {} });
+step('DELETE /api/entries/:ref/blocks/:blockId', apiBlockDel.status === 200 && apiBlockDel.body.data.status === 'ok');
+
+const apiBlocksBack = await j(`/api/entries/${apiEntryId}/blocks`);
+step('删完回到空序列', apiBlocksBack.body.data.count === 0);
 
 const apiBlocked = await j('/api/sections/job', { method: 'DELETE', body: {} });
 step('栏目非空删除报 409 blocked', apiBlocked.status === 409 && apiBlocked.body.code === 'BLOCKED');

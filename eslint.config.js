@@ -35,7 +35,7 @@ const SIBLING_MODULES = [
 ];
 
 export default [
-  { ignores: ['src/web/public/**', 'node_modules/**', 'assets/**', 'tests/fixtures/**'] },
+  { ignores: ['src/web/public/**', 'node_modules/**', 'assets/**', 'tests/fixtures/**', 'plan/**/dist/**', '.claude/repo/**'] },
   {
     files: ['**/*.{js,mjs,jsx}'],
     languageOptions: {
@@ -47,7 +47,9 @@ export default [
     rules: BASE,
   },
 
-  // core 是最底层
+  // core 是最底层。**依赖边登记**：core → shared 允许（v4 起 store.js / entries 需要
+  // shared/blocks.js 的块归一与校验——「块怎么算合法」只允许一份实现，与 shared/table.js
+  // 同一条理由）。shared 之上不依赖任何 Node 内置模块，所以这条边不会把浏览器打包搞炸。
   {
     files: ['src/core/**/*.js'],
     rules: {
