@@ -133,6 +133,93 @@ export default {
       render: (d) => service.renderEntryChange(d),
     },
 
+    // —— 块正文（entry.body，v4）——
+    // 五条 action：add / update / move / remove / remove-many。
+    // 「转类型」没有独立 action —— 就是 update 一份新形状的块（整块替换）。
+    {
+      id: 'entry.block.list',
+      cli: ['entry', 'block', 'list'],
+      http: ['GET', '/api/entries/:ref/blocks'],
+      summary: '看条目的块正文。secret 块的值默认原文（和敏感字段同一条边界），--mask 打码',
+      args: ['ref'],
+      flags: {
+        section: { type: 'string', hint: '限定栏目，解决同名歧义' },
+        mask: { type: 'boolean', hint: '密文块打码显示' },
+      },
+      run: (ctx) => service.listBlocks(ctx.ref, ctx),
+      render: (d) => service.renderBlocks(d),
+    },
+    {
+      id: 'entry.block.add',
+      cli: ['entry', 'block', 'add'],
+      http: ['POST', '/api/entries/:ref/blocks'],
+      summary: '给条目加一块。--type 决定类型（paragraph/heading/md/table/entrylist/file/secret/section/column）',
+      args: ['ref'],
+      flags: {
+        type: { type: 'string', hint: '块类型：paragraph / heading / md / table / entrylist / file / secret / section / column' },
+        data: { type: 'json', hint: '块的数据（@file.json 走 json flag）' },
+        after: { type: 'string', hint: '插在哪个块之后（默认追加到尾部）' },
+        section: { type: 'string' },
+        'dry-run': { type: 'boolean' },
+      },
+      run: (ctx) => service.addBlock(ctx.ref, ctx),
+      render: (d) => service.renderBlockChange(d),
+    },
+    {
+      id: 'entry.block.update',
+      cli: ['entry', 'block', 'update'],
+      http: ['PATCH', '/api/entries/:ref/blocks/:blockId'],
+      summary: '改一块（PATCH）。改 type 就是转类型（整块替换）。secret 块打码占位会被拒收',
+      args: ['ref', 'blockId'],
+      flags: {
+        data: { type: 'json', hint: '要改的块数据（@file.json 走 json flag）' },
+        section: { type: 'string' },
+        'dry-run': { type: 'boolean' },
+      },
+      run: (ctx) => service.updateBlockValue(ctx.ref, ctx.blockId, ctx),
+      render: (d) => service.renderBlockChange(d),
+    },
+    {
+      id: 'entry.block.move',
+      cli: ['entry', 'block', 'move'],
+      http: ['POST', '/api/entries/:ref/blocks/:blockId/move'],
+      summary: '移动一块的位置。--to 收索引（0 起，负数从尾部数）',
+      args: ['ref', 'blockId'],
+      flags: {
+        to: { type: 'number', hint: '目标位置（0 起；负数从尾部数）' },
+        section: { type: 'string' },
+        'dry-run': { type: 'boolean' },
+      },
+      run: (ctx) => service.moveBlockTo(ctx.ref, ctx.blockId, ctx),
+      render: (d) => service.renderBlockChange(d),
+    },
+    {
+      id: 'entry.block.remove',
+      cli: ['entry', 'block', 'remove'],
+      http: ['DELETE', '/api/entries/:ref/blocks/:blockId'],
+      summary: '删一块（连同它的子树）。块删除属条目内编辑，不需要先导出',
+      args: ['ref', 'blockId'],
+      flags: {
+        section: { type: 'string' },
+        'dry-run': { type: 'boolean' },
+      },
+      run: (ctx) => service.removeBlocks(ctx.ref, ctx.blockId, ctx),
+      render: (d) => service.renderBlockChange(d),
+    },
+    {
+      id: 'entry.block.remove-many',
+      cli: ['entry', 'block', 'remove-many'],
+      http: ['POST', '/api/entries/:ref/blocks/remove-many'],
+      summary: '批量删块（ids 用逗号分隔）。找不到的跳过并报告',
+      args: ['ref', 'ids'],
+      flags: {
+        section: { type: 'string' },
+        'dry-run': { type: 'boolean' },
+      },
+      run: (ctx) => service.removeBlocks(ctx.ref, ctx.ids, ctx),
+      render: (d) => service.renderBlockChange(d),
+    },
+
     // —— 密钥 KV 直通命令 ——
     // 作用在**标了 kv 的栏目**（密钥模板自带 kv: true）上，可以用 --section 指定别的。
     // 它们是同一套 service 函数的语法糖，不是第二份业务逻辑。

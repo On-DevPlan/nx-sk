@@ -98,12 +98,25 @@ export async function currentKeyId() {
  * 是安全决策——把它收成**一个**函数，就不会出现「某个出口忘了打码」。
  * 只有当栏目里真有密文字段、且条目里真有密文时才去解析密钥（避免无谓地生成密钥文件）。
  */
+/** 块正文里有没有密文（v4：secret 块的值也是密文落盘）。 */
+function bodyHasSecretBlob(blocks) {
+  for (const b of blocks || []) {
+    if (b.type === 'secret' && isCipherBlob(b.value)) return true;
+    if (b.children && bodyHasSecretBlob(b.children)) return true;
+  }
+  return false;
+}
+
 export async function sensitiveViewer(section, entries = []) {
   const sensitive = (section?.fields || []).filter((f) => f.sensitive || f.type === 'secret');
   // 清单类（结构清单 entrylist / 表格 table）的敏感**子值**也是密文落盘：
   // 不探行内的话，清单里真有密文时 viewer 不会被创建，读出来全变成「需要密钥才能解密」。
   const lists = (section?.fields || []).filter((f) => f.type === 'entrylist' || f.type === 'table');
-  if (!sensitive.length && !lists.length) return undefined;
+  // 块正文里的 secret 块也要算进「有没有密文」——
+  // 栏目里一个密文字段都没有、只有块里存了密钥时，早退会让 viewer 不被创建，
+  // 读出来全是「需要密钥才能解密」。
+  const bodyHasBlob = entries.some((e) => bodyHasSecretBlob(e?.body));
+  if (!sensitive.length && !lists.length && !bodyHasBlob) return undefined;
   const keys = sensitive.map((f) => f.key);
   // 两种清单的「列」字段名不同（fields / columns），但密文边界的判据是同一个
   const subKeysOf = (f) => (f.type === 'table' ? (f.columns || []) : (f.fields || []))
@@ -118,7 +131,10 @@ export async function sensitiveViewer(section, entries = []) {
     return Object.values(row).some((v) => isCipherBlob(v));
   };
   const hasBlob = entries.some((e) => keys.some((k) => isCipherBlob(e?.values?.[k]))
-    || lists.some((f) => rowsOf(e?.values?.[f.key]).some((row) => rowHasBlob(row, f))));
+    || lists.some((f) => rowsOf(e?.values?.[f.key]).some((row) => rowHasBlob(row, f)))
+    // 块正文里的 secret 块同样是密文落盘（v4）：不探它的话，
+    // 「整条条目只有块里有密文」时 viewer 不会被创建，读出来全是「需要密钥才能解密」。
+    || entries.some((e) => bodyHasSecretBlob(e?.body)));
   if (!hasBlob) return undefined;
   const { key } = await resolveVaultKey();
   return (blob) => decryptValue(key, blob);

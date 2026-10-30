@@ -27,12 +27,54 @@ import { mdImageIds } from '../../core/mdimages.js';
 import { badInput, blocked, notFound } from '../../core/errors.js';
 import { nowIso, stamp } from '../../core/ids.js';
 import { ensureDir, fileSize, writeAtomic } from '../../core/fsx.js';
-import { addEntry, updateEntry } from '../entries/service.js';
+import { addEntry, setEntryBody, updateEntry } from '../entries/service.js';
 import { addSection, updateSection } from '../sections/service.js';
+import { normalizeViews } from '../../shared/views.js';
 
 const FORMAT = 'nx-sk.section';
-const FORMAT_VERSION = 1;
+// v1 → v2：包里多了 `entries[].body`（块正文）与 `section.views`（视图配置）。
+// 升版本不是为了迁移（两条都是可选键），是为了**让老版本读到新包时明确拒绝**——
+// 老版本的白名单会静默丢掉这两个键，用户会以为「导出时没带上」。
+const FORMAT_VERSION = 2;
 const CONFLICT_POLICIES = ['skip', 'copy', 'overwrite'];
+
+/**
+ * 块正文导出：secret 块的值**解密写出**（与 secret 字段同一条口径——包里恒为明文，
+ * 保护靠外层口令）。解不开就抛，不静默写 null：包里放一个 null 比报错更糟，
+ * 用户会以为「这条密钥本来就没值」。
+ */
+async function plainBlocks(blocks) {
+  const out = [];
+  for (const b of blocks || []) {
+    const next = { ...b };
+    if (b.type === 'secret' && isCipherBlob(b.value)) {
+      const { key } = await resolveVaultKey();
+      next.value = decryptValue(key, b.value);
+    }
+    if (Array.isArray(b.children)) next.children = await plainBlocks(b.children);
+    out.push(next);
+  }
+  return out;
+}
+
+/**
+ * 块正文导入：文件 id 走「旧 → 新」重映射（附件是重新入库的，旧 id 在目标库里不存在）。
+ * 与 remapValues 的两条规则同源：file 块是 id 列表、md 块正文里内嵌 `![x](f_xxx)`。
+ */
+function remapBlocks(blocks, idMap) {
+  return (blocks || []).map((b) => {
+    const next = { ...b };
+    if (b.type === 'file') {
+      next.files = fileIdsOf(b.files).map((id) => idMap.get(id) || id).filter(Boolean);
+    } else if (b.type === 'md' && typeof b.text === 'string') {
+      next.text = b.text.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (m, alt, id) => (
+        idMap.has(id) ? `![${alt}](${idMap.get(id)})` : m
+      ));
+    }
+    if (Array.isArray(b.children)) next.children = remapBlocks(b.children, idMap);
+    return next;
+  });
+}
 
 function safeCategory(cat) {
   return CATEGORY_IDS.includes(cat) ? cat : 'other';
@@ -63,6 +105,27 @@ async function plainValues(section, values) {
       out[k] = v;
     }
   }
+  // 表格（table）的敏感列同样是密文落盘。0.19 加表格时漏了这条分支：
+  // 导出包里躺着密文对象，导入到另一台机器（另一把密钥）**永远解不开**——
+  // 既不是明文也不是本机密文，等于数据损坏。
+  for (const f of section.fields || []) {
+    if (f.type !== 'table' || !Array.isArray(out[f.key]?.rows)) continue;
+    const subs = (f.columns || []).filter((c) => c.sensitive);
+    if (!subs.length) continue;
+    const rows = [];
+    for (const row of out[f.key].rows) {
+      if (!row || typeof row !== 'object' || Array.isArray(row)) { rows.push(row); continue; }
+      const next = { ...row };
+      for (const c of subs) {
+        if (isCipherBlob(next[c.key])) {
+          const { key } = await resolveVaultKey();
+          next[c.key] = decryptValue(key, next[c.key]);
+        }
+      }
+      rows.push(next);
+    }
+    out[f.key] = { ...out[f.key], rows };
+  }
   // 结构清单（entrylist）的敏感子值也是密文落盘：不解开的话包里会混进密文对象，
   // 导入到另一台机器（另一把密钥）就永远解不开了。
   for (const f of section.fields || []) {
@@ -89,7 +152,17 @@ async function plainValues(section, values) {
 /** 一个栏目引用了哪些附件：`file` 字段的 id 列表 + `md` 正文里的图片引用。 */
 function referencedFileIds(section, entries) {
   const ids = new Set();
+  const walk = (blocks) => {
+    for (const b of blocks || []) {
+      // file 块里挂的附件是正式引用（v4）：漏了它导出的包就丢原件
+      if (b.type === 'file' && Array.isArray(b.files)) for (const id of fileIdsOf(b.files)) ids.add(id);
+      // md 块正文里贴的图同上（图片内嵌在 markdown 里，与 md 字段同一待遇）
+      else if (b.type === 'md' && typeof b.text === 'string') for (const id of mdImageIds(b.text)) ids.add(id);
+      if (b.children) walk(b.children);
+    }
+  };
   for (const e of entries) {
+    walk(e.body);
     for (const f of section.fields) {
       const v = e.values?.[f.key];
       if (v === null || v === undefined) continue;
@@ -135,6 +208,9 @@ export async function buildSectionZip(ref, { entryIds, passphrase, includeFiles 
       createdAt: e.createdAt,
       updatedAt: e.updatedAt,
       values: plain,
+      // 块正文（v4）：没有正文就不带这个键（与 entry get 同一口径——
+      // 「没有正文」与「正文为空」是两种状态，别在包里抹平）
+      ...(Array.isArray(e.body) && e.body.length ? { body: await plainBlocks(e.body) } : {}),
     });
   }
 
@@ -182,6 +258,8 @@ export async function buildSectionZip(ref, { entryIds, passphrase, includeFiles 
       titleLabel: section.titleLabel || '名称', titleField: section.titleField || null,
       order: section.order, kv: section.kv === true,
       groups: section.groups || [], fields: section.fields || [],
+      // 视图配置随包走：同一批数据的多种投影是栏目的一部分，丢了等于换了台机器就只剩一种读法
+      views: section.views || [], defaultView: section.defaultView || null,
     },
     counts: { entries: entries.length, available: all.length, files: fileRecords.length },
     selection: { partial: rows.length !== all.length, requested: picked },
@@ -443,6 +521,13 @@ export async function previewImport(ref, buffer, { fileName, passphrase, encrypt
   if (fileIssues.length) warnings.push(`${fileIssues.length} 个附件有问题（缺失或校验失败），将被跳过`);
   // 只有「显式指定了目标栏目」时这句才成立；零配置导入是新建，说「当前栏目」会误导
   if (ref && manifest.section.id !== targetId) warnings.push(`ZIP 来自栏目「${manifest.section.title}」（${manifest.section.id}），将导入到当前栏目`);
+  // 视图配置随包走，但**不覆盖用户自己配过的**：目标已有显式视图时只提示，不动数据。
+  const packagedViews = normalizeViews(manifest.section.views);
+  const targetViews = Array.isArray(target?.views) ? target.views.length : 0;
+  const viewsWillApply = packagedViews.length > 0 && targetViews === 0;
+  if (packagedViews.length && targetViews) {
+    warnings.push(`包里带 ${packagedViews.length} 个视图配置，但目标栏目已经有 ${targetViews} 个自己的视图 —— 不覆盖（要换用 section view remove 清掉后重导）`);
+  }
 
   return {
     status: 'preview',
@@ -460,6 +545,7 @@ export async function previewImport(ref, buffer, { fileName, passphrase, encrypt
       title: sectionTitle,
       fieldsToAdd: fieldsToAdd.map((f) => ({ key: f.key, label: f.label, type: f.type })),
       groupsToAdd: groupsToAdd.map((g) => ({ id: g.id, title: g.title })),
+      views: { packaged: packagedViews.length, stored: targetViews, willApply: viewsWillApply },
     },
     entries: {
       total: manifest.entries.length,
@@ -561,6 +647,23 @@ export async function applyImport(ref, buffer, { fileName, onConflict = 'skip', 
   }
   section = findSection(await loadStore(), targetId);
 
+  // 视图配置：只在「新建栏目」或「目标还没配过视图」时应用。
+  // 目标已有显式视图 = 用户自己配过，包的视图不静默覆盖（预览里已警告）。
+  let viewsApplied = 0;
+  const pkgViews = normalizeViews(manifest.section.views);
+  if (pkgViews.length && !(section.views && section.views.length)) {
+    const wantedDefault = manifest.section.defaultView && pkgViews.some((v) => v.id === manifest.section.defaultView)
+      ? String(manifest.section.defaultView) : null;
+    await mutateStore((st) => {
+      const t = st.sections.find((x) => x.id === targetId);
+      if (!t) return;
+      t.views = pkgViews;
+      if (wantedDefault) t.defaultView = wantedDefault; else delete t.defaultView;
+    });
+    section = findSection(await loadStore(), targetId);
+    viewsApplied = pkgViews.length;
+  }
+
   // 附件先落，拿到「旧 id → 新 id」映射；条目里的引用随后重写
   const idMap = new Map();
   let filesAdded = 0;
@@ -594,10 +697,13 @@ export async function applyImport(ref, buffer, { fileName, onConflict = 'skip', 
       if (typeof v === 'string' && v.includes('******')) { delete values[f.key]; maskedSkipped += 1; }
     }
     const hit = byId.get(src.id) || existing.find((e) => e.title === src.title);
+    // 块正文随条目走：附件 id 先在包内重映射，再由 setEntryBody 加密落盘（secret 块）
+    const body = Array.isArray(src.body) && src.body.length ? remapBlocks(src.body, idMap) : null;
     if (hit) {
       if (onConflict === 'skip') { skipped += 1; continue; }
       if (onConflict === 'overwrite') {
         await updateEntry(hit.id, { section: targetId, set: values });
+        if (body) await setEntryBody(hit.id, body);
         overwritten += 1;
         continue;
       }
@@ -609,6 +715,7 @@ export async function applyImport(ref, buffer, { fileName, onConflict = 'skip', 
       ? uniqueTitle(src.title, takenTitles)
       : uniqueTitle(src.title, takenTitles);
     const created = await addEntry({ section: targetId, title, set: values, tags: src.tags });
+    if (body) await setEntryBody(created.id, body);
     takenTitles.add(created.title);
     if (hit) copied += 1;
     else added += 1;
@@ -621,6 +728,7 @@ export async function applyImport(ref, buffer, { fileName, onConflict = 'skip', 
     entries: { added, copied, overwritten, skipped, total: manifest.entries.length },
     files: { added: filesAdded, reused: filesReused, bytes: filesBytes },
     fieldsAdded,
+    viewsApplied,
     maskedSkipped,
     preview,
   };
@@ -889,6 +997,9 @@ export function renderImport(d) {
       `来源栏目: ${s.source.title}（${s.source.id}）→ 目标: ${s.targetId}${s.willCreate ? '（将新建）' : ''}${s.renamedFrom ? `（id ${s.renamedFrom} 已存在，另存为 ${s.targetId}）` : ''}`,
       `条目: 共 ${d.entries.total}，新增 ${d.entries.fresh}，冲突 ${d.entries.conflicts.length}`,
       `字段: 将补 ${s.fieldsToAdd.length} 个${s.fieldsToAdd.length ? `（${s.fieldsToAdd.map((f) => f.key).join(', ')}）` : ''}`,
+      s.views?.packaged
+        ? `视图: 包内 ${s.views.packaged} 个${s.views.stored ? `，目标已有 ${s.views.stored} 个（不覆盖）` : '（将应用）'}`
+        : '',
       `附件: 新增 ${d.files.new}，复用 ${d.files.reused}，${(d.files.bytes / 1024).toFixed(1)}KB`,
       `凭据: ${d.secrets.masked ? `${d.secrets.masked} 个需重填` : '随包（明文，靠口令保护）'}${d.encrypted ? ' · 已加密' : ''}`,
     ];
@@ -905,6 +1016,7 @@ export function renderImport(d) {
     `条目 新增 ${d.entries.added} / 另存 ${d.entries.copied} / 覆盖 ${d.entries.overwritten} / 跳过 ${d.entries.skipped}`,
     `附件 新增 ${d.files.added} / 复用 ${d.files.reused}（${(d.files.bytes / 1024).toFixed(1)}KB）`,
     d.fieldsAdded.length ? `新增字段: ${d.fieldsAdded.join(', ')}` : '',
+    d.viewsApplied ? `应用 ${d.viewsApplied} 个视图配置` : '',
     d.maskedSkipped ? `跳过 ${d.maskedSkipped} 个打码凭据（需重新填写）` : '',
   ].filter(Boolean).join('\n');
 }

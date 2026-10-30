@@ -108,6 +108,15 @@ export function displaySensitive(raw, { mask = false, decrypt } = {}) {
   }
 }
 
+/** 块正文（v4）的展示形态：secret 块的值走与敏感字段**同一条** displaySensitive 边界。 */
+export function displayBlocks(blocks, { mask = false, decrypt } = {}) {
+  return (blocks || []).map((b) => {
+    if (b.type === 'secret') return { ...b, value: displaySensitive(b.value, { mask, decrypt }) };
+    if (Array.isArray(b.children)) return { ...b, children: displayBlocks(b.children, { mask, decrypt }) };
+    return b;
+  });
+}
+
 /**
  * 条目的**唯一序列化出口**（面板、`entry list`、`section dump` 共用一份）。
  * 两个出口各写一遍序列化，迟早会分叉成「CLI 看得到、面板看不到」。
@@ -147,6 +156,10 @@ export function serializeEntry(section, entry, { mask = false, decrypt } = {}) {
     tags: entry.tags || [],
     createdAt: entry.createdAt,
     updatedAt: entry.updatedAt,
+    // 块正文（v4）：可选键——没有块就不带这个键（别让老条目凭空多出一个空数组）
+    ...(Array.isArray(entry.body) && entry.body.length
+      ? { body: displayBlocks(entry.body, { mask, decrypt }) }
+      : {}),
     completeness: {
       filled: c.filled,
       total: c.total,

@@ -1,0 +1,262 @@
+/* 原型主题层 —— 项目 token + FlexLayout 变量全量覆写
+ *
+ * 两条纪律：
+ *   1. 只借 FlexLayout 的**结构 CSS**（.flexlayout__* 盒模型 / 拖拽几何），
+ *      不引它的配色：所有视觉量都走 --flexlayout-* 变量，这里逐个覆写。
+ *      覆写写在 :root 上 → 浮窗（float）、子布局（subLayout）、弹出窗
+ *      （popout）用的是同一批变量，一起变，不会「主区变了、浮窗还是老样子」。
+ *   2. 单色 + 唯一语义红（--danger）；密度 28px 行 / 32px 按钮 / 12px 字号；
+ *      全站只用 1px 浅底线分隔，不用投影把容器撑成岛屿。
+ */
+
+:root {
+  --ink: #14161a;
+  --paper: #fff;
+  --soft: #f5f6f7;
+  --soft-2: #ebedf0;
+  --soft-3: #e3e6e9;
+  --soft-4: #dcdfe3;
+  --mid: #8b9096;
+  --danger: #b3261e;
+  --line: 1px solid var(--soft-2);
+
+  --row-h: 28px;
+  --btn-h: 32px;
+  --fs-core: 12px;
+  --radius-btn: 8px;
+
+  --shadow-relief: -1px -1px 2px rgba(255, 255, 255, .85), 2px 2px 6px rgba(20, 22, 26, .07);
+  --shadow-relief-press: inset 1px 1px 2px rgba(20, 22, 26, .10), inset -1px -1px 2px rgba(255, 255, 255, .7);
+}
+
+/* ── FlexLayout 变量覆写（全量） ───────────────────────────── */
+:root {
+  --flexlayout-color-text: var(--ink);
+  --flexlayout-color-background: var(--paper);
+  --flexlayout-color-base: var(--paper);
+  --flexlayout-color-1: var(--soft);
+  --flexlayout-color-2: var(--soft-2);
+  --flexlayout-color-3: var(--soft-3);
+  --flexlayout-color-4: var(--soft-4);
+  --flexlayout-color-5: #d5d9dd;
+  --flexlayout-color-6: #ced2d7;
+
+  --flexlayout-font-family: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+  --flexlayout-font-size: 12px;
+  --flexlayout-font-weight: 400;
+
+  --flexlayout-color-tab-content: var(--paper);
+  --flexlayout-color-tab-selected: var(--ink);
+  --flexlayout-color-tab-selected-background: var(--paper);
+  --flexlayout-color-tab-unselected: var(--mid);
+  --flexlayout-color-tab-unselected-background: transparent;
+  --flexlayout-color-tab-textbox: var(--ink);
+  --flexlayout-color-tab-textbox-background: var(--paper);
+
+  --flexlayout-color-tabset-background: var(--paper);
+  --flexlayout-color-tabset-background-selected: var(--paper);
+  --flexlayout-color-tabset-background-maximized: var(--paper);
+  --flexlayout-color-tabset-divider-line: var(--soft-2);
+
+  --flexlayout-color-border: var(--soft-2);
+  --flexlayout-color-border-background: var(--paper);
+  --flexlayout-color-border-divider-line: var(--soft-2);
+  --flexlayout-color-border-tab-content: var(--paper);
+  --flexlayout-color-border-tab-selected: var(--ink);
+  --flexlayout-color-border-tab-selected-background: var(--paper);
+  --flexlayout-color-border-tab-unselected: var(--mid);
+  --flexlayout-color-border-tab-unselected-background: var(--soft);
+
+  --flexlayout-color-splitter: var(--soft-2);
+  --flexlayout-color-splitter-hover: var(--mid);
+  --flexlayout-color-splitter-drag: var(--mid);
+  --flexlayout-color-splitter-handle: var(--soft-2);
+  --flexlayout-splitter-size: 5px;
+  --flexlayout-splitter-active-size: 5px;
+  --flexlayout-splitter-handle-visibility: hidden;
+
+  --flexlayout-color-drag1: var(--mid);
+  --flexlayout-color-drag2: var(--mid);
+  --flexlayout-color-drag1-background: rgba(139, 144, 150, .14);
+  --flexlayout-color-drag2-background: rgba(139, 144, 150, .08);
+  --flexlayout-color-drag-rect: var(--ink);
+  --flexlayout-color-drag-rect-background: rgba(255, 255, 255, .92);
+  --flexlayout-color-drag-rect-border: var(--mid);
+
+  --flexlayout-color-edge-icon: var(--mid);
+  --flexlayout-color-edge-marker: var(--mid);
+
+  --flexlayout-color-popup-border: var(--soft-2);
+  --flexlayout-color-popup-unselected: var(--ink);
+  --flexlayout-color-popup-unselected-background: var(--paper);
+  --flexlayout-color-popup-selected: var(--ink);
+  --flexlayout-color-popup-selected-background: var(--soft);
+
+  --flexlayout-color-icon: var(--mid);
+  --flexlayout-color-focus: var(--mid);
+  --flexlayout-color-overflow: var(--mid);
+  --flexlayout-color-mini-scroll-indicator: var(--soft-2);
+  --flexlayout-color-mini-scroll-indicator-hovered: var(--mid);
+  --flexlayout-size-mini-scroll-indicator: 3px;
+  --flexlayout-color-toolbar-button-hover: var(--soft);
+  --flexlayout-color-float-window-header-background: var(--soft);
+  --flexlayout-color-underline: var(--soft-2);
+  --flexlayout-color-underline-hover: var(--mid);
+  --flexlayout-tab-divider-bg: var(--soft-2);
+  --flexlayout-color-tabgroup-default: var(--mid);
+  --flexlayout-color-tabgroup-pill-text: var(--ink);
+  --flexlayout-color-tabgroup-menu-palette: var(--mid);
+  --flexlayout-tabgroup-pill-radius: 10px;
+  --flexlayout-tab-button-radius: 6px;
+  --flexlayout-border-button-radius: 6px;
+}
+
+/* ── 结构微调：把 FlexLayout 的默认盒高收到项目密度 ─────────── */
+.flexlayout__tab_button {
+  height: 26px;
+  padding: 0 9px;
+  font-size: var(--fs-core);
+}
+.flexlayout__tab_button--selected {
+  font-weight: 600;
+  box-shadow: var(--shadow-relief);
+}
+.flexlayout__tab_button-text {
+  font-size: var(--fs-core);
+}
+.flexlayout__tabset_header {
+  min-height: 28px;
+  background: var(--soft);
+  border-bottom: var(--line);
+}
+.flexlayout__tabset_header_content {
+  font-size: var(--fs-core);
+}
+.flexlayout__splitter {
+  background: transparent;
+}
+.flexlayout__splitter:hover,
+.flexlayout__splitter-drag {
+  background: var(--mid);
+}
+.flexlayout__float_window {
+  border: var(--line);
+  border-radius: var(--radius-btn);
+  box-shadow: var(--shadow-relief);
+  overflow: hidden;
+}
+.flexlayout__float_window_header {
+  height: var(--row-h);
+  background: var(--soft);
+  border-bottom: var(--line);
+  font-size: var(--fs-core);
+}
+.flexlayout__popup_menu {
+  border: var(--line);
+  border-radius: var(--radius-btn);
+  box-shadow: var(--shadow-relief);
+  font-size: var(--fs-core);
+}
+
+/* ── 应用骨架 ────────────────────────────────────────────── */
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; }
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+  font-size: var(--fs-core);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+.mono { font-family: ui-monospace, Consolas, "Courier New", monospace; }
+.muted { color: var(--mid); }
+.bad { color: var(--danger); }
+.grow { flex: 1; min-width: 0; }
+.rowgap { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.nowrap { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.app { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+
+header.top {
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 12px; border-bottom: var(--line); flex-shrink: 0;
+}
+header.top .brand { font-size: 14px; font-weight: 700; }
+header.top .tagline { color: var(--mid); font-size: 11px; }
+
+button {
+  height: 24px; border: var(--line); background: var(--paper); color: inherit;
+  border-radius: 6px; padding: 0 8px; font: inherit; cursor: pointer;
+}
+button:hover { background: var(--soft); }
+button:disabled { color: var(--mid); cursor: default; background: var(--paper); }
+button.primary { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+button.danger { color: var(--danger); }
+
+input[type=text], input[type=search] {
+  height: var(--btn-h); border: var(--line); border-radius: var(--radius-btn);
+  padding: 0 10px; font: inherit; color: inherit; background: var(--paper);
+}
+
+/* 面板内通用零件 */
+.toolbar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 12px; border-bottom: var(--line); flex-shrink: 0;
+  overflow-x: auto; overflow-y: hidden;
+}
+/* 工具条里的东西一律不换行、不压缩——窄了就横向滚，不许把标签挤成两行 */
+.toolbar > * { flex-shrink: 0; white-space: nowrap; }
+.chip {
+  height: 22px; padding: 0 9px; display: inline-flex; align-items: center;
+  border: var(--line); border-radius: 11px; font-size: 11px; background: var(--paper);
+  white-space: nowrap; flex-shrink: 0;
+}
+.chip.on { background: var(--soft-2); font-weight: 600; }
+.chip.dim { color: var(--mid); }
+.tag {
+  display: inline-block; padding: 0 8px; border: var(--line); border-radius: 10px;
+  font-size: 11px; line-height: 18px; background: var(--soft);
+  white-space: nowrap;
+}
+/* 表格块 / 清单块：宽了就横向滚，不许撑破面板 */
+.mini-table { border: 1px solid var(--soft-2); border-radius: 6px; overflow: hidden; margin: 2px 0; }
+.mini-table > div { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; }
+th, td { height: var(--row-h); padding: 0 10px; border-bottom: var(--line); text-align: left; white-space: nowrap; }
+thead th { font-weight: 600; }
+tbody tr:hover { background: var(--soft); }
+td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.statusbar {
+  display: flex; align-items: center; gap: 12px;
+  padding: 4px 12px; border-top: var(--line); flex-shrink: 0; color: var(--mid);
+}
+.prop { display: flex; gap: 8px; padding: 3px 0; border-bottom: 1px solid var(--soft); }
+.prop .k { width: 84px; color: var(--mid); flex-shrink: 0; }
+.blk { padding: 4px 0; border-bottom: 1px dashed var(--soft-2); }
+.scroll { overflow: auto; height: 100%; }
+
+/* 面板抽屉 */
+.drawer {
+  position: fixed; z-index: 60; background: var(--paper);
+  border: var(--line); border-radius: var(--radius-btn);
+  box-shadow: var(--shadow-relief); padding: 4px; min-width: 200px;
+}
+.drawer .it { padding: 5px 8px; border-radius: 6px; cursor: pointer; display: flex; gap: 8px; align-items: center; }
+.drawer .it:hover { background: var(--soft); }
+.drawer .sep { height: 1px; background: var(--soft-2); margin: 4px 2px; }
+.drawer .hd { padding: 4px 8px; color: var(--mid); font-size: 11px; }
+
+/* 弹窗（危险操作二次确认） */
+.modal-mask {
+  position: fixed; inset: 0; z-index: 80; background: rgba(20, 22, 26, .18);
+  display: flex; align-items: center; justify-content: center;
+}
+.modal {
+  background: var(--paper); border: var(--line); border-radius: var(--radius-btn);
+  box-shadow: var(--shadow-relief); padding: 14px 16px; min-width: 320px; max-width: 460px;
+}
+.modal h3 { margin: 0 0 8px; font-size: 13px; }
+.modal p { margin: 0 0 12px; color: var(--mid); }
+.modal .acts { display: flex; gap: 8px; justify-content: flex-end; }

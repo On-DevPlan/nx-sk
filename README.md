@@ -170,6 +170,16 @@ CLI 与 API 同源，skill 驱动 agent**。落到具体功能上：
 | `nx-sk section sync <id> [--dry-run]` | 按模板**补齐**本栏目缺的分组与字段（只增不改不删）——模板演进后让老栏目追上 |
 | `nx-sk entry list \| get \| add \| update \| remove` | 条目 CRUD（PATCH 语义） |
 | `nx-sk entry fields [--section job]` | 字段字典 —— 填之前先看这个，别猜字段名 |
+| `nx-sk entry block add <ref> --type <段落\\|标题\\|图文\\|表格\\|清单\\|附件\\|密钥> [--data @x.json] [--after <块id>]` | 追加**块正文**（`entry.body`，可选键）；详细页下半部分同源 |
+| `nx-sk entry block update <ref> <块id> [--data @x.json]` | 改块（PATCH 语义）；密钥块在打码态下写回会被拒（星号不能存成密钥） |
+| `nx-sk entry block move <ref> <块id> --to <index>` | 移动块（拖拽落点 = 一次 move） |
+| `nx-sk entry block remove \\| remove-many <ref> <块id…>` | 删块；批量时找不到的跳过并报告 |
+| `nx-sk entry body <ref> [--mask]` | 读块正文（人读渲染；`--mask` 只作用于密钥块） |
+| `nx-sk section view list <id>` | 列视图配置；**没配过时给缺省推断**（表格/精简/看板，标 provisional，不落盘） |
+| `nx-sk section view add <id> --type table\\|board\\|kv [--title 名] [--columns 姓名,状态] [--groupby 字段] [--sort 字段:desc]` | 新增视图（第一次 add 把当前生效的推断视图一起固化，chips 不会凭空消失） |
+| `nx-sk section view update <id> <viewId> [--title] [--columns] [--sort] [--set col.字段.width=120]` | 改视图；列宽拖拽结束 = 一次 update |
+| `nx-sk section view remove <id> <viewId>` | 删视图；删光回到缺省推断态（`defaultView` 一并清掉） |
+| `nx-sk section view set-default <id> <viewId>` | 设缺省视图（写 `section.defaultView` —— 是数据，不是面板设置） |
 | `nx-sk file list \| get \| add \| update \| remove` | 附件 CRUD（原件在 `~/nx-sk/files/`，同内容去重） |
 | `nx-sk file add --path <文件> [--copy] [--category C]` | 导入附件：**默认移动原件**，`--copy` 仅复制 |
 | `nx-sk file list [--section <栏目\|none>] [--q 关键字]` | 列附件：按「哪些栏目在引用」筛选（`none` = 未引用）；返回栏目汇总与存储目录 |

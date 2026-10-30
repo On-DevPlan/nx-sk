@@ -136,6 +136,24 @@ export function normalizeFileRecord(raw) {
  * 0.8.0 之前 `--set` 不拆逗号），所以字符串统一按分隔符拆开。
  * 去空、去重、保序：同一个附件在一个字段里出现两次没有意义。
  */
+/** 块正文里的附件引用：file 块的 id 列表 + md 块正文里的图片 id。 */
+function blockFileRefs(entry) {
+  const out = [];
+  const walk = (blocks) => {
+    for (const b of blocks || []) {
+      if (b.type === 'file' && Array.isArray(b.files)) {
+        for (const id of fileIdsOf(b.files)) out.push(id);
+      }
+      if (b.type === 'md' && typeof b.text === 'string') {
+        for (const id of mdImageIds(b.text)) out.push(id);
+      }
+      if (b.children) walk(b.children);
+    }
+  };
+  walk(entry.body);
+  return out;
+}
+
 export function fileIdsOf(value) {
   const raw = value === null || value === undefined
     ? []
@@ -173,7 +191,11 @@ export function findFileRecord(store, ref) {
  *      图片是**内嵌在 markdown 里**的，和 file 字段一样是正式引用。
  *   3. `source` 字段 —— 原始资料袋里 kind='file' 的 item（袋是溯源的锚点：
  *      字段值是从这份原件整理出来的，原件被删，溯源就成了空话）。
- * 同一个（条目, 字段）只出一条。附件中心据此显示「被哪些栏目 / 条目 / 字段用到」。
+ *   4. **块正文**（v4）—— `file` 块里挂的附件、`md` 块正文里贴的图。
+ *      块是条目正文的一部分，正式程度与字段相同；漏扫它 = 「只在块里挂过」的附件
+ *      会被 cleanup 判成未引用然后删掉（真实事故的块版）。
+ * 块引用出一条（fieldKey 记块 id）；其余同一条（条目, 字段）只出一条。
+ * 附件中心据此显示「被哪些栏目 / 条目 / 字段 / 块用到」。
  */
 export function fileReferences(store, rec) {
   if (!rec) return [];
@@ -220,6 +242,17 @@ export function fileReferences(store, rec) {
           .filter((x) => x && typeof x === 'object' && x.kind === 'file' && x.fileId)
           .map((x) => x.fileId);
         if (ids.length && hits(ids)) push(f);
+      }
+      // ④ 块正文（v4）：file 块 + md 块。命中就出一条，fieldKey 记块 id、fieldLabel 记块类型。
+      const blockHits = blockFileRefs(e);
+      if (blockHits.length && hits(blockHits)) {
+        const which = (e.body || []).some((b) => b.type === 'file'
+          && fileIdsOf(b.files).some((ref) => hits([ref]))) ? 'file 块' : 'md 块';
+        out.push({
+          sectionId: sec.id, sectionTitle: sec.title,
+          entryId: e.id, entryTitle: e.title,
+          fieldKey: 'body', fieldLabel: which,
+        });
       }
     }
   }

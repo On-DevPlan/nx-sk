@@ -18,6 +18,10 @@ import { mdImageIds, rewriteMdImages } from '../../core/mdimages.js';
 import { looksLikeSourceList, normalizeSourceItem, normalizeSourceItems, resolveSourceConflicts, sourceItemSummary, sourceItemTimeLabel } from '../../core/source.js';
 import { displayPath } from '../../core/paths.js';
 import { coerceCell, columnToDef, computeTable, normalizeSpec, renderTableText, sanitizeColumns, sanitizeTotals } from '../../shared/table.js';
+import {
+  BLOCK_LABELS, BLOCK_TYPES, appendBlock, findBlock, findContainer, moveToIndex, normalizeBlock,
+  removeBlock as removeBlockIn, replaceBlock, updateBlock, validateBlocks,
+} from '../../shared/blocks.js';
 
 /**
  * 「这一格拿到的是打码占位吗」。
@@ -1493,4 +1497,342 @@ export function renderKeysLedger(d) {
     lines.push(`    ${x.label.padEnd(10)} ${x.key.padEnd(14)} ${x.sensitive ? '[密文] ' : ''}${x.value}`);
   }
   return lines.join('\n');
+}
+
+// —— 块正文（v4，entry.body）—————————————————————————————————————
+//
+// 五条 action（设计 §九 9.2）：add / update / move / remove / remove-many。
+// 「转类型」没有独立 action —— 就是 `entry.block.update` 一份新形状的块（**整块替换**）。
+// secret 块的值走与敏感字段**同一条**密文边界：写时加密、读时默认原文、打码占位拒收。
+// 打码写回按 **blockId** 认领 —— 这是块级相对表格列的安全优势（表格只能按值猜 + 行号兜底）。
+
+/** 必须先有一条有正文的条目；没有就明确报错（别静默建一个空 body）。 */
+function mustFindEntryWithBody(store, ref, sectionRef) {
+  const entry = resolveEntry(store, ref, sectionRef);
+  if (!Array.isArray(entry.body)) {
+    throw badInput(`条目「${entry.title}」（${entry.id}）还没有块正文。先 entry block add 建一块。`);
+  }
+  return entry;
+}
+
+/**
+ * 趟 A：把调用方给的块数据归一成**可落盘**的形状（异步加密在这里做）。
+ *
+ *   · secret 块：明文 → AES-256-GCM 加密；打码占位 → 按 blockId 认领现值
+ *     （认领成功 = 没改，原样保留；认领失败 = 报错，**掩码写回会毁凭据**）；
+ *     已是密文对象（导入/还原）→ 原样保留。
+ *   · 其余类型：normalizeBlock 归一（非法形状在这里暴露，而不是落盘后读出来才发现）。
+ *
+ * convert（type 变了）返回 `{ block, converted: true }`；否则 `{ block }`（PATCH 合并语义）。
+ */
+async function prepareBlockValue(currentBlock, data = {}) {
+  const merged = { ...(currentBlock || {}), ...(data && typeof data === 'object' ? data : {}) };
+  const type = String(merged.type || (currentBlock ? currentBlock.type : '') || '');
+  if (!BLOCK_TYPES.includes(type)) {
+    throw badInput(`未知块类型: ${type || '（空）'}（可用: ${BLOCK_TYPES.join(' / ')}）`);
+  }
+
+  if (type === 'secret' && merged.value !== undefined && merged.value !== null && merged.value !== '') {
+    if (!isCipherBlob(merged.value)) {
+      const text = String(merged.value);
+      if (looksMasked(text)) {
+        const current = currentBlock && currentBlock.type === 'secret' ? currentBlock.value : null;
+        if (isCipherBlob(current)) {
+          try {
+            const { key } = await resolveVaultKey();
+            if (maskValue(decryptValue(key, current)) === text) {
+              merged.value = current; // 打码占位 == 现值的打码 → 没改，保留现密文
+            }
+          } catch { /* 解不开（换过密钥）就按新值走，下面照常报错 */ }
+        }
+        if (!isCipherBlob(merged.value)) {
+          throw badInput('secret 块收到的是打码占位而非明文。给完整值，或把这块清掉重填。'
+            + '（打码值回写会**毁掉凭据**——块级按 blockId 认领，这次没认领上。）');
+        }
+      } else {
+        const { key } = await resolveVaultKey();
+        merged.value = encryptValue(key, text);
+      }
+    }
+  }
+
+  // 新块的 id 在这里就定下来（normalizeBlock 缺 id 会返回 null —— 那正是「块数据不合法」的由来）
+  const normalized = normalizeBlock({
+    ...merged, type,
+    id: (currentBlock && currentBlock.id) || merged.id || newBlockId(),
+  });
+  if (!normalized) throw badInput(`块数据不合法（类型 ${type}）`);
+  const converted = !currentBlock || currentBlock.type !== type;
+  return { block: normalized, converted };
+}
+
+/** 新块的 id：b_ 前缀（与 f_ 附件同一先例）。 */
+function newBlockId() {
+  return newId('b');
+}
+
+/** 条目的块正文整体校验：一条错误就整体拒绝（写入即体检，与面板预检共用 shared/blocks）。 */
+function assertBodyOk(body) {
+  const errors = validateBlocks(body);
+  if (errors.length) throw badInput(`块正文校验失败（未落盘）：\n- ${errors.join('\n- ')}`);
+}
+
+/** 条目（含 body）的读出口：serializeEntry 已带 body（secret 块按 mask/decrypt 展示）。 */
+export async function listBlocks(ref, { mask, section } = {}) {
+  const d = await getEntry(ref, { mask, section });
+  return {
+    id: d.id, section: d.section, sectionTitle: d.sectionTitle, title: d.title,
+    mask: !!mask, blocks: d.body || [], count: (d.body || []).length,
+  };
+}
+
+export async function addBlock(ref, { type, data, after, section, 'dry-run': dryRun } = {}) {
+  const kind = String(type || (data && data.type) || '').trim();
+  if (!kind) throw badInput(`缺少块类型：--type ${BLOCK_TYPES.join(' / ')}`);
+  if (!BLOCK_TYPES.includes(kind)) throw badInput(`未知块类型: ${kind}（可用: ${BLOCK_TYPES.join(' / ')}）`);
+
+  const store = await loadStore();
+  const target = resolveEntry(store, ref, section);
+  const body = Array.isArray(target.body) ? target.body : [];
+  const current = data && data.id ? findBlock(body, data.id) : null;
+  if (current) throw conflict(`块 id 已存在: ${current.id}（改块用 entry block update，别用 add 冒名顶替）`);
+
+  const incoming = { ...(data && typeof data === 'object' ? data : {}), type: kind };
+  const { block } = await prepareBlockValue(null, incoming);
+  const withId = data && data.id ? { ...block, id: String(data.id) } : block;
+
+  if (after && !findBlock(body, String(after))) throw notFound(`找不到插入锚点块: ${after}`);
+  assertBodyOk(appendBlock(body, withId, after ? String(after) : null));
+
+  if (dryRun) {
+    return { status: 'skipped', dryRun: true, wouldAdd: withId, after: after || null };
+  }
+
+  await mutateStore((s) => {
+    const e = s.entries.find((x) => x.id === target.id);
+    if (!Array.isArray(e.body)) e.body = [];
+    e.body = appendBlock(e.body, structuredClone(withId), after ? String(after) : null);
+    e.updatedAt = nowIso();
+  });
+
+  const afterStore = await loadStore();
+  const finalEntry = afterStore.entries.find((x) => x.id === target.id);
+  return {
+    status: 'ok', id: target.id, blockId: withId.id, type: withId.type,
+    blocks: (finalEntry.body || []).length,
+  };
+}
+
+export async function updateBlockValue(ref, blockId, { data, section, 'dry-run': dryRun } = {}) {
+  if (!data || typeof data !== 'object' || !Object.keys(data).length) {
+    throw badInput('没有要改的内容：--data @file.json（块级只有 PATCH 一种写法）');
+  }
+  const store = await loadStore();
+  const target = mustFindEntryWithBody(store, ref, section);
+  const current = findBlock(target.body, blockId);
+  if (!current) throw notFound(`找不到块: ${blockId} —— 现有: ${target.body.map((b) => b.id).join(' / ')}`);
+
+  const { block, converted } = await prepareBlockValue(current, data);
+  const body = converted ? replaceBlock(target.body, blockId, block) : updateBlock(target.body, blockId, block);
+  assertBodyOk(body);
+
+  if (dryRun) {
+    return { status: 'skipped', dryRun: true, wouldChange: { id: target.id, blockId, converted, type: block.type } };
+  }
+
+  await mutateStore((s) => {
+    const e = s.entries.find((x) => x.id === target.id);
+    e.body = structuredClone(body);
+    e.updatedAt = nowIso();
+  });
+
+  return { status: 'ok', id: target.id, blockId, type: block.type, converted };
+}
+
+export async function moveBlockTo(ref, blockId, { to, section, 'dry-run': dryRun } = {}) {
+  const toIndex = Number(to);
+  if (!Number.isFinite(toIndex)) {
+    throw badInput('缺少目标位置：--to <index>（0 起；负数表示从尾部数）');
+  }
+  const store = await loadStore();
+  const target = mustFindEntryWithBody(store, ref, section);
+  const current = findBlock(target.body, blockId);
+  if (!current) throw notFound(`找不到块: ${blockId}`);
+  const container = findContainer(target.body, blockId);
+  const arr = container ? (container.children || []) : target.body;
+  const length = arr.length;
+  const from = arr.findIndex((b) => b.id === blockId);
+  // 允许负数从尾部数（-1 = 最后一个），与数组下标的直觉一致
+  const resolved = toIndex < 0 ? length + toIndex : toIndex;
+  if (resolved < 0 || resolved >= length) {
+    throw badInput(`--to ${toIndex} 越界：这个容器里有 ${length} 个块（合法 0–${length - 1}，或负数从尾部数）`);
+  }
+  if (resolved === from) {
+    return { status: 'skipped', unchanged: true, id: target.id, blockId, to: resolved };
+  }
+  if (dryRun) {
+    return { status: 'skipped', dryRun: true, wouldChange: { id: target.id, blockId, from, to: resolved } };
+  }
+
+  await mutateStore((s) => {
+    const e = s.entries.find((x) => x.id === target.id);
+    e.body = moveToIndex(e.body, container ? container.id : null, blockId, resolved);
+    e.updatedAt = nowIso();
+  });
+
+  return { status: 'ok', id: target.id, blockId, from, to: resolved };
+}
+
+export async function removeBlocks(ref, ids, { section, 'dry-run': dryRun } = {}) {
+  // ids 是**逗号分隔的一串**（`entry block remove-many <ref> a,b`）——不拆的话
+  // 整串会被当成一个块 id，永远「找不到」（而且报错里的 id 长得像对的）。
+  const wanted = [...new Set((Array.isArray(ids) ? ids : [ids])
+    .flatMap((x) => String(x ?? '').split(/[,，、\s]+/))
+    .map((x) => x.trim())
+    .filter(Boolean))];
+  if (!wanted.length) throw badInput('缺少要删的块 id：entry block remove <ref> <blockId>（多个用逗号分隔）');
+  const store = await loadStore();
+  const target = mustFindEntryWithBody(store, ref, section);
+
+  const found = wanted.filter((id) => !!findBlock(target.body, id));
+  const skipped = wanted.filter((id) => !findBlock(target.body, id));
+  if (!found.length) {
+    throw notFound(`找不到要删的块: ${wanted.join(', ')} —— 现有: ${target.body.map((b) => b.id).join(' / ')}`);
+  }
+
+  if (dryRun) {
+    return { status: 'skipped', dryRun: true, wouldRemove: found, skipped };
+  }
+
+  await mutateStore((s) => {
+    const e = s.entries.find((x) => x.id === target.id);
+    for (const id of found) e.body = removeBlockIn(e.body, id);
+    e.updatedAt = nowIso();
+  });
+
+  const left = (await loadStore()).entries.find((x) => x.id === target.id)?.body?.length ?? 0;
+  const partial = skipped.length > 0 && found.length > 0;
+  return {
+    status: partial ? 'partial' : 'ok',
+    removed: found,
+    skipped,
+    id: target.id,
+    blocks: left,
+  };
+}
+
+
+/**
+ * 导入专用：把一份**明文**块（导出包里恒为明文）重新加密落盘。
+ *
+ * 与 prepareBlockValue 的分工：那条是「用户改一个块」的入口，按 blockId 认领打码值；
+ * 这条是「整份正文换掉」的入口（导入），没有当前块可比对，所以只认明文 → 加密。
+ * 两条都走同一个 `encryptValue`，密文形状因此完全一致（store.json 里看不出差别）。
+ */
+async function sealBlocks(blocks) {
+  const out = [];
+  for (const raw of blocks || []) {
+    const b = normalizeBlock(raw);
+    if (!b) continue;
+    if (b.type === 'secret' && typeof b.value === 'string' && b.value) {
+      const { key } = await resolveVaultKey();
+      b.value = encryptValue(key, b.value);
+    }
+    if (Array.isArray(b.children)) b.children = await sealBlocks(b.children);
+    out.push(b);
+  }
+  return out;
+}
+
+/**
+ * 整份正文写入（导入路径用）。校验不过就**整份拒绝**——与块 CRUD 同一条「写入即体检」，
+ * 免得半份合法的正文落盘（导出的包坏了，应该在边界处停下，而不是存一半）。
+ *
+ * 空数组 = 清掉正文（键删除，不是留一个空 body：老数据里「没有正文」就是这个形状）。
+ */
+export async function setEntryBody(entryId, blocks) {
+  const sealed = await sealBlocks(blocks);
+  assertBodyOk(sealed);
+  await mutateStore((s) => {
+    const e = s.entries.find((x) => x.id === entryId);
+    if (!e) throw notFound(`找不到条目: ${entryId}`);
+    if (sealed.length) e.body = sealed;
+    else delete e.body;
+    e.updatedAt = nowIso();
+  });
+  return { status: 'ok', id: entryId, blocks: sealed.length };
+}
+
+// —— 块正文（v4）的 CLI 渲染 ——
+//
+// 块的形状是**自描述**的（类型自带值形状），所以渲染要按类型给不同的读法：
+// 段落/标题直接印文字，表格印成表，附件印 id + 文件名，密文印打码。
+function renderBlockLine(b, indent = '') {
+  const label = BLOCK_LABELS[b.type] || b.type;
+  switch (b.type) {
+    case 'paragraph':
+    case 'md':
+      return `${indent}[${label}] ${b.text || ''}`;
+    case 'heading':
+      return `${indent}[${label}] ${'#'.repeat(b.level || 2)} ${b.text || ''}`;
+    case 'table': {
+      const cols = (b.columns || []).map((c) => c.label || c.key);
+      const head = cols.join(' | ');
+      const rows = (b.rows || []).map((r) => cols.map((_, i) => {
+        const key = (b.columns || [])[i]?.key;
+        return String(r[key] ?? '');
+      }).join(' | '));
+      return `${indent}[${label}] ${cols.length} 列 · ${(b.rows || []).length} 行`
+        + `\n${indent}  ${head}`
+        + rows.map((r) => `\n${indent}  ${r}`).join('');
+    }
+    case 'entrylist': {
+      const cols = (b.fields || []).map((f) => f.label || f.key);
+      return `${indent}[${label}] ${cols.join(' | ')} · ${(b.value || []).length} 行`;
+    }
+    case 'file':
+      return `${indent}[${label}] ${(b.files || []).join(' / ') || '（空）'}`;
+    case 'secret': {
+      // 与字段同一条边界：默认原文，--mask 打码。displaySensitive 已经在序列化时
+      // 把密文解成字符串（或按 mask 打成星号），所以这里读到字符串就是「能显示的」；
+      // 读到对象 = 密文解不开（缺密钥 / 换过密钥），必须说清楚而不是假装正常。
+      const v = b.value;
+      const text = v == null || v === ''
+        ? '（空）'
+        : (typeof v === 'string' ? v : '（密文无法解开：本机缺密钥或换过密钥）');
+      return `${indent}[${label}] ${b.label || '密钥'} = ${text}`;
+    }
+    case 'section':
+      return `${indent}[${label}] ${b.sectionId || '（未指定栏目）'}${b.viewId ? ` · 视图 ${b.viewId}` : ''}`;
+    case 'column':
+      return `${indent}[${label}] ${(b.widths || []).length ? `列组 · 宽 ${(b.widths || []).join('/')}` : '叶子列'}`
+        + ` · ${(b.children || []).length} 个子块`;
+    default:
+      return `${indent}[${b.type}] ${JSON.stringify(b)}`;
+  }
+}
+
+export function renderBlocks(d) {
+  const lines = [`条目 ${d.title}（${d.id}）· 栏目 ${d.sectionTitle || d.section} · ${d.count} 块`];
+  const walk = (blocks, depth) => {
+    for (const b of blocks || []) {
+      lines.push(renderBlockLine(b, '  '.repeat(depth)));
+      if (b.children) walk(b.children, depth + 1);
+    }
+  };
+  walk(d.blocks, 1);
+  return lines.join('\n');
+}
+
+export function renderBlockChange(d) {
+  if (d.status === 'skipped') {
+    return `试运行（未落盘）：${JSON.stringify(d.wouldAdd || d.wouldChange || d.wouldRemove || {})}`;
+  }
+  if (d.removed) {
+    const skipped = d.skipped?.length ? ` · 跳过 ${d.skipped.join(', ')}` : '';
+    return `已删除块 ${d.removed.join(', ')}${skipped}`;
+  }
+  if (d.wouldAdd) return `（试运行）将加块 ${d.wouldAdd.id}（${d.wouldAdd.type}）`;
+  if (d.converted) return `已改块 ${d.blockId} · 转为 ${d.type}（整块替换）`;
+  return `已改块 ${d.blockId}（${d.type}）`;
 }

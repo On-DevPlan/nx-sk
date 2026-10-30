@@ -1178,3 +1178,119 @@ body.col-resizing, body.col-resizing * { cursor: col-resize !important; user-sel
 }
 .file-picker-list.expanded { max-height: none; }
 .file-picker-list .file-preview { flex-shrink: 0; }
+
+/* ============ 块正文（entry.body，v4） ============ */
+/* 正文区在属性区下方，与属性区同一套分隔语言：只用 1px 浅底线，不投影、不描边框。
+   每块一行抬头（类型 + id）+ 内容；块之间也是 1px 线——不把每块做成「卡片岛」。 */
+.blk-panel { border-top: var(--border); }
+.blk-bar {
+  display: flex; align-items: center; gap: 8px;
+  min-height: var(--row-h); padding: 4px 14px;
+  border-bottom: var(--border);
+  background: var(--soft);
+  font-size: 13px; font-weight: 600;
+}
+.blk-list { display: flex; flex-direction: column; }
+.blk { border-bottom: var(--border); }
+.blk:last-child { border-bottom: 0; }
+.blk-head {
+  display: flex; align-items: center; gap: 8px;
+  min-height: 24px; padding: 2px 14px 0;
+  font-size: 11px; color: var(--mid);
+}
+/* 类型标签：单色小字，不用彩色块（全站不变量：唯一彩色是语义红） */
+.blk-type {
+  padding: 0 6px; border: var(--border); border-radius: 999px;
+  background: var(--paper); color: var(--ink);
+  line-height: 16px; font-size: 10px;
+}
+.blk-id { font-size: 10px; opacity: .7; }
+.blk-head .more > summary { height: 20px; min-height: 20px; padding: 0 8px; line-height: 18px; }
+.blk-body { padding: 4px 14px 10px; }
+.blk-body:empty { padding-bottom: 0; }
+
+/* 文本块：双击编辑。空块给一句占位——不然它在屏幕上「不存在」 */
+.blk-text { font-size: var(--fs-core); min-height: 18px; cursor: text; }
+.blk-empty {
+  font-size: var(--fs-core); color: var(--mid);
+  min-height: 18px; cursor: text; border-radius: 3px;
+}
+.blk-empty:hover { background: var(--soft); }
+.blk-empty:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
+.blk-input {
+  width: 100%; resize: vertical;
+  font: inherit; font-size: var(--fs-core); line-height: 1.5;
+  padding: 4px 6px; border: var(--border); border-radius: 6px;
+  box-shadow: var(--shadow-relief-inset);
+  background: var(--paper); color: var(--ink);
+}
+.blk-input:focus { outline: none; border-color: var(--mid); }
+.blk-md { cursor: text; }
+.blk-md .md-preview, .blk-md > * { font-size: var(--fs-core); }
+.blk-heading { display: flex; align-items: flex-start; gap: 6px; }
+.blk-level {
+  flex: 0 0 auto; height: 22px; font: inherit; font-size: 10px;
+  padding: 0 2px; border: var(--border); border-radius: 4px;
+  background: var(--paper); color: var(--ink);
+}
+.blk-h { font-weight: 700; }
+.blk-h1 { font-size: 16px; }
+.blk-h2 { font-size: 14px; }
+.blk-h3 { font-size: 13px; }
+
+/* 密钥块：名称一行、值一行。值与 secret 字段同一条加密边界 */
+.blk-secret { display: flex; flex-direction: column; gap: 6px; }
+.blk-secret-label { width: 180px; }
+.blk-secret .rowgap { gap: 6px; }
+
+/* 内嵌栏目块：一行身份信息（表格渲染随 S3） */
+.blk-section {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 6px 8px; border: var(--border); border-radius: 6px;
+  background: var(--soft);
+}
+
+/* 容器块的子块：左侧一条 1px 竖线表示层级，不缩进成「俄罗斯套娃」 */
+.blk-nested { margin-left: 10px; padding-left: 8px; border-left: var(--border); }
+.blk-nested > .blk { border-bottom: 0; }
+
+/* 打码态下的只读提示：含密文的块一律不写回 */
+.blk-readonly { opacity: .85; }
+.blk-readonly .hint { margin-top: 4px; }
+
+/* ============ 数据库视图（S2） ============ */
+/* 视图 chips：单色，唯一「按下」感给选中态（全站不变量：立体感只给可交互元素） */
+.viewbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 0 14px 8px; }
+.viewbar-label { font-size: 11px; letter-spacing: .04em; }
+.vchip {
+  height: 24px; padding: 0 10px; font-size: 11px; line-height: 22px;
+  border: var(--border); border-radius: 12px; background: var(--paper); color: var(--ink);
+  cursor: pointer; transition: background .12s;
+}
+.vchip:hover:not(:disabled) { background: var(--soft); }
+.vchip.on { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.vchip:disabled { color: var(--mid); cursor: not-allowed; opacity: .6; }
+
+/* 表格视图 = 同一批数据的横向投影。列多就横滚，行高与全站 28px 对齐 */
+.dbtable-wrap { overflow: auto; max-height: calc(100vh - 230px); }
+.dbtable { border-collapse: collapse; width: max-content; min-width: 100%; }
+.dbtable th, .dbtable td {
+  height: var(--row-h); padding: 0 10px; border-bottom: var(--border);
+  font-size: var(--fs-core); text-align: left; white-space: nowrap;
+  max-width: 260px; overflow: hidden; text-overflow: ellipsis;
+}
+.dbtable th {
+  position: sticky; top: 0; z-index: 1; background: var(--paper);
+  font-weight: 600; box-shadow: 0 1px 0 var(--soft-2);
+}
+.dbtable tbody tr { cursor: pointer; }
+.dbtable tbody tr:hover { background: var(--soft); }
+.dbtable tbody tr.on { background: var(--soft-2); }
+.dbtable .pickcol { width: 30px; min-width: 30px; padding: 0 0 0 10px; }
+/* 投影引用的字段被删：列还在，弱化显示 —— 「曾经有一列，现在字段没了」 */
+.dbtable .missing { color: var(--mid); font-style: italic; }
+.dbtable th .hint { font-weight: 400; }
+
+/* 表格视图下不按拖拽宽度分栏：表格要空间，详情保底 520px（S3 换成 FlexLayout 后取消） */
+.cols.table-mode .col-splitter { display: none; }
+
