@@ -7,7 +7,9 @@
 //   { id, kind, name, text?, fileId?, url?, addedAt, at?, note?, mapped?,
 //     superseded?, supersededBy?, supersedes? }
 //
-//   kind   text = 粘贴进来的文字；file = 附件库里的原件（fileId）；url = 一个网址
+//   kind   text = 粘贴进来的**markdown**（图片内嵌在正文里，`![说明](f_xxx)` / 外链
+//              `![说明](https://…)`——聊天记录图文混排，图和文不能分开存）；
+//          file = 附件库里的原件（fileId）；url = 一个网址
 //   name   人读的名字（用户可改），默认从内容推断
 //   mapped 整理去向：这条资料已经被同步到哪些字段 key（双向同步的锚点）
 //   at     **资料自身的时间**（如邮件时间）；缺省用 addedAt（入袋时间）
@@ -15,11 +17,12 @@
 //
 // 三条纪律写在代码里，不只是文档：
 //   1. **只增不删**——袋里的东西是原始证据，整理完也留着（要删由人显式做）。
-//   2. **原文不改写**——text 原样存，整理后的结果写进**字段**或写进新的一条，
-//      不就地改写原件（否则「原始」这个词就没意义了）。
+//   2. **原文不改写**——text 原样存（底层是 markdown；面板上改是**人显式**点了「编辑」），
+//      整理后的结果写进**字段**或写进新的一条，不就地改写原件（否则「原始」这个词就没意义了）。
 //   3. **冲突以新的为准，但旧的留痕**——同名即冲突（同一件事有了新版本）：
 //      时间新的那条是「当前版本」，旧的被标 `superseded` 但**仍留在袋里**。
 import { newId, nowIso } from './ids.js';
+import { mdImageIds, parseMdImages } from './mdimages.js';
 
 export const SOURCE_KINDS = ['text', 'file', 'url'];
 
@@ -47,12 +50,24 @@ export function sourceItemTime(item) {
   return Number.isFinite(t) ? t : 0;
 }
 
+/**
+ * 从一段 markdown 里推断人读标题：逐个非空行去掉图片语法后取第一个还有字的——
+ * 聊天记录的第一行常常**只是一张图**（`![截图](f_xxx)`），跳过它才能落到人话上。
+ */
+function firstLineTitle(text, fallback = '一段文字') {
+  for (const line of String(text || '').split('\n')) {
+    if (!line.trim()) continue;
+    const stripped = line.replace(/!\[([^\]]*)\]\(\s*[^)\s]+\s*\)/g, '').trim();
+    if (stripped) return stripped.slice(0, 40);
+  }
+  return fallback;
+}
+
 function inferName(item) {
   if (item.name) return String(item.name).trim();
   if (item.kind === 'url') return String(item.url || '').slice(0, 60);
   if (item.kind === 'file') return String(item.fileId || '附件');
-  const first = String(item.text || '').split('\n').find((l) => l.trim()) || '';
-  return first.trim().slice(0, 40) || '一段文字';
+  return firstLineTitle(item.text);
 }
 
 /**
@@ -170,13 +185,38 @@ export function currentSourceItems(items) {
   return (items || []).filter((x) => !x.superseded);
 }
 
-/** 一条 item 的人读摘要（CLI 一行一条、面板清单副标题都用它）。 */
+/**
+ * 一条 item 的人读摘要（CLI 一行一条、面板清单副标题都用它）。
+ *
+ * text 的底层是 **markdown**（图片内嵌在正文里，`![说明](f_xxx)` / `![说明](https://…)`）：
+ * 摘要里把图片语法压成 `[图: 说明]`——一行摘要里出现一串 `![截图](f_mvts…)` 没人读得下去。
+ */
 export function sourceItemSummary(item) {
   if (!isSourceItem(item)) return '';
   if (item.kind === 'url') return item.url || '';
   if (item.kind === 'file') return `附件 ${item.fileId}`;
-  const t = String(item.text || '').replace(/\s+/g, ' ').trim();
+  const t = String(item.text || '').replace(/!\[([^\]]*)\]\(\s*[^)\s]+\s*\)/g, (_m, alt) => `[图: ${alt || '图'}]`).replace(/\s+/g, ' ').trim();
   return t.length > 80 ? `${t.slice(0, 80)}…` : t;
+}
+
+/** 这条（或这袋）资料里内嵌的附件图片 id —— 打包导出与完整性检查都用它。 */
+export function sourceImageIds(items) {
+  const out = [];
+  const seen = new Set();
+  for (const item of items || []) {
+    if (!isSourceItem(item) || item.kind !== 'text' || !item.text) continue;
+    for (const id of mdImageIds(item.text)) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+      out.push(id);
+    }
+  }
+  return out;
+}
+
+/** 正文里的 `![alt](f_xxx)` 引用（保序，含外链）。面板解析图片、CLI 渲染都用它。 */
+export function sourceItemImages(text) {
+  return parseMdImages(text);
 }
 
 /** 人读时间：优先资料自身的时间（at），否则入袋时间。 */

@@ -180,6 +180,46 @@ test('导出带上资料袋里的原件，导入后 fileId 重映射到新库', 
   assert.equal(got.files[bag[0].fileId]?.name, '袋内原件.png', '袋里 item 的 fileId 应重映射到可解析的附件');
 });
 
+// text 的底层是 markdown：正文里内嵌的 `![x](f_xxx)` 也是正式引用——
+// 聊天记录图文混排，漏了正文里的图，导出的记录就成了没图的文字。
+test('导出带上资料袋正文内嵌的图片，导入后正文里的 id 也重映射', async () => {
+  await sections.addSection({ id: 'mdsec', title: '图文袋', template: 'projects' });
+  await entries.addEntry({ section: 'mdsec', title: '图文条目', set: { name: '图文条目' } });
+  const img = await files.addFile({
+    content: Buffer.from(`bag-md-${Date.now()}-${Math.random()}`).toString('base64'),
+    name: '聊天截图.png',
+  });
+  const local = `f_local_${Date.now().toString(36)}`;
+  await entries.updateEntry('图文条目', {
+    section: 'mdsec',
+    data: { source: [
+      { kind: 'text', name: '带图聊天', text: `今天聊了这些\n\n![聊天截图](${img.id})\n\n![外链图](https://example.com/x.png) 这条是网图`, addedAt: new Date().toISOString() },
+      { kind: 'text', text: `纯文字一条，引用不存在也不会炸：![丢](f_丢了)` },
+    ] },
+  });
+
+  const zip = await transfer.buildSectionZip('mdsec', {});
+  const man = manifestOf(zip.buffer);
+  assert.equal(man.files.length, 1, '只有正文内嵌的那张随包（外链与不存在的 id 不进包）');
+
+  await transfer.applyImport('mddst', zip.buffer, { onConflict: 'skip' });
+  // 读袋子要用 source get：它的 files 表会把 **text 正文里内嵌的** 图片引用也解析出来
+  const got = await entries.getSource('图文条目', { section: 'mddst' });
+  const bag = got.items;
+  const withImg = bag.find((x) => x.name === '带图聊天');
+  assert.ok(withImg, '条目要在');
+  // 正文里的引用要能解析（同机导入 sha 相同会复用同 id；跨库时 remapValues 会换成新 id，
+  // 两条路最终契约一致：**正文里引用的 id 在目标库可解析**）
+  const refId = withImg.text.match(/!\[聊天截图\]\(([^)]+)\)/)[1];
+  assert.equal(got.files[refId]?.name, '聊天截图.png', '正文内嵌的引用必须可解析');
+  assert.ok(withImg.text.includes('https://example.com/x.png'), '外链图原样保留');
+
+  // 纯文字那条：引用的附件不存在时不报错也不伪造，原样保留
+  const plain = bag.find((x) => x.kind === 'text' && x.text.includes('纯文字'));
+  assert.ok(plain.text.includes('f_丢了'));
+  void local;
+});
+
 test('零配置导入：不指定栏目，按包内结构新建；重复导入自动加序号', async () => {
   const zip = await transfer.buildSectionZip('picksec');
   const first = await transfer.previewImport(null, zip.buffer, { fileName: 'x.zip' });
