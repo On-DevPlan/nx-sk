@@ -9,7 +9,7 @@ await useTempHome();
 
 const sections = await import('../../src/modules/sections/service.js');
 const entries = await import('../../src/modules/entries/service.js');
-const { normalizeSourceItems, sourceItemSummary } = await import('../../src/core/source.js');
+const { normalizeSourceItems, sourceImageIds, sourceItemSummary } = await import('../../src/core/source.js');
 const { getTemplate, instantiateTemplate } = await import('../../src/core/fields.js');
 const { applySpec } = await import('../../src/runtime/spec.js');
 
@@ -213,4 +213,30 @@ test('存量栏目缺 source 时 normalize 读一次即自愈（KV 表不加）'
   const sec = store.sections.find((s) => s.id === 'oldsec');
   assert.equal(sec.fields, 2, '归一后自带 source 字段');
   assert.equal(sec.groups, 2, '归一后自带 source 分组');
+});
+
+
+// —— text 的底层是 markdown（图片内嵌，图文不分家）——
+
+test('text 里的图片语法不进标题：第一行是一张图时，标题不能是一串 id', () => {
+  const [item] = normalizeSourceItems([{ kind: 'text', text: '![聊天截图](f_abc123)\n后面的说明文字' }]);
+  assert.notEqual(item.name, '一段文字');
+  assert.ok(!item.name.includes('f_abc123'), 'id 不能出现在标题里');
+  assert.ok(item.name.includes('后面的说明文字'), '取的是第一行剩下的文字');
+});
+
+test('摘要把图片语法压成 [图: 说明]（一行摘要里不该出现一串 md 引用）', () => {
+  const [item] = normalizeSourceItems([{ kind: 'text', text: '看这张\n![发票](f_img1) 和 ![外链](https://x/y.png)' }]);
+  const sum = sourceItemSummary(item);
+  assert.ok(!sum.includes('](f_'), '摘要里不该有 md 引用');
+  assert.ok(sum.includes('[图: 发票]') && sum.includes('[图: 外链]'));
+});
+
+test('sourceImageIds：收正文内嵌的附件图（去重、跳过外链），file item 不混进来', () => {
+  const items = normalizeSourceItems([
+    { kind: 'text', text: '![a](f_one) 和 ![b](https://x/y.png) 与重复 ![a2](f_one)' },
+    { kind: 'file', fileId: 'f_file_item' },
+    { kind: 'text', text: '没有图' },
+  ]);
+  assert.deepEqual(sourceImageIds(items), ['f_one'], '外链与 file item 都不算正文内嵌引用');
 });
