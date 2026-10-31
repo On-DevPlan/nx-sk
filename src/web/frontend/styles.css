@@ -955,6 +955,7 @@ a.file-name:hover { text-decoration: underline; }
 .entrylist-head .entrylist-col { display: inline-flex; align-items: center; gap: 4px; min-width: 0; }
 .entrylist-head .entrylist-col .tag { font-size: 10px; padding: 0 4px; }
 .entrylist-row input { padding: 3px 6px; font-size: 12px; }
+.entrylist-acts { display: flex; align-items: center; justify-content: flex-end; gap: 1px; }
 .entrylist-add { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
 
 /* ============ 栏目管理：栏目 → 条目的树 ============ */
@@ -1073,6 +1074,44 @@ a.file-name:hover { text-decoration: underline; }
 }
 .tf-mini:hover:not(:disabled) { background: var(--soft-2); color: var(--ink); }
 .tf-mini:disabled { opacity: .28; cursor: default; }
+
+/* ── 拖拽排序：把手 + 插入线（表格 / 清单共用）──
+ * 把手常驻但很淡，行内按钮 **hover 才出现** —— 密集表里的操作不该抢内容的注意力，
+ * 这是「像 Notion 那种数据库」和「像一堆按钮」的分界。 */
+.tf-grip {
+  flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 14px; height: 17px;
+  font-size: 11px; line-height: 1; color: var(--soft-2);
+  border-radius: 3px; cursor: grab; user-select: none;
+}
+.tf-grip:hover { color: var(--ink); background: var(--soft-2); }
+.tf-grip:active { cursor: grabbing; }
+.tablefield .tf-mini, .entrylist .tf-mini { width: 16px; height: 16px; font-size: 10px; }
+.tf-acts .tf-mini, .entrylist-acts .tf-mini { opacity: 0; transition: opacity .12s; }
+.tf-row:hover .tf-acts .tf-mini, .entrylist-row:hover .entrylist-acts .tf-mini,
+.tf-acts .tf-mini:focus-visible, .entrylist-acts .tf-mini:focus-visible { opacity: 1; }
+/* 插入线：说清「会插到这里」。高亮整行/整列做不到这件事 */
+.tf-row, .tf-th, .tf-colrow, .entrylist-row { position: relative; }
+.tf-row.drop-before::before, .tf-row.drop-after::after,
+.entrylist-row.drop-before::before, .entrylist-row.drop-after::after {
+  content: ''; position: absolute; left: 0; right: 0; height: 2px;
+  background: var(--ink); z-index: 4; pointer-events: none;
+}
+.tf-row.drop-before::before, .entrylist-row.drop-before::before { top: -1px; }
+.tf-row.drop-after::after, .entrylist-row.drop-after::after { bottom: -1px; }
+.tf-th.drop-before::before, .tf-th.drop-after::after,
+.tf-colrow.drop-before::before, .tf-colrow.drop-after::after {
+  content: ''; position: absolute; top: 0; bottom: 0; width: 2px;
+  background: var(--ink); z-index: 4; pointer-events: none;
+}
+.tf-th.drop-before::before { left: -1px; }
+.tf-th.drop-after::after { right: -1px; }
+.tf-colrow.drop-before::before { left: -4px; }
+.tf-colrow.drop-after::after { right: -4px; }
+.tf-row.dragging, .entrylist-row.dragging { opacity: .45; }
+.tf-head .tf-th { cursor: grab; }
+.tf-head .tf-th:active { cursor: grabbing; }
 
 .tf-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .tf-errors { display: flex; flex-direction: column; gap: 1px; }
