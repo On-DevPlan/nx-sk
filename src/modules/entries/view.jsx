@@ -493,7 +493,11 @@ export default function SectionView({ sectionId }) {
       />
 
       <div className={`cols${tableMode || boardMode ? ' table-mode' : ''}`} ref={colsRef}>
-        <div className="col" style={tableMode || boardMode ? { flex: '1 1 auto', minWidth: 380 } : { flex: `0 0 ${listW}px` }}>
+        {/* basis 必须是 0 不是 auto：auto = 内容宽度，而表/看板是 max-content 的横滚布局
+            （75 列 ≈ 7300px），会被当成 flex 基准，行溢出时按基准比例收缩，
+            详情列（basis 520）被抽走全部溢出量、挤成一条竖缝。basis 0 = 「拿剩余空间」，
+            横滚交给 .dbtable-wrap / .board 自己的 overflow。 */}
+        <div className="col" style={tableMode || boardMode ? { flex: '1 1 0', minWidth: 380 } : { flex: `0 0 ${listW}px` }}>
           <div className="card">
             <div className="colhead">
               <label className="inline pickall" title="全选 / 取消全选（只影响导出与批量操作）">
