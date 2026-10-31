@@ -886,17 +886,26 @@ function sourceItemsOf(entry) {
 }
 
 /** 袋里引用的附件解析（名字 / 物理路径 / 链接）——否则只剩一串 f_xxx。 */
+/**
+ * source 涉及的附件：file item 指向的 + **text（markdown）正文里内嵌的** `![x](f_xxx)`。
+ * 渲染（面板解析图片 / CLI 把 id 还原成路径）与完整性检查都以这份为准。
+ */
 function sourceFiles(store, items) {
   const files = {};
-  for (const item of items) {
-    if (item.kind !== 'file' || !item.fileId || files[item.fileId]) continue;
-    const rec = att.findFileRecord(store, item.fileId);
-    if (!rec) continue;
+  const put = (id) => {
+    if (!id || files[id]) return;
+    const rec = att.findFileRecord(store, id);
+    if (!rec) return;
     const links = att.fileLinks(rec);
-    files[item.fileId] = {
+    files[id] = {
       id: rec.id, name: rec.name, ext: rec.ext, isImage: att.isImageExt(rec.ext),
       path: displayPath(att.fileRecordAbs(rec)), url: links.url, downloadUrl: links.downloadUrl,
     };
+  };
+  for (const item of items) {
+    if (item.kind === 'file' && item.fileId) put(item.fileId);
+    // text 的底层是 markdown：正文里内嵌的 `![x](f_xxx)` 也是正式引用
+    else if (item.kind === 'text' && item.text) for (const id of mdImageIds(item.text)) put(id);
   }
   return files;
 }
@@ -1131,7 +1140,10 @@ export function renderSourceGet(d) {
       const f = d.files?.[item.fileId];
       lines.push(`      ${f ? `${f.name}　${f.path}` : `附件 ${item.fileId}（库里已不存在）`}`);
     } else if (item.kind === 'text') {
-      for (const line of String(item.text).split('\n')) lines.push(`      ${line}`);
+      // text 的底层是 markdown：图片引用还原成「[图片: 说明] 本地路径」，外链标注「外链」——
+      // CLI 没法显示图，但读者要知道这里本来有图、图在哪。
+      const text = rewriteMdImages(item.text, (id) => d.files?.[id] || null);
+      for (const line of String(text).split('\n')) lines.push(`      ${line}`);
     } else if (item.kind === 'url') {
       lines.push(`      ${item.url}`);
     }

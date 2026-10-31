@@ -1129,6 +1129,8 @@ body.col-resizing, body.col-resizing * { cursor: col-resize !important; user-sel
 .source-list-tools { display: flex; align-items: center; gap: 6px; padding: 8px; border-bottom: var(--border); flex-wrap: wrap; }
 .source-paste { display: flex; flex-direction: column; gap: 4px; padding: 8px; border-bottom: var(--border); }
 .source-paste textarea { font: inherit; resize: vertical; }
+/* 编辑器上的落点高亮：拖到这里 = 插进正文（拖到左栏 = 入袋成附件条目），两条路要一眼分得开 */
+.source-paste.drag { outline: 2px dashed var(--mid); outline-offset: -3px; background: var(--soft); }
 .source-items { flex: 1; overflow: auto; min-height: 0; }
 .source-item {
   display: flex; align-items: center; gap: 6px; width: 100%;
