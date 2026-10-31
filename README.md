@@ -168,6 +168,8 @@ CLI 与 API 同源，skill 驱动 agent**。落到具体功能上：
 | `nx-sk entry remove-many <ids>` | 批量删条目（ids 逗号分隔）；找不到的跳过并报告，一个都找不到才报错 |
 | `nx-sk section templates` | 内置模板（job / secret / projects / internships / campus / deploy / platform / thesis） |
 | `nx-sk section sync <id> [--dry-run]` | 按模板**补齐**本栏目缺的分组与字段（只增不改不删）——模板演进后让老栏目追上 |
+| `nx-sk section update <id> --add-group / --rename-group / --move-group / --remove-group` | 改**分组骨架**：新增 / 改名（可换 id，字段引用跟着改）/ 上下挪 / 删（空的才让删） |
+| `nx-sk section update <id> --set-field / --move-field` | 改**字段**：改标签 / 类型 / 分组 / 提示 / 必填策略，组内上下挪（key 不可改）。面板「编辑栏目」同源 |
 | `nx-sk entry list \| get \| add \| update \| remove` | 条目 CRUD（PATCH 语义） |
 | `nx-sk entry fields [--section job]` | 字段字典 —— 填之前先看这个，别猜字段名 |
 | `nx-sk entry block add <ref> --type <段落\\|标题\\|图文\\|表格\\|清单\\|附件\\|密钥> [--data @x.json] [--after <块id>]` | 追加**块正文**（`entry.body`，可选键）；详细页下半部分同源 |

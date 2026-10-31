@@ -622,6 +622,22 @@ step('删完回到空序列', apiBlocksBack.body.data.count === 0);
 const apiBlocked = await j('/api/sections/job', { method: 'DELETE', body: {} });
 step('栏目非空删除报 409 blocked', apiBlocked.status === 409 && apiBlocked.body.code === 'BLOCKED');
 
+// ── 栏目结构：面板「改分组 / 改字段」走的就是这几个 PATCH ──
+// 面板过去只能加字段、连分组都建不了；现在结构能自己搭，冒烟必须钉住这条链路，
+// 不然「后端有、面板接口没有」这种错只有点开面板才知道。
+const apiAddGroup = await j('/api/sections/job', { method: 'PATCH', body: { 'add-group': { id: 'smokeg', title: '冒烟分组' } } });
+step('PATCH 加分组（面板的「＋ 添加分组」）', apiAddGroup.status === 200 && apiAddGroup.body.data.ops[0].includes('新增分组 smokeg'));
+const apiSecGroups = await j('/api/sections/job');
+step('分组进了 groupList（面板据此渲染结构）', apiSecGroups.body.data.groupList.some((g) => g.id === 'smokeg'));
+const apiRmBusy = await j('/api/sections/job', { method: 'PATCH', body: { 'remove-group': 'contact' } });
+step('非空分组不给删（409 BLOCKED，并报出是哪个字段）', apiRmBusy.status === 409 && apiRmBusy.body.code === 'BLOCKED' && apiRmBusy.body.error.includes('phone'), apiRmBusy.body?.error);
+const apiRmGroup = await j('/api/sections/job', { method: 'PATCH', body: { 'remove-group': 'smokeg' } });
+step('空分组可删', apiRmGroup.status === 200 && apiRmGroup.body.data.ops[0].includes('删除分组 smokeg'));
+const apiSetField = await j('/api/sections/job', { method: 'PATCH', body: { 'set-field': { key: 'phone', label: '手机号(改)' } } });
+step('改字段标签（key 不动，已填的值不丢）', apiSetField.status === 200 && apiSetField.body.data.ops[0].includes('手机号(改)'));
+const apiFieldBack = await j('/api/sections/job');
+step('改的是 label，key 仍是 phone', apiFieldBack.body.data.fieldList.some((f) => f.key === 'phone' && f.label === '手机号(改)'));
+
 const apiNotFound = await j('/api/entries/不存在的东西');
 step('不存在的条目报 404 NOT_FOUND', apiNotFound.status === 404 && apiNotFound.body.code === 'NOT_FOUND');
 

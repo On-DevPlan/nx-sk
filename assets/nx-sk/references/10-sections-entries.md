@@ -198,6 +198,37 @@ nx-sk section update job --fields @fields.json
 
 > `select` 的 `options` 是**候选项不是白名单**：真实值（如某个少数民族）不在候选里也允许写入。
 
+### 栏目结构：分组也是数据，面板里就能改
+
+栏目 = 分组（`section.groups`）+ 字段字典（`section.fields`），两样都只是**数据**：
+分组是条目表单里的小标题，**顺序就是它们出现的先后**。面板「编辑栏目」里能直接增删改序，
+CLI 用同一批 action —— 不存在「哪一边功能少一点」。
+
+```bash
+nx-sk section update job --add-group '{"id":"contact","title":"联系信息"}'
+nx-sk section update job --rename-group '{"id":"contact","title":"联系方式"}'
+nx-sk section update job --rename-group '{"id":"contact","title":"联系方式","newId":"reach"}'  # 换 id：组里字段的 group 跟着改
+nx-sk section update job --move-group '{"id":"reach","dir":"up"}'
+nx-sk section update job --remove-group reach                        # 空组才能删
+nx-sk section update job --set-field '{"key":"phone","label":"手机号","group":"reach"}'
+nx-sk section update job --move-field '{"key":"phone","dir":"up"}'   # 在自己的分组内换位置
+```
+
+每次改动都会把**新旧值**打进输出（`字段 phone：分组 contact → reach`）——
+「已更新栏目 job：fields」这种输出等于没说，改错了没法回溯。
+
+三条规矩，全是**拦下来**而不是悄悄做：
+
+| 规矩 | 为什么 |
+| --- | --- |
+| 分组 id 唯一 | 重复报 CONFLICT，绝不覆盖同名分组（改名用 `--rename-group`） |
+| 非空分组不给删 | 字段上挂着每个条目的值；先把字段挪走（改它的「分组」）或删掉 |
+| 字段 key 不可改 | 值按 key 存在条目里，改 key = 已有值读不出来。要换就新增字段再搬值 |
+
+另外两条边界：内置的「原始资料」分组与字段**删不掉**（每个栏目自带，删了下回读又补回来）；
+清单类字段（`entrylist` / `table`）的列是字段自己的结构，所以**不提供就地换类型**——
+要建就在「新增字段」里连列一起建。
+
 ### 填写策略 `fill`：有些格子填了反而减分
 
 不是每个格子都值得填。应届生的「上一家公司」、政治面貌为「群众」时的「入党时间」——
@@ -240,6 +271,8 @@ nx-sk entry get 张三
 `nx-sk serve` → 每个栏目一个 tab，共用同一个条目视图：
 
 - 左侧条目列表（带完整度），右侧按分组渲染的字段表单；
+- **「栏目」页的「编辑」弹窗能改整个结构**：分组可新增 / 改名（含换 id）/ 上下挪 / 删（空的才让删），
+  字段可改标签、类型、分组、提示、必填策略、组内上下挪、删除 —— 一次改动一次落盘；
 - 密文字段默认显示原文；「打码显示（投屏/截图时用）」勾选等价于 `--mask`（选择持久化在 localStorage）；
 - 保存是 **PATCH**：只有被你改动过的字段才会发出去（面板会显示「N 处改动」）；
 - 每个页面底部会派生显示该模块的 CLI 等价命令（可点击复制）。

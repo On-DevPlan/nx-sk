@@ -3,7 +3,7 @@
 import { loadStore, mutateStore } from '../../core/store.js';
 import { assertFieldKey, assertSafeId } from '../../core/paths.js';
 import { badInput, blocked, conflict, notFound } from '../../core/errors.js';
-import { FILL_POLICIES, FIELD_TYPES, ensureSourceBuiltin, findSection, getTemplate, groupFields, instantiateTemplate, mergeTemplate, sectionNames, syncSectionGroups, templateSummaries } from '../../core/fields.js';
+import { FILL_POLICIES, FIELD_TYPES, SOURCE_GROUP, ensureSourceBuiltin, findSection, getTemplate, groupFields, instantiateTemplate, mergeTemplate, sectionNames, syncSectionGroups, templateSummaries } from '../../core/fields.js';
 import { computeTable, sanitizeColumns, sanitizeTotals } from '../../shared/table.js';
 import { VIEW_LABELS, VIEW_TYPES, effectiveDefaultViewId, effectiveViews, isViewId } from '../../shared/views.js';
 import { completeness, dumpSection, formatValue } from '../../core/render.js';
@@ -129,6 +129,37 @@ function validateGroupDef(raw, idx) {
   if (!raw || typeof raw !== 'object') throw badInput('分组定义必须是对象');
   const id = assertSafeId(raw.id || `g${idx + 1}`, '分组 id');
   return { id, title: String(raw.title || id) };
+}
+
+/** 字段定位：key 优先，其次标签（CLI 里人更愿意写「求职状态」而不是 jobStatus）。 */
+function indexOfField(fields, ref) {
+  const s = String(ref ?? '').trim();
+  const i = fields.findIndex((x) => x.key === s);
+  if (i >= 0) return i;
+  return fields.findIndex((x) => String(x.label) === s);
+}
+
+// 改动摘要里说什么：只报用户看得懂的几项，且**必须报出新旧值**——
+// 「已更新栏目 x：fields」这种输出等于没说，出了错没法回溯。
+const FIELD_PATCH_LABELS = {
+  label: '标签', type: '类型', group: '分组', hint: '提示',
+  options: '选项', maxItems: '最多几条', fill: '填写策略', sensitive: '密文',
+};
+
+function showPatchValue(v) {
+  if (v === undefined || v === null || v === '') return '（空）';
+  if (Array.isArray(v)) return v.length ? v.join(' / ') : '（空）';
+  if (typeof v === 'object') return JSON.stringify(v);
+  return String(v);
+}
+
+function describeFieldPatch(before, after) {
+  const bits = [];
+  for (const [k, name] of Object.entries(FIELD_PATCH_LABELS)) {
+    if (showPatchValue(before?.[k]) === showPatchValue(after?.[k])) continue;
+    bits.push(`${name} ${showPatchValue(before?.[k])} → ${showPatchValue(after?.[k])}`);
+  }
+  return bits.length ? bits.join('，') : '无变化';
 }
 
 export async function listSections() {
@@ -274,7 +305,155 @@ export async function updateSection(ref, patch = {}) {
     }
   }
 
-  // 不变量：分组声明 ⊇ 字段引用。add-field 若引用了未声明的分组，
+  // —— 字段级改动：--set-field / --move-field ——
+  // 面板要能改字段的名字、类型、分组、提示（用户提过「web 里只能加不能改」）。
+  // key 刻意**不能改**：条目里的值按 key 存，改 key = 已有值读不出来。
+  // 这两个操作与 add/remove 走同一处，规则不会分叉：改完的整份定义仍过 validateFieldDef。
+  const ops = [];
+  const setField = patch['set-field'];
+  if (setField !== undefined) {
+    const list = Array.isArray(setField) ? setField : [setField];
+    for (const raw of list) {
+      if (!raw || typeof raw !== 'object') {
+        throw badInput('--set-field 需要对象，例如 \'{"key":"phone","label":"手机号"}\'');
+      }
+      const ref = String(raw.key ?? '').trim();
+      if (!ref) throw badInput('--set-field 需要 key');
+      const idx = indexOfField(nextFields, ref);
+      if (idx < 0) throw notFound(`字段不存在: ${ref}（用 'nx-sk section get ${target.id}' 看字段 key / 标签）`);
+      const cur = nextFields[idx];
+      // key 一律以**现 key** 为准：条目里的值按 key 存，改 key = 已有值读不出来。
+      // 传了不存在的 key 早在上面 indexOfField 处就报「字段不存在」——没有「改 key」这条路。
+      const merged = { ...cur, ...raw, key: cur.key };
+      // 换类型时清掉「只属于清单类字段」的键：columns/fields 留在普通字段上是噪音，
+      // validateFieldDef 也会因此拒绝（不是 entrylist/table 却带着 columns）。
+      if (merged.type && merged.type !== cur.type) {
+        for (const k of ['fields', 'columns', 'totals', 'summary', 'maxRows']) delete merged[k];
+      }
+      const def = validateFieldDef(merged, { allowGroup: cur.group });
+      nextFields[idx] = def;
+      changes.fields = nextFields;
+      ops.push(`字段 ${def.key}：${describeFieldPatch(cur, def)}`);
+    }
+  }
+  const moveField = patch['move-field'];
+  if (moveField !== undefined) {
+    const list = Array.isArray(moveField) ? moveField : [moveField];
+    for (const raw of list) {
+      if (!raw || typeof raw !== 'object') throw badInput('--move-field 需要对象，例如 \'{"key":"phone","dir":"up"}\'');
+      const ref = String(raw.key ?? '').trim();
+      const dir = String(raw.dir ?? '').trim();
+      if (!ref) throw badInput('--move-field 需要 key');
+      if (dir !== 'up' && dir !== 'down') throw badInput(`--move-field 的 dir 只能是 up / down，收到 ${JSON.stringify(raw.dir)}`);
+      const i = indexOfField(nextFields, ref);
+      if (i < 0) throw notFound(`字段不存在: ${ref}`);
+      const gid = nextFields[i].group || 'other';
+      // 同组字段在数组里未必连续（fields 是全局顺序），所以「相邻」要**在本组内**找
+      let j = -1;
+      if (dir === 'up') for (let k = i - 1; k >= 0; k -= 1) if ((nextFields[k].group || 'other') === gid) { j = k; break; }
+      else for (let k = i + 1; k < nextFields.length; k += 1) if ((nextFields[k].group || 'other') === gid) { j = k; break; }
+      if (j < 0) {
+        throw badInput(`字段 ${nextFields[i].key} 已经是分组「${gid}」的${dir === 'up' ? '第一' : '最后一'}个`);
+      }
+      [nextFields[i], nextFields[j]] = [nextFields[j], nextFields[i]];
+      changes.fields = nextFields;
+      ops.push(`字段 ${nextFields[j].key} 在分组「${gid}」里${dir === 'up' ? '上移' : '下移'}`);
+    }
+  }
+
+  // —— 分组结构：--add-group / --rename-group / --move-group / --remove-group ——
+  // 栏目的骨架（分几组、谁在前、叫什么）过去只有模板和 --groups 整体替换两条路，
+  // 面板连「加一个分组」都做不到。这四个操作让面板与 CLI 共用同一份规则：
+  //   · id 唯一（重复 = CONFLICT，绝不静默覆盖同名分组）
+  //   · **非空分组不许删**——字段上挂着每个条目的值，「删组连带删字段」比拦下来贵得多
+  //   · 内置「原始资料」分组不可删（每个栏目自带，删了下回读又补回来，删了等于没删）
+  const nextGroups = [...(changes.groups || target.groups)];
+  const addGroup = patch['add-group'];
+  if (addGroup !== undefined) {
+    const list = Array.isArray(addGroup) ? addGroup : [addGroup];
+    for (const raw of list) {
+      const g = validateGroupDef(raw, nextGroups.length);
+      if (nextGroups.some((x) => x.id === g.id)) throw conflict(`分组已存在: ${g.id}（改名用 --rename-group，不要重建）`);
+      // 新分组建在末尾；但若末尾是内置的「原始资料」袋，插到它前面——
+      // 那个袋子是收尾用的乱入区，不该把正经分组压在它后面（建栏目时它本来就在最后）。
+      const at = nextGroups.length && nextGroups[nextGroups.length - 1].id === SOURCE_GROUP.id
+        ? nextGroups.length - 1
+        : nextGroups.length;
+      nextGroups.splice(at, 0, g);
+      changes.groups = nextGroups;
+      ops.push(`新增分组 ${g.id}（${g.title}）`);
+    }
+  }
+  const renameGroup = patch['rename-group'];
+  if (renameGroup !== undefined) {
+    const list = Array.isArray(renameGroup) ? renameGroup : [renameGroup];
+    for (const raw of list) {
+      if (!raw || typeof raw !== 'object') throw badInput('--rename-group 需要对象，例如 \'{"id":"basic","title":"基本信息"}\'');
+      const id = String(raw.id ?? '').trim();
+      if (!id) throw badInput('--rename-group 需要 id');
+      const i = nextGroups.findIndex((g) => g.id === id);
+      if (i < 0) throw notFound(`分组不存在: ${id}（现有: ${nextGroups.map((g) => g.id).join(', ') || '（无）'}）`);
+      const title = String(raw.title ?? '').trim();
+      if (!title) throw badInput(`分组 ${id} 的新名字不能为空`);
+      // id 也可以改：字段上的 group 引用要跟着走，否则整组字段会从表单里消失
+      let nid = id;
+      let moved = 0;
+      if (raw.newId !== undefined && String(raw.newId).trim() && String(raw.newId).trim() !== id) {
+        nid = assertSafeId(String(raw.newId).trim(), '分组 id');
+        if (nextGroups.some((g) => g.id === nid)) throw conflict(`分组已存在: ${nid}`);
+        for (let k = 0; k < nextFields.length; k += 1) {
+          if ((nextFields[k].group || 'other') !== id) continue;
+          nextFields[k] = { ...nextFields[k], group: nid };
+          moved += 1;
+        }
+        if (moved) changes.fields = nextFields;
+      }
+      nextGroups[i] = { id: nid, title };
+      changes.groups = nextGroups;
+      ops.push(nid === id ? `分组 ${id} 改名为「${title}」` : `分组 ${id} → ${nid}（${title}，${moved} 个字段跟着改）`);
+    }
+  }
+  const moveGroup = patch['move-group'];
+  if (moveGroup !== undefined) {
+    const list = Array.isArray(moveGroup) ? moveGroup : [moveGroup];
+    for (const raw of list) {
+      if (!raw || typeof raw !== 'object') throw badInput('--move-group 需要对象，例如 \'{"id":"basic","dir":"up"}\'');
+      const id = String(raw.id ?? '').trim();
+      const dir = String(raw.dir ?? '').trim();
+      if (!id) throw badInput('--move-group 需要 id');
+      if (dir !== 'up' && dir !== 'down') throw badInput(`--move-group 的 dir 只能是 up / down，收到 ${JSON.stringify(raw.dir)}`);
+      const i = nextGroups.findIndex((g) => g.id === id);
+      if (i < 0) throw notFound(`分组不存在: ${id}`);
+      const j = dir === 'up' ? i - 1 : i + 1;
+      if (j < 0 || j >= nextGroups.length) throw badInput(`分组 ${id} 已经是${dir === 'up' ? '第一' : '最后一'}个`);
+      [nextGroups[i], nextGroups[j]] = [nextGroups[j], nextGroups[i]];
+      changes.groups = nextGroups;
+      ops.push(`分组 ${id} ${dir === 'up' ? '上移' : '下移'}（${nextGroups.map((g) => g.id).join(' → ')}）`);
+    }
+  }
+  const removeGroup = patch['remove-group'];
+  if (removeGroup !== undefined) {
+    const ids = Array.isArray(removeGroup) ? removeGroup : [removeGroup];
+    for (const raw of ids) {
+      const id = String(raw ?? '').trim();
+      if (!id) continue;
+      if (id === SOURCE_GROUP.id) {
+        throw badInput(`「${SOURCE_GROUP.title}」是每个栏目自带的内置分组（删了下回读又会补回来），不给删。`);
+      }
+      const i = nextGroups.findIndex((g) => g.id === id);
+      if (i < 0) throw notFound(`分组不存在: ${id}`);
+      const inUse = nextFields.filter((f) => (f.group || 'other') === id).map((f) => f.key);
+      if (inUse.length) {
+        throw blocked(`分组 ${id} 里还有 ${inUse.length} 个字段：${inUse.slice(0, 8).join(', ')}${inUse.length > 8 ? '…' : ''}。`
+          + `先把它们挪走（--set-field '{"key":"…","group":"…"}'）或删掉，再删这个分组。`);
+      }
+      nextGroups.splice(i, 1);
+      changes.groups = nextGroups;
+      ops.push(`删除分组 ${id}`);
+    }
+  }
+
+  // 不变量：分组声明 ⊇ 字段引用。add-field / rename-group 若引用或产生了未声明的分组，
   // 必须在这里补上声明——否则面板读声明数组渲染，整组字段会静默消失
   // （CLI 从字段推导所以看不出来，这个坑在 servers 栏目踩过一次）。
   if (changes.fields) {
@@ -284,10 +463,10 @@ export async function updateSection(ref, patch = {}) {
   }
 
   if (!Object.keys(changes).length) {
-    throw badInput('没有要修改的内容（可改 title / description / order / fields / groups / add-field / remove-field / fill）');
+    throw badInput('没有要修改的内容（可改 title / description / order / fields / groups / add-field / set-field / move-field / remove-field / add-group / rename-group / move-group / remove-group / fill）');
   }
 
-  if (dryRun) return { status: 'skipped', dryRun: true, wouldChange: changes, added, removed, fillChanged };
+  if (dryRun) return { status: 'skipped', dryRun: true, wouldChange: changes, added, removed, fillChanged, ops };
 
   await mutateStore((s) => {
     const t = mustFind(s, ref);
@@ -296,7 +475,11 @@ export async function updateSection(ref, patch = {}) {
     s.sections.sort((a, b) => a.order - b.order);
   });
   const after = await loadStore();
-  return { status: 'ok', id: target.id, changed: Object.keys(changes), added, removed, fillChanged, section: summarize(after, mustFind(after, target.id)) };
+  return {
+    status: 'ok', id: target.id, changed: Object.keys(changes),
+    added, removed, fillChanged, ops,
+    section: summarize(after, mustFind(after, target.id)),
+  };
 }
 
 /**
@@ -855,7 +1038,10 @@ export function renderSectionChange(d) {
     d.added?.length ? `新增字段 ${d.added.join(', ')}` : '',
     d.removed?.length ? `删除字段 ${d.removed.join(', ')}` : '',
     d.fillChanged?.length ? `填写策略 ${d.fillChanged.join(', ')}` : '',
-  ].filter(Boolean).join('；');
+    // 结构改动（分组增删改名换序 / 字段改名换组）是**一句话一条**的摘要：
+    // 「changed: groups, fields」这种输出等于没说，改错了没法回溯。
+    ...(d.ops || []),
+  ].filter(Boolean).join('\n');
   return `已更新栏目 ${d.id}：${d.changed.join(', ')}${extra ? `\n${extra}` : ''}`;
 }
 
