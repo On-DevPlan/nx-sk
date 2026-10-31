@@ -10,7 +10,7 @@ import { useTempHome } from '../helpers.mjs';
 
 const dir = await useTempHome('nx-sk-store-version-');
 
-const { loadStore, mutateStore, normalize, STORE_VERSION, diskVersion } = await import('../../src/core/store.js');
+const { loadStore, mutateStore, normalize, STORE_VERSION, diskVersion, downgradeNote } = await import('../../src/core/store.js');
 
 test('当前版本是 4', () => {
   assert.equal(STORE_VERSION, 4);
@@ -73,6 +73,8 @@ test('降级守卫：磁盘版本比当前新时，**拒绝写入**（BLOCKED）
 
   await loadStore(p);
   assert.equal(diskVersion(), 99, '要记住磁盘版本（normalize 会把它抹成当前版本）');
+  assert.deepEqual(downgradeNote(), { disk: 99, current: STORE_VERSION },
+    '降级说明要能被 bootstrap / health 取到（S5：主动展示，不等用户写一次被拒才知道）');
 
   await assert.rejects(
     () => mutateStore((x) => { x.settings.touched = true; }, p),
@@ -93,6 +95,7 @@ test('降级守卫解除后恢复正常写入', async () => {
     version: 4, settings: {}, sections: [], entries: [], files: [],
   }), 'utf8');
   await loadStore(p);
+  assert.equal(downgradeNote(), null, '版本对齐后降级说明应消失');
   await mutateStore((x) => { x.settings.ok = true; }, p);
   const onDisk = JSON.parse(await fsp.readFile(p, 'utf8'));
   assert.equal(onDisk.settings.ok, true);

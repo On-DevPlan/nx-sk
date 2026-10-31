@@ -8,6 +8,7 @@ import ViewChips from '../../web/frontend/components/viewChips.jsx';
 import { resolveViewColumns } from '../../shared/views.js';
 import KvTable from './kvTable.jsx';
 import EntriesTable from './entriesTable.jsx';
+import BoardView from './boardView.jsx';
 import BlockPanel from './blockPanel.jsx';
 
 // 脏值比较用：对象/数组（tags、entrylist 的行）必须走 JSON 序列化——
@@ -176,6 +177,17 @@ export default function SectionView({ sectionId }) {
     () => (tableMode && data ? resolveViewColumns({ ...data.section, fields: data.fields }, activeView) : []),
     [tableMode, data, activeView],
   );
+  // 看板：列 = 分组字段的候选值。分组字段没有 options（不是 select）时不给看板——
+  // 与其渲染一个空壳，不如把 chip 置灰并说明原因（chips 那边同一条判断）。
+  const boardMode = activeView?.type === 'board';
+  const boardField = useMemo(
+    () => (boardMode && data ? data.fields.find((f) => f.key === activeView.groupBy) || null : null),
+    [boardMode, data, activeView],
+  );
+  const boardColumns = useMemo(
+    () => (boardMode && data ? resolveViewColumns({ ...data.section, fields: data.fields }, activeView) : []),
+    [boardMode, data, activeView],
+  );
 
   const patchField = (key, value) => setDraft((d) => (d ? { ...d, values: { ...d.values, [key]: value } } : d));
 
@@ -188,6 +200,24 @@ export default function SectionView({ sectionId }) {
     return { set, titleChanged: draft.title !== current.title, count: Object.keys(set).length + (draft.title !== current.title ? 1 : 0) };
   }, [draft, current, data]);
 
+  // 外部改「当前条目」时要跟着切（目录树点条目 / 深链第二段）：ui.entry 是跨组件的选择，
+  // 不是本组件的私有态。**有未保存改动时不切**——静默丢掉用户的编辑比「点了没反应」糟得多。
+  const entryJump = useRef('');
+  useEffect(() => {
+    if (!data || !ui.entry || draft?.id === ui.entry) return;
+    const hit = data.entries.find((e) => e.id === ui.entry);
+    if (!hit) return;
+    if (dirty.count) {
+      if (entryJump.current !== ui.entry) {
+        entryJump.current = ui.entry;
+        toast('当前条目还有未保存的改动：先保存或放弃，再切到别的条目', 'bad');
+        patchUi({ entry: draft?.id || '' });
+      }
+      return;
+    }
+    setDraft({ id: hit.id, title: hit.title, values: { ...hit.values } });
+  }, [ui.entry, data, draft, dirty.count, patchUi, toast]);
+
   const save = guard(async () => {
     if (!draft || !current) return;
     if (!dirty.count) { toast('没有改动'); return; }
@@ -196,6 +226,22 @@ export default function SectionView({ sectionId }) {
     await api(`/api/entries/${encodeURIComponent(draft.id)}`, { method: 'PATCH', body });
     toast(`已保存 ${dirty.count} 处改动`);
     await load(draft.id);
+    await reload();
+  });
+
+  // 看板拖卡 = **写操作**（改条目的 select 字段值），不是「这一屏的临时状态」：
+  // 写回后重拉，表格 / 精简 / 详情立刻看到同一个改动——前端不持有第二份真相。
+  // 失败时 guard 会吵（卡片被 dnd-kit 弹回原位，数据没变，不需要额外回滚）。
+  const moveCard = guard(async (id, to) => {
+    if (!activeView?.groupBy) return;
+    const label = boardField?.label || activeView.groupBy;
+    const hit = data.entries.find((e) => e.id === id);
+    await api(`/api/entries/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: { set: { [activeView.groupBy]: to } },
+    });
+    toast(`「${hit?.title || id}」的${label}改成「${to}」`);
+    await load(draft?.id || id);
     await reload();
   });
 
@@ -437,29 +483,49 @@ export default function SectionView({ sectionId }) {
         <button className="btn small" onClick={addEntry}>新建条目</button>
       </div>
 
-      {/* 视图切换：同一批数据的多种投影。看板在 S2 只有配置，渲染随 S3（chip 置灰并说明原因） */}
+      {/* 视图切换：同一批数据的多种投影。看板要一个 select 分组字段，没有就置灰并说明 */}
       <ViewChips
         views={viewList}
         active={activeViewId}
         provisional={!!viewsInfo?.provisional}
+        disabledTypes={viewList.some((v) => v.type === 'board' && !v.groupBy) ? ['board'] : []}
         onPick={(id) => patchUi({ viewId: id })}
       />
 
-      <div className={`cols${tableMode ? ' table-mode' : ''}`} ref={colsRef}>
-        <div className="col" style={tableMode ? { flex: '1 1 auto', minWidth: 380 } : { flex: `0 0 ${listW}px` }}>
+      <div className={`cols${tableMode || boardMode ? ' table-mode' : ''}`} ref={colsRef}>
+        {/* basis 必须是 0 不是 auto：auto = 内容宽度，而表/看板是 max-content 的横滚布局
+            （75 列 ≈ 7300px），会被当成 flex 基准，行溢出时按基准比例收缩，
+            详情列（basis 520）被抽走全部溢出量、挤成一条竖缝。basis 0 = 「拿剩余空间」，
+            横滚交给 .dbtable-wrap / .board 自己的 overflow。 */}
+        <div className="col" style={tableMode || boardMode ? { flex: '1 1 0', minWidth: 380 } : { flex: `0 0 ${listW}px` }}>
           <div className="card">
             <div className="colhead">
               <label className="inline pickall" title="全选 / 取消全选（只影响导出与批量操作）">
                 <input type="checkbox" checked={allPicked} onChange={toggleAll} />
-                <span>{tableMode ? `${activeView.title}　${tableColumns.length} 列` : '条目列表'}</span>
+                <span>{tableMode ? `${activeView.title}　${tableColumns.length} 列` : boardMode ? `${activeView.title}　按${boardField?.label || activeView.groupBy || '未指定'}分列` : '条目列表'}</span>
               </label>
               <span className="right muted">
                 {selected.size ? `已选 ${selected.size} / ${data.count}` : data.count}
                 {selected.size ? <button type="button" className="btn small ghost" onClick={() => setSelected(new Set())}>清空</button> : null}
               </span>
             </div>
-            <div className="colbody">
-              {tableMode ? (
+            <div className={`colbody${boardMode ? ' board-body' : ''}`}>
+              {boardMode ? (
+                <BoardView
+                  entries={data.entries}
+                  columns={boardColumns}
+                  groupBy={activeView.groupBy || null}
+                  groupOptions={boardField?.options || []}
+                  mask={mask}
+                  activeId={draft?.id || null}
+                  onMove={moveCard}
+                  onPick={(id) => {
+                    patchUi({ entry: id });
+                    const hit = data.entries.find((e) => e.id === id);
+                    if (hit) setDraft({ id: hit.id, title: hit.title, values: { ...hit.values } });
+                  }}
+                />
+              ) : tableMode ? (
                 <EntriesTable
                   entries={data.entries}
                   columns={tableColumns}
@@ -511,7 +577,7 @@ export default function SectionView({ sectionId }) {
           onDoubleClick={resetColDrag}
         />
 
-        <div className="col" style={tableMode ? { flex: '0 1 520px' } : undefined}>
+        <div className="col" style={tableMode ? { flex: '0 1 520px' } : boardMode ? { flex: '0 1 460px' } : undefined}>
           {!draft ? (
             <div className="card"><Empty>左边选一条，或新建一条</Empty></div>
           ) : (
