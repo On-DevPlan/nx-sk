@@ -17,7 +17,7 @@ import { Copyable, DialogHost, Toasts } from './components/ui.jsx';
 import { useStore } from './store.jsx';
 import { PANELS, PANEL_ORDER, factory } from './panels.jsx';
 import { resolveDeepLink } from './activeView.js';
-import { WORKSPACE_KEY, clearStoredModel, layoutStats, loadModel, openPanel, saveModel } from './workspace.js';
+import { WORKSPACE_KEY, clearStoredModel, layoutStats, loadModel, openEntryPanel, openPanel, saveModel } from './workspace.js';
 
 /** FlexLayout 自带的右键菜单是英文。只翻译**用得到的**几条；没翻的原样透出（不吞）。 */
 const I18N = {
@@ -87,6 +87,10 @@ export default function App() {
     patchUi({ view: t.sectionId });
     if (t.entryId) {
       patchUi({ entry: t.entryId });
+      // 深链第二段 = 条目：**另外开一块详情面板**（详情是工作区里的独立面板，不是视图的右栏）
+      if (t.missing !== 'entry') {
+        openEntryPanel(model, { section: t.sectionId, entry: t.entryId, title: t.entryId });
+      }
       setNote(t.missing === 'entry'
         ? `深链里的条目已不存在，只开了栏目面板（${t.sectionId}）`
         : `已按深链打开：${sec ? sec.title : t.sectionId} / ${t.entryId}`);

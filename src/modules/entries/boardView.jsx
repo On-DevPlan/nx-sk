@@ -74,7 +74,8 @@ function Column({ group, label, entries, columns, mask, onPick, activeId, droppa
 
 export default function BoardView({ entries, columns, groupBy, groupOptions, mask, onMove, onPick, activeId }) {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
-  const options = Array.isArray(groupOptions) ? groupOptions : [];
+  // options 的引用要稳定：它进 useMemo 依赖，每次渲染新数组 = 分桶每次重算
+  const options = useMemo(() => (Array.isArray(groupOptions) ? groupOptions : []), [groupOptions]);
   const cards = useMemo(() => (columns || []).filter((c) => c.key !== groupBy), [columns, groupBy]);
   const { buckets, ungrouped } = useMemo(
     () => bucketByGroup(entries || [], groupBy, options),

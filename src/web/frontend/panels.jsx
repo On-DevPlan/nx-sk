@@ -10,8 +10,10 @@
 
 import { Suspense, lazy } from 'react';
 import SidebarPanel from './components/sidebar.jsx';
+import { Empty } from './components/ui.jsx';
 
 const EntriesView = lazy(() => import('../../modules/entries/view.jsx'));
+const EntryDetail = lazy(() => import('../../modules/entries/detailPanel.jsx'));
 const SectionsView = lazy(() => import('../../modules/sections/view.jsx'));
 const FilesView = lazy(() => import('../../modules/files/view.jsx'));
 const ExportView = lazy(() => import('../../modules/export/view.jsx'));
@@ -42,14 +44,31 @@ export const PANELS = {
   welcome: { title: '开始', render: () => <WelcomePanel /> },
   database: {
     title: '数据库',
-    // config.section 为空 = 还没选栏目（初始布局）；此时给空态而不是空白
-    render: (cfg) => (cfg && cfg.section
+    // config.section 为空 = 还没选栏目（初始布局）；此时给空态而不是空白。
+    // model 传下去：点表格里的一行要**开详情面板**（工作区里的一块），视图本身只管投影。
+    render: (cfg, ctx) => (cfg && cfg.section
       ? (
         <Suspense fallback={<div className="pad muted">加载中…</div>}>
-          <EntriesView sectionId={cfg.section} />
+          <EntriesView sectionId={cfg.section} model={ctx && ctx.model} />
         </Suspense>
       )
       : <WelcomePanel />),
+  },
+  // 条目详情：**独立面板**（不是视图里的右栏）。单例——表格点行时换它的 config。
+  entry: {
+    title: '条目详情',
+    render: (cfg, ctx) => (cfg && cfg.section
+      ? (
+        <Suspense fallback={<div className="pad muted">加载中…</div>}>
+          <EntryDetail
+            sectionId={cfg.section}
+            entryId={cfg.entry}
+            tabId={ctx && ctx.tabId}
+            model={ctx && ctx.model}
+          />
+        </Suspense>
+      )
+      : <div className="pad"><Empty>在表格里点一行，条目详情会在这个面板里打开。</Empty></div>),
   },
   sections: { title: '栏目管理', render: () => wrap(SectionsView) },
   files: { title: '附件', render: () => wrap(FilesView) },

@@ -2,28 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../web/frontend/api/client.js';
 import { checkZipFile, fmtBytes, isNeedPassphraseError, postZip } from '../../web/frontend/api/zip.js';
 import { useStore } from '../../web/frontend/store.jsx';
-import { CliHints, Empty, Modal, Tag } from '../../web/frontend/components/ui.jsx';
-import { FieldGroup } from '../../web/frontend/components/fieldEditor.jsx';
+import { CliHints, Modal, Tag } from '../../web/frontend/components/ui.jsx';
+import { openEntryPanel } from '../../web/frontend/workspace.js';
 import ViewChips from '../../web/frontend/components/viewChips.jsx';
 import { resolveViewColumns } from '../../shared/views.js';
 import KvTable from './kvTable.jsx';
 import EntriesTable from './entriesTable.jsx';
 import BoardView from './boardView.jsx';
-import BlockPanel from './blockPanel.jsx';
-
-// 脏值比较用：对象/数组（tags、entrylist 的行）必须走 JSON 序列化——
-// String(obj) 恒为 '[object Object]'，会把「没改」误判成「每处都改了」
-const norm = (x) => (x === null || x === undefined ? '' : (typeof x === 'object' ? JSON.stringify(x) : String(x)));
-
-// 条目定位文本（面包屑点击复制用）：人读的路径 + agent 可直接执行的 CLI。
-// id 与标题都带——标题可能重名/被改，id 是唯一事实；命令里用 id 定位最稳。
-function entryRefText(section, entry) {
-  return [
-    `nx-sk 条目 · 栏目「${section.title}」(${section.id}) › 条目「${entry.title}」(${entry.id})`,
-    `读: nx-sk entry get --section ${section.id} ${entry.id}`,
-    `改: nx-sk entry update --section ${section.id} ${entry.id} --set 字段=值`,
-  ].join('\n');
-}
 
 
 /**
@@ -35,14 +20,12 @@ function entryRefText(section, entry) {
  *
  * 字段与分组全部来自后端，所以新增字段不需要改前端。
  */
-export default function SectionView({ sectionId }) {
+export default function SectionView({ sectionId, model }) {
   const { ui, patchUi, toast, guard, dialog, reload } = useStore();
   const [data, setData] = useState(null);
   const [err, setErr] = useState(null);
   const [busy, setBusy] = useState(false);
-  const [draft, setDraft] = useState(null);
   const [modal, setModal] = useState(null);
-  const [quick, setQuick] = useState('');
   // 栏目 ZIP：zip = { fileName, buffer, preview }（buffer 用于确认时再 POST 一次，服务端不存状态）
   const [zip, setZip] = useState(null);
   // 加密包先问口令：ask = { fileName, buffer }
@@ -72,85 +55,27 @@ export default function SectionView({ sectionId }) {
   }, [sectionId]);
   useEffect(() => { loadViews(); }, [loadViews]);
 
-  // —— 左右栏拖宽：清单视图 = 条目列表宽度；表格视图 = 详情列宽度 ——
-  // 宽度持久化在 ui.listW / ui.detailW（patchUi 对新键照存）。拖动过程只改**本地** state，
-  // 松手才落盘——否则每次 mousemove 都会经 context 重渲染整个表单树。
-  const colsRef = useRef(null);
-  const listWRef = useRef(Number(ui.listW) || 300);
-  const [listW, setListW] = useState(listWRef.current);
-  const detailWRef = useRef(Number(ui.detailW) || 440);
-  const [detailW, setDetailW] = useState(detailWRef.current);
-  const [draggingCol, setDraggingCol] = useState(''); // '' | 'list' | 'detail'
-  const startColDrag = (which) => (e) => { e.preventDefault(); setDraggingCol(which); };
-  useEffect(() => {
-    if (!draggingCol) return undefined;
-    const move = (ev) => {
-      const rect = colsRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      if (draggingCol === 'list') {
-        const w = Math.round(Math.min(560, Math.max(240, ev.clientX - rect.left)));
-        listWRef.current = w;
-        setListW(w);
-      } else {
-        // 表格视图的详情列在右边：宽度 = 面板右缘 − 光标
-        const w = Math.round(Math.min(680, Math.max(340, rect.right - ev.clientX)));
-        detailWRef.current = w;
-        setDetailW(w);
-      }
-    };
-    const up = () => setDraggingCol('');
-    window.addEventListener('mousemove', move);
-    window.addEventListener('mouseup', up);
-    document.body.classList.add('col-resizing');
-    return () => {
-      window.removeEventListener('mousemove', move);
-      window.removeEventListener('mouseup', up);
-      document.body.classList.remove('col-resizing');
-      if (draggingCol === 'list' && listWRef.current !== (Number(ui.listW) || 300)) patchUi({ listW: listWRef.current });
-      if (draggingCol === 'detail' && detailWRef.current !== (Number(ui.detailW) || 440)) patchUi({ detailW: detailWRef.current });
-    };
-    // ui.listW / ui.detailW 只在拖动开始/结束之间有意义；patchUi 稳定，不会造成重复订阅
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draggingCol]);
-  const resetColDrag = () => {
-    listWRef.current = 300;
-    setListW(300);
-    patchUi({ listW: 300 });
-  };
-  const resetDetailW = () => {
-    detailWRef.current = 440;
-    setDetailW(440);
-    patchUi({ detailW: 440 });
-  };
-  // 收起详情列 = 清掉选择：下次进来表格还是全宽。选中是显式动作，不偷偷恢复。
-  const collapseDetail = () => {
-    setDraft(null);
-    patchUi({ entry: '' });
-  };
-
-  const load = useCallback(async (keepId) => {
+  const load = useCallback(async () => {
     setBusy(true);
     setErr(null);
     try {
       const d = await api(`/api/sections/${encodeURIComponent(sectionId)}/dump${mask ? '?mask=1' : ''}`);
       setData(d);
-      const wanted = keepId || ui.entry;
-      // 不自动选中第一条：详情是「点开才看」的面——表格视图默认全宽给表格，
-      // 清单视图本来就是先选左边。深链 / 明确点过的 ui.entry 才会带出详情。
-      const hit = d.entries.find((e) => e.id === wanted) || null;
-      setDraft(hit ? { id: hit.id, title: hit.title, values: { ...hit.values } } : null);
-      if (hit && hit.id !== ui.entry) patchUi({ entry: hit.id });
     } catch (e) {
       setErr(e.message);
       setData(null);
-      setDraft(null);
     } finally {
       setBusy(false);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sectionId, mask]);
 
   useEffect(() => { load(); }, [load]);
+  // 详情面板改了数据 → 表格重拉（ui.rev 是唯一的跨面板信号）
+  useEffect(() => {
+    if (!ui.rev) return;
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ui.rev]);
   // 切栏目、或条目被删掉后，选择里不能留下不存在的 id（导出会因为「找不到条目」整包失败）
   useEffect(() => { setSelected(new Set()); }, [sectionId]);
   useEffect(() => {
@@ -161,13 +86,6 @@ export default function SectionView({ sectionId }) {
     });
   }, [data]);
 
-  const current = useMemo(() => data?.entries.find((e) => e.id === draft?.id) || null, [data, draft]);
-  // 「已标不填」只对**真的空着**的可选字段有意义：填了值的可选字段不属于跳过，
-  // 否则一份填满的资料会被显示成「另有 N 项已标不填」，自相矛盾。
-  const skippedExcluded = useMemo(
-    () => (current?.excluded || []).filter((m) => norm(current.values?.[m.key]) === ''),
-    [current],
-  );
   const allIds = useMemo(() => (data?.entries || []).map((e) => e.id), [data]);
   const allPicked = allIds.length > 0 && allIds.every((id) => selected.has(id));
   const togglePick = (id) => setSelected((prev) => {
@@ -176,11 +94,6 @@ export default function SectionView({ sectionId }) {
     return next;
   });
   const toggleAll = () => setSelected(allPicked ? new Set() : new Set(allIds));
-
-  const groups = useMemo(() => {
-    if (!data) return [];
-    return data.groups.map((g) => ({ ...g, fields: data.fields.filter((f) => f.group === g.id) })).filter((g) => g.fields.length);
-  }, [data]);
 
   // 当前视图：ui.viewId 指得到就用它；指不到（换了栏目 / 视图被删）退回后端给的缺省
   const viewList = useMemo(() => viewsInfo?.views || [], [viewsInfo]);
@@ -194,7 +107,8 @@ export default function SectionView({ sectionId }) {
     [viewList, activeViewId],
   );
   // 表格视图：列 = 视图投影。字段被删掉的列**仍在**（渲染「已删字段」+「—」），不静默消失。
-  const tableMode = activeView?.type === 'table';
+  // 退役的 list 视图（存量 store 里可能还留着）按表格投影处理——见 shared/views.js 的说明
+  const tableMode = activeView?.type === 'table' || activeView?.type === 'list';
   const tableColumns = useMemo(
     () => (tableMode && data ? resolveViewColumns({ ...data.section, fields: data.fields }, activeView) : []),
     [tableMode, data, activeView],
@@ -211,45 +125,9 @@ export default function SectionView({ sectionId }) {
     [boardMode, data, activeView],
   );
 
-  const patchField = (key, value) => setDraft((d) => (d ? { ...d, values: { ...d.values, [key]: value } } : d));
-
-  const dirty = useMemo(() => {
-    if (!draft || !current) return { set: {}, titleChanged: false, count: 0 };
-    const set = {};
-    for (const f of data.fields) {
-      if (norm(current.values[f.key]) !== norm(draft.values[f.key])) set[f.key] = draft.values[f.key];
-    }
-    return { set, titleChanged: draft.title !== current.title, count: Object.keys(set).length + (draft.title !== current.title ? 1 : 0) };
-  }, [draft, current, data]);
-
-  // 外部改「当前条目」时要跟着切（目录树点条目 / 深链第二段）：ui.entry 是跨组件的选择，
-  // 不是本组件的私有态。**有未保存改动时不切**——静默丢掉用户的编辑比「点了没反应」糟得多。
-  const entryJump = useRef('');
-  useEffect(() => {
-    if (!data || !ui.entry || draft?.id === ui.entry) return;
-    const hit = data.entries.find((e) => e.id === ui.entry);
-    if (!hit) return;
-    if (dirty.count) {
-      if (entryJump.current !== ui.entry) {
-        entryJump.current = ui.entry;
-        toast('当前条目还有未保存的改动：先保存或放弃，再切到别的条目', 'bad');
-        patchUi({ entry: draft?.id || '' });
-      }
-      return;
-    }
-    setDraft({ id: hit.id, title: hit.title, values: { ...hit.values } });
-  }, [ui.entry, data, draft, dirty.count, patchUi, toast]);
-
-  const save = guard(async () => {
-    if (!draft || !current) return;
-    if (!dirty.count) { toast('没有改动'); return; }
-    const body = { set: dirty.set };
-    if (dirty.titleChanged) body.title = draft.title;
-    await api(`/api/entries/${encodeURIComponent(draft.id)}`, { method: 'PATCH', body });
-    toast(`已保存 ${dirty.count} 处改动`);
-    await load(draft.id);
-    await reload();
-  });
+  // 切视图 = 换投影。视图里没有「选中」这回事了——详情是独立面板，
+  // 选中由详情面板自己的 config 决定。
+  const onPickView = (id) => patchUi({ viewId: id });
 
   // 看板拖卡 = **写操作**（改条目的 select 字段值），不是「这一屏的临时状态」：
   // 写回后重拉，表格 / 精简 / 详情立刻看到同一个改动——前端不持有第二份真相。
@@ -263,34 +141,8 @@ export default function SectionView({ sectionId }) {
       body: { set: { [activeView.groupBy]: to } },
     });
     toast(`「${hit?.title || id}」的${label}改成「${to}」`);
-    await load(draft?.id || id);
-    await reload();
-  });
-
-  // 改到一半关标签页 = 改动全丢。浏览器只允许弹一句「确定要离开吗」，
-  // 拦不住也改不了文案，但至少别让未保存的改动无声消失。
-  useEffect(() => {
-    if (!dirty.count) return undefined;
-    const onBeforeUnload = (e) => {
-      e.preventDefault();
-      e.returnValue = '';
-      return '';
-    };
-    window.addEventListener('beforeunload', onBeforeUnload);
-    return () => window.removeEventListener('beforeunload', onBeforeUnload);
-  }, [dirty.count]);
-
-  // 「直接存 kv」的入口：敲一行 字段=值 回车即写入，字典里没有的键会自动登记
-  const quickAdd = guard(async () => {
-    if (!draft) { toast('先新建一条条目', 'bad'); return; }
-    const i = quick.indexOf('=');
-    if (i <= 0) { toast('用 字段=值 的格式，例如 微信=zhangsan', 'bad'); return; }
-    const k = quick.slice(0, i).trim();
-    const v = quick.slice(i + 1);
-    const r = await api(`/api/entries/${encodeURIComponent(draft.id)}`, { method: 'PATCH', body: { set: { [k]: v } } });
-    setQuick('');
-    toast(`已写入 ${k}${r.newFields?.length ? '（新字段已登记）' : ''}`);
-    await load(draft.id);
+    await load();
+    patchUi({ rev: (Number(ui.rev) || 0) + 1 }); // 详情面板里那条也要重拉
     await reload();
   });
 
@@ -302,45 +154,13 @@ export default function SectionView({ sectionId }) {
     if (data?.section.titleField) body.set = { [data.section.titleField]: name };
     const created = await api('/api/entries', { method: 'POST', body });
     toast(`已新建：${created.title}`);
-    await load(created.id);
-    await reload();
-  });
-
-  const removeEntry = guard(async () => {
-    if (!current) return;
-    const ok = await dialog({
-      message: `删除条目「${current.title}」？删除不可恢复（没有自动快照）——需要留底就先在「导出导入」页导一份。`,
-      danger: true,
-      confirmText: '删除',
-    });
-    if (!ok) return;
-    await api(`/api/entries/${encodeURIComponent(current.id)}`, { method: 'DELETE' });
-    toast('已删除');
-    await load('');
+    await load();
+    // 新条目直接进详情面板（单例：已开着就切过去）
+    openEntryPanel(model, { section: sectionId, entry: created.id, title: created.title });
     await reload();
   });
 
   const closeMore = () => { if (moreRef.current) moreRef.current.open = false; };
-
-  // 面包屑点击复制：把「栏目›条目」定位（含 id 与 CLI 命令）贴进剪贴板，
-  // 粘给任意 agent 即可精确定位这条条目去做修改
-  const copyEntryRef = guard(async (entry) => {
-    if (!entry) return;
-    const text = entryRefText(data.section, entry);
-    try {
-      await navigator.clipboard.writeText(text);
-      toast(`已复制条目定位：${data.section.title} › ${entry.title}（贴给 agent 即可）`);
-    } catch {
-      // 剪贴板被拒（非安全上下文/权限）时退回选中文本方案
-      const ta = document.createElement('textarea');
-      ta.value = text;
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand('copy');
-      ta.remove();
-      toast(`已复制条目定位：${data.section.title} › ${entry.title}`);
-    }
-  });
 
   /** 浏览器下载：让 <a download> 去接，前端不碰 zip 内容；含凭据与否由菜单项决定。 */
   const exportZip = (withSecrets) => {
@@ -511,27 +331,28 @@ export default function SectionView({ sectionId }) {
         active={activeViewId}
         provisional={!!viewsInfo?.provisional}
         disabledTypes={viewList.some((v) => v.type === 'board' && !v.groupBy) ? ['board'] : []}
-        onPick={(id) => patchUi({ viewId: id })}
+        onPick={onPickView}
       />
 
-      <div className={`cols${tableMode || boardMode ? ' table-mode' : ''}`} ref={colsRef}>
+      {/* 视图 = 一批条目的横切（表格 / 精简 / 看板）。**详情不在这里**——
+          它是工作区里独立的面板（可拖到任意分栏、可弹出浮窗），点行才开。 */}
+      <div className="cols">
         {/* basis 必须是 0 不是 auto：auto = 内容宽度，而表/看板是 max-content 的横滚布局
-            （75 列 ≈ 7300px），会被当成 flex 基准，行溢出时按基准比例收缩，
-            详情列（basis 520）被抽走全部溢出量、挤成一条竖缝。basis 0 = 「拿剩余空间」，
+            （75 列 ≈ 7300px），会被当成 flex 基准；basis 0 = 「占满面板」，
             横滚交给 .dbtable-wrap / .board 自己的 overflow。 */}
-        <div className="col" style={tableMode || boardMode ? { flex: '1 1 0', minWidth: 380 } : { flex: `0 0 ${listW}px` }}>
+        <div className="col" style={{ flex: '1 1 0', minWidth: 380 }}>
           <div className="card">
             <div className="colhead">
               <label className="inline pickall" title="全选 / 取消全选（只影响导出与批量操作）">
                 <input type="checkbox" checked={allPicked} onChange={toggleAll} />
-                <span>{tableMode ? `${activeView.title}　${tableColumns.length} 列` : boardMode ? `${activeView.title}　按${boardField?.label || activeView.groupBy || '未指定'}分列` : '条目列表'}</span>
+                <span>{tableMode ? `${activeView.title}　${tableColumns.length} 列` : boardMode ? `${activeView.title}　按${boardField?.label || activeView.groupBy || '未指定'}分列` : activeView?.title || '视图'}</span>
               </label>
               <span className="right muted">
                 {selected.size ? `已选 ${selected.size} / ${data.count}` : data.count}
                 {selected.size ? <button type="button" className="btn small ghost" onClick={() => setSelected(new Set())}>清空</button> : null}
               </span>
             </div>
-            <div className={`colbody${boardMode ? ' board-body' : ''}`}>
+            <div className={`colbody${tableMode ? ' table-colbody' : ''}${boardMode ? ' board-body' : ''}`}>
               {boardMode ? (
                 <BoardView
                   entries={data.entries}
@@ -539,12 +360,12 @@ export default function SectionView({ sectionId }) {
                   groupBy={activeView.groupBy || null}
                   groupOptions={boardField?.options || []}
                   mask={mask}
-                  activeId={draft?.id || null}
+                  activeId={ui.entry || null}
                   onMove={moveCard}
                   onPick={(id) => {
                     patchUi({ entry: id });
                     const hit = data.entries.find((e) => e.id === id);
-                    if (hit) setDraft({ id: hit.id, title: hit.title, values: { ...hit.values } });
+                    openEntryPanel(model, { section: sectionId, entry: id, title: hit?.title });
                   }}
                 />
               ) : tableMode ? (
@@ -555,135 +376,32 @@ export default function SectionView({ sectionId }) {
                   sort={activeView.sort || null}
                   selected={selected}
                   onTogglePick={togglePick}
-                  activeId={draft?.id || null}
+                  activeId={ui.entry || null}
                   onPick={(id) => {
                     patchUi({ entry: id });
                     const hit = data.entries.find((e) => e.id === id);
-                    if (hit) setDraft({ id: hit.id, title: hit.title, values: { ...hit.values } });
+                    openEntryPanel(model, { section: sectionId, entry: id, title: hit?.title });
                   }}
                 />
-              ) : data.entries.length ? data.entries.map((e) => (
-                <div
-                  key={e.id}
-                  className={`row selectable ${e.id === draft?.id ? 'selected' : ''}`}
-                  onClick={() => { patchUi({ entry: e.id }); setDraft({ id: e.id, title: e.title, values: { ...e.values } }); }}
-                >
-                  <input
-                    type="checkbox"
-                    className="pick"
-                    checked={selected.has(e.id)}
-                    onClick={(ev) => ev.stopPropagation()}
-                    onChange={() => togglePick(e.id)}
-                    title="选中后可只导出这一条"
-                  />
-                  <span className="name">{e.title || '（无名）'}</span>
-                  <span className="acts">
-                    {e.missing.length ? <span className="tag">{e.completeness.ratio}%</span> : <span className="tag strong">已填满</span>}
-                    <button
-                      type="button"
-                      className="row-copy"
-                      title="复制条目定位（贴给 agent 即可修改）"
-                      onClick={(ev) => { ev.stopPropagation(); copyEntryRef(e); }}
-                    >⧉</button>
-                  </span>
-                </div>
-              )) : <Empty>还没有条目。点右上角「新建条目」，或用 CLI：nx-sk entry add --section {data.section.id} --set ...</Empty>}
+              ) : (
+                <EntriesTable
+                  entries={data.entries}
+                  columns={tableColumns}
+                  mask={mask}
+                  sort={activeView?.sort || null}
+                  selected={selected}
+                  onTogglePick={togglePick}
+                  activeId={ui.entry || null}
+                  onPick={(id) => {
+                    patchUi({ entry: id });
+                    const hit = data.entries.find((e) => e.id === id);
+                    openEntryPanel(model, { section: sectionId, entry: id, title: hit?.title });
+                  }}
+                />
+              )}
             </div>
           </div>
         </div>
-
-        {/* 表格视图：没选中条目就不渲染详情列——表格占满全宽（默认态不再是半屏占位） */}
-        {(!tableMode || draft) ? (
-          <>
-            <div
-              className={`col-splitter${draggingCol ? ' active' : ''}`}
-              title="拖动调整左右宽度（双击恢复默认）"
-              onMouseDown={startColDrag(tableMode ? 'detail' : 'list')}
-              onDoubleClick={tableMode ? resetDetailW : resetColDrag}
-            />
-
-            <div
-              className="col"
-              style={tableMode
-                ? { flex: `0 1 ${detailW}px`, minWidth: 340 }
-                : boardMode ? { flex: '0 1 460px' } : undefined}
-            >
-          {!draft ? (
-            <div className="card"><Empty>左边选一条，或新建一条</Empty></div>
-          ) : (
-            <div className="card">
-              {/* 顶栏固定在窗口右上角：长栏目滚到一半也能看见「保存」——
-                  否则改完一个字段要翻到表单最底点保存，翻页越多越容易漏保存。 */}
-              <div className="colhead sticky-head">
-                <span
-                  className="crumb grow nowrap"
-                  title="点击复制条目定位（栏目›条目 + id + CLI 命令，贴给 agent 即可修改）"
-                  onClick={() => copyEntryRef(current || draft)}
-                >
-                  <span className="crumb-sec">{data.section.title}</span>
-                  <span className="crumb-sep">›</span>
-                  <span className="crumb-ent">{current?.title || draft.title}</span>
-                  <span className="crumb-copy" aria-hidden>⧉</span>
-                </span>
-                <span className="muted mono">{draft.id}</span>
-                {current ? <Tag kind={current.missing.length ? '' : 'strong'}>完整度 {current.completeness.ratio}%</Tag> : null}
-                {tableMode ? (
-                  <button type="button" className="btn small ghost" onClick={collapseDetail} title="收起详情列，表格占满全宽">收起</button>
-                ) : null}
-                {dirty.count ? (
-                  <>
-                    <span className="hint nowrap">{dirty.count} 处改动未保存</span>
-                    <button type="button" className="btn small" onClick={save} title="保存当前条目的改动">保存</button>
-                  </>
-                ) : null}
-              </div>
-
-              <div className="field wide pad" style={{ borderBottom: '1px solid var(--soft-2)' }}>
-                <div className="flabel">
-                  <span>{data.section.titleLabel || '名称'}</span>
-                  <span className="bad">改动后必须保存</span>
-                </div>
-                <div className="fctrl">
-                  <input value={draft.title} onChange={(e) => setDraft((d) => ({ ...d, title: e.target.value }))} />
-                </div>
-              </div>
-
-              <div className="rowgap" style={{ padding: '6px 14px', borderBottom: '1px solid var(--soft-2)' }}>
-                <input
-                  className="grow"
-                  style={{ minWidth: 220 }}
-                  placeholder="直接加字段：字段=值　（回车写入；没见过的键会自动登记）"
-                  value={quick}
-                  onChange={(e) => setQuick(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') quickAdd(); }}
-                />
-                <button className="btn small" onClick={quickAdd} disabled={!quick.includes('=')}>写入</button>
-              </div>
-
-              {groups.map((g) => (
-                <FieldGroup key={g.id} title={g.title} fields={g.fields} draft={draft.values} onPatch={patchField} sectionTitle={data.section.title} entryTitle={current?.title || draft.title} />
-              ))}
-
-              {/* 正文区（entry.body）：属性区在上、块正文在下，同一条数据同一个编辑面。
-                  body 是可选键——老条目没有正文，这里就是一句空态 + 一个「加块」。 */}
-              <BlockPanel key={draft.id} entryId={draft.id} mask={mask} />
-
-              <div className="rowgap pad">
-                <button className="btn" onClick={save} disabled={!dirty.count}>保存{dirty.count ? `（${dirty.count} 处改动）` : ''}</button>
-                <button className="btn ghost" onClick={() => load(draft.id)} disabled={!dirty.count}>放弃改动</button>
-                <button className="btn ghost" onClick={removeEntry}>删除条目</button>
-                {current?.missing.length ? (
-                  <span className="hint">模板建议里还有 {current.missing.length} 项没填（不影响使用）：{current.missing.slice(0, 5).map((m) => m.label).join('、')}{current.missing.length > 5 ? '…' : ''}</span>
-                ) : null}
-                {skippedExcluded.length ? (
-                  <span className="hint">另有 {skippedExcluded.length} 项已标不填、不计入完整度：{skippedExcluded.slice(0, 6).map((m) => m.label).join('、')}{skippedExcluded.length > 6 ? '…' : ''}</span>
-                ) : null}
-              </div>
-            </div>
-          )}
-            </div>
-          </>
-        ) : null}
       </div>
 
       <CliHints module="entries" />

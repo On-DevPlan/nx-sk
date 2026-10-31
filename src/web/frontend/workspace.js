@@ -53,7 +53,7 @@ export function initialLayoutJson() {
         {
           type: 'tabset',
           id: 'ts_sidebar',
-          weight: 20,
+          weight: 15,
           children: [{ type: 'tab', id: 't_sidebar', name: '目录', component: 'sidebar' }],
         },
         {
@@ -169,6 +169,49 @@ export function allTabsets(model) {
   return out;
 }
 
+/** 第一个 component 匹配的页签（**不限 config**）——详情面板是单例，只有一块。 */
+export function findComponentPanel(model, component) {
+  let hit = null;
+  model.visitNodes((node) => {
+    if (hit) return;
+    if (node.getType() !== 'tab') return;
+    if (node.getComponent() !== component) return;
+    hit = node;
+  });
+  return hit;
+}
+
+/**
+ * 打开（或切到）**条目详情面板**。
+ *
+ * 详情是工作区里的一等面板，不是视图里的右栏：可以拖到任意分栏、弹出浮窗、单独关掉。
+ * 单例：已开着就换它的 config（换条目）并选中它——开两块详情没有意义，
+ * 反而让人分不清哪块是当前条目的。
+ */
+export function openEntryPanel(model, { section, entry, title }) {
+  if (!model || !section || !entry) return null;
+  const existing = findComponentPanel(model, 'entry');
+  if (existing) {
+    model.doAction(Actions.updateNodeAttributes(existing.getId(), { config: { section, entry } }));
+    if (title && existing.getName() !== title) model.doAction(Actions.renameTab(existing.getId(), title));
+    model.doAction(Actions.selectTab(existing.getId()));
+    return existing.getId();
+  }
+  const target = activeTabsetId(model, ['sidebar']);
+  if (!target) return null;
+  // 默认停靠在右边：表格在左、详情在右，是「看一行改一行」最省事的落点；
+  // 用户可以自己把它拖走、拖成浮窗、关掉。
+  model.doAction(Actions.addTab(
+    { type: 'tab', name: title || '条目详情', component: 'entry', config: { section, entry } },
+    target,
+    DockLocation.getByName('right'),
+    -1,
+    true,
+  ));
+  const created = findComponentPanel(model, 'entry');
+  return created ? created.getId() : null;
+}
+
 /** 这个 tabset 里有没有指定 component 的页签 */
 function hasComponent(tabset, components) {
   if (!components || !components.length) return false;
@@ -231,6 +274,49 @@ export function dockPanel(model, tabId, location) {
 export function closePanel(model, tabId) {
   if (!tabId) return false;
   model.doAction(Actions.deleteTab(tabId));
+  return true;
+}
+
+/** 找到承载某个 component 页签的 tabset id（侧边栏收起/展开要用它改 weight） */
+export function tabsetOfComponent(model, component) {
+  if (!model) return null;
+  let hit = null;
+  model.visitNodes((node) => {
+    if (hit) return;
+    if (node.getType() !== 'tab') return;
+    if (node.getComponent() !== component) return;
+    // TabNode 没有 getTabset()（0.11 的 API）：页签的父节点就是它所在的 tabset
+    const parent = node.getParent();
+    if (parent && parent.getType() === 'tabset') hit = parent;
+  });
+  return hit ? hit.getId() : null;
+}
+
+/** 读某个 tabset 的 weight（布局宽度 = weight 的比例分摊）；找不到返回 null */
+export function tabsetWeight(model, tabsetId) {
+  if (!model || !tabsetId) return null;
+  let w = null;
+  model.visitNodes((node) => {
+    if (w !== null) return;
+    if (node.getType() === 'tabset' && node.getId() === tabsetId) w = node.getWeight();
+  });
+  return w;
+}
+
+export function setTabsetWeight(model, tabsetId, weight) {
+  return setTabsetAttrs(model, tabsetId, { weight });
+}
+
+/** 改 tabset 属性（weight / enableTabStrip …）；目标不存在时安全 no-op */
+export function setTabsetAttrs(model, tabsetId, attrs) {
+  if (!model || !tabsetId) return false;
+  let found = false;
+  model.visitNodes((node) => {
+    if (found) return;
+    if (node.getType() === 'tabset' && node.getId() === tabsetId) found = true;
+  });
+  if (!found) return false;
+  model.doAction(Actions.updateNodeAttributes(tabsetId, attrs));
   return true;
 }
 

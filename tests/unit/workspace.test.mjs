@@ -6,7 +6,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-const { pruneEmptyTabsets } = await import('../../src/web/frontend/workspace.js');
+const { pruneEmptyTabsets, tabsetOfComponent, tabsetWeight, setTabsetWeight } = await import('../../src/web/frontend/workspace.js');
+const { Model } = await import('flexlayout-react');
 
 const ts = (id, n = 1) => ({
   type: 'tabset', id, weight: 50,
@@ -64,4 +65,27 @@ test('非 row 根 / 缺 children 的怪形状：不动它（交给 Model.fromJso
   assert.deepEqual(pruneEmptyTabsets(null), null);
   assert.deepEqual(pruneEmptyTabsets({ type: 'tabset', id: 'x' }), { type: 'tabset', id: 'x' });
   assert.deepEqual(pruneEmptyTabsets({ type: 'row' }), { type: 'row' });
+});
+
+test('tabset 定位与调宽：侧边栏收起就是改它所在 tabset 的 weight', () => {
+  const model = Model.fromJson({
+    global: {},
+    borders: [],
+    layout: {
+      type: 'row', weight: 100,
+      children: [
+        { type: 'tabset', id: 'ts_sb', weight: 20, children: [{ type: 'tab', id: 't_sb', name: '目录', component: 'sidebar' }] },
+        { type: 'tabset', id: 'ts_main', weight: 80, children: [{ type: 'tab', id: 't_m', name: '开始', component: 'welcome' }] },
+      ],
+    },
+  });
+  assert.equal(tabsetOfComponent(model, 'sidebar'), 'ts_sb');
+  assert.equal(tabsetOfComponent(model, 'nope'), null);
+  const before = tabsetWeight(model, 'ts_sb');
+  assert.equal(before, 20);
+  assert.equal(setTabsetWeight(model, 'ts_sb', 2.5), true);
+  assert.equal(tabsetWeight(model, 'ts_sb'), 2.5);
+  // 找不到的 tabset：安全 no-op
+  assert.equal(setTabsetWeight(model, 'ts_ghost', 2.5), false);
+  assert.equal(tabsetWeight(null, 'ts_sb'), null);
 });

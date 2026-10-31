@@ -89,9 +89,10 @@ export default [
     rules: { 'react/jsx-uses-vars': 'error', 'react/jsx-uses-react': 'off' },
   },
 
-  // hooks 规则只对视图与前端壳生效
+  // hooks 规则只对**前端代码**生效：web/frontend 下的组件 + modules 里的视图/面板组件
+  // （modules 下的前端组件不止 view.jsx，还有 blockPanel / boardView / detailPanel 这些 .jsx）
   {
-    files: ['src/web/frontend/**/*.jsx', 'src/modules/**/view.jsx'],
+    files: ['src/web/frontend/**/*.jsx', 'src/modules/**/*.jsx'],
     plugins: { 'react-hooks': reactHooks },
     rules: { 'react-hooks/rules-of-hooks': 'error', 'react-hooks/exhaustive-deps': 'warn' },
   },

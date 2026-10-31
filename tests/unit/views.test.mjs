@@ -27,31 +27,31 @@ const jobSection = {
   ],
 };
 
-test('缺省推断：非 KV 栏目给 列表 / 表格 / 精简 / 看板 四条，且都不落盘（provisional）', () => {
+test('缺省推断：非 KV 栏目给 表格 / 精简 / 看板 三条，且都不落盘（provisional）', () => {
   const views = inferViews(jobSection);
-  assert.deepEqual(views.map((v) => v.id), ['list-default', 'table-default', 'compact-default', 'board-by-jobStatus']);
+  assert.deepEqual(views.map((v) => v.id), ['table-default', 'compact-default', 'board-by-jobStatus']);
   assert.ok(views.every((v) => v.provisional === true));
 
-  // **列表在最前 = 缺省视图**：打开栏目先看到「条目列表 + 详情」，不是一张大表的行
-  // （用户原话：「左边的条目栏别出现表格」——80 个字段的栏目摊成 80 列没法看）
-  assert.equal(views[0].type, 'list');
+  // **表格在最前 = 缺省视图**：视图只管一批条们的横切，详情是工作区里独立的面板，
+  // 不再是某个视图里的右栏（列表视图因此退役——见 shared/views.js 的说明）。
+  assert.equal(views[0].type, 'table');
 
   // 表格：除 source 外全部字段（密文列也在——值打码，列本身不是秘密）
-  const table = views[1];
+  const table = views[0];
   assert.ok(!table.columns.some((c) => c.key === 'source'), 'source 是资料袋，不是一列数据');
   assert.ok(table.columns.some((c) => c.key === 'apiKey'), '密文字段照常进列');
 
   // 精简 = 标题字段 + 第一个 select
-  assert.deepEqual(views[2].columns.map((c) => c.key), ['company', 'jobStatus']);
+  assert.deepEqual(views[1].columns.map((c) => c.key), ['company', 'jobStatus']);
 
   // 看板 = 第一个 select 分组
-  assert.equal(views[3].groupBy, 'jobStatus');
+  assert.equal(views[2].groupBy, 'jobStatus');
 });
 
 test('缺省推断：没有 select 字段就没有看板；只有一列时不给「精简」', () => {
   const bare = { id: 'x', title: 'X', fields: [{ key: 'name', label: '名称', type: 'text' }], titleField: 'name' };
   const views = inferViews(bare);
-  assert.deepEqual(views.map((v) => v.id), ['list-default', 'table-default']);
+  assert.deepEqual(views.map((v) => v.id), ['table-default']);
 });
 
 test('缺省推断：KV 栏目只有一条 kv 视图', () => {
@@ -70,7 +70,7 @@ test('落过盘就用落盘的：provisional 变为 false', () => {
 test('views 为空数组 = 没配过：回到推断（两种「空」行为必须一样）', () => {
   const eff = effectiveViews({ ...jobSection, views: [] });
   assert.equal(eff.provisional, true);
-  assert.equal(eff.views.length, 4);
+  assert.equal(eff.views.length, 3); // 表格 / 精简 / 看板（列表视图已退役）
 });
 
 test('defaultView 指向不存在的视图时退回第一个（不留悬空引用）', () => {

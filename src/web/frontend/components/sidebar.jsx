@@ -12,12 +12,12 @@
  * 从这一刻起推断让位（「加法不换血」的落点）。
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DndContext, PointerSensor, useDraggable, useDroppable, useSensor, useSensors } from '@dnd-kit/core';
 import { api } from '../api/client.js';
 import { useStore } from '../store.jsx';
 import { Empty } from './ui.jsx';
-import { openPanel } from '../workspace.js';
+import { openPanel, setTabsetAttrs, tabsetOfComponent } from '../workspace.js';
 import { findNode, locateNode, moveNode, resolveNavTree } from '../../../shared/navTree.js';
 
 export default function SidebarPanel({ model }) {
@@ -132,62 +132,123 @@ export default function SidebarPanel({ model }) {
     saveTree(next);
   };
 
-  if (!sections.length && !boot) return <div className="pad muted">正在装载…</div>;
+  // —— 展开收起双态：宽度就是状态 ——
+  // 拖窄到阈值以下（树没法用了）→ 自动变一条窄轨；点轨（或头部的「收起」）回**标准宽度**。
+  // 两个宽度都是布局 weight：收起 2.5（~40px）、展开 15（~240px）——
+  // 布局本身就是持久化（刷新后保持）；想要别的宽度自己拖，拖完自然记住。
+  const COLLAPSE_AT = 140;
+  const W_COLLAPSED = 2.5;
+  const W_EXPANDED = 15;
+  const rootRef = useRef(null);
+  const [paneW, setPaneW] = useState(null);
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return undefined;
+    const ro = new ResizeObserver((entries) => {
+      for (const e of entries) setPaneW(Math.round(e.contentRect.width));
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const collapsed = paneW !== null && paneW < COLLAPSE_AT;
+  // enableTabStrip 跟着收起/展开一起翻：39px 宽的 tabset 挤不下页签条，
+  // 「目」字残片和图标碎片比空白更难看。两个属性都进布局，刷新后保持。
+  const setSidebarState = (collapsed) => {
+    const tsId = tabsetOfComponent(model, 'sidebar');
+    if (tsId) setTabsetAttrs(model, tsId, { weight: collapsed ? W_COLLAPSED : W_EXPANDED, enableTabStrip: !collapsed });
+  };
+  const collapse = () => setSidebarState(true);
+  const expand = () => setSidebarState(false);
+  // 拖拽触发的收起/展开也要落到模型（weight + 页签条）——rail 的渲染是 CSS 驱动的，
+  // 没有这一步，拖出来的收起态页签条还在。只在**翻转**时生效：挂载即设会把用户拖好的宽度冲掉。
+  const prevCollapsed = useRef(null);
+  useEffect(() => {
+    if (prevCollapsed.current === null) { prevCollapsed.current = collapsed; return; }
+    if (prevCollapsed.current === collapsed) return;
+    prevCollapsed.current = collapsed;
+    setSidebarState(collapsed);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [collapsed]);
+
+  // 两种状态共用一个**稳定宿主**：ResizeObserver 观察它——状态切换会换掉内层 DOM，
+  // 但宿主不变，宽度测量不会断（否则收起后再展开，观察不到宽度恢复，会卡死在窄轨）。
+  if (!sections.length && !boot && !collapsed) return <div className="pad muted">正在装载…</div>;
 
   return (
-    <DndContext sensors={sensors} onDragEnd={onDragEnd}>
-      <div className="navtree">
-        <div className="navtree-head">
-          <span className="muted nowrap grow">{boot?.counts?.sections ?? sections.length} 个栏目</span>
-          <button
-            type="button"
-            className="btn small ghost"
-            title="列表面板（栏目的增删改、拖拽与隐藏都在那里）"
-            onClick={() => openSection('sections')}
-          >管理</button>
+    <div ref={rootRef} className="navtree-host">
+      {collapsed ? (
+        <div
+          className="navtree-rail"
+          title="展开目录"
+          onClick={expand}
+          role="button"
+          aria-label="展开目录"
+        >
+          <span className="rail-btn" aria-hidden>»</span>
+          <span className="rail-label">目录</span>
         </div>
+      ) : (
+        <DndContext sensors={sensors} onDragEnd={onDragEnd}>
+          <div className="navtree">
+            <div className="navtree-head">
+              <span className="muted nowrap grow">{boot?.counts?.sections ?? sections.length} 个栏目</span>
+              <button
+                type="button"
+                className="btn small ghost"
+                title="收起目录（收起后点窄条展开）"
+                onClick={collapse}
+              >«</button>
+              <button
+                type="button"
+                className="btn small ghost"
+                title="列表面板（栏目的增删改、拖拽与隐藏都在那里）"
+                onClick={() => openSection('sections')}
+              >管理</button>
+            </div>
 
-        {nav.source === 'inferred' ? (
-          <div className="navtree-note hint">
-            目录是从旧的导航配置推断的；拖动任意栏目后，它会变成你自己配的树。
+            {nav.source === 'inferred' ? (
+              <div className="navtree-note hint">
+                目录是从旧的导航配置推断的；拖动任意栏目后，它会变成你自己配的树。
+              </div>
+            ) : null}
+
+            <RootDrop>
+              {tree.length ? (
+                <NodeList
+                  nodes={tree}
+                  depth={0}
+                  open={open}
+                  busy={busy}
+                  countOf={countOf}
+                  entryListOf={entryListOf}
+                  onToggle={toggleOpen}
+                  onOpenSection={openSection}
+                  onOpenEntry={openEntry}
+                  onHide={hideSection}
+                  activeView={ui.view}
+                  activeEntry={ui.entry}
+                />
+              ) : <Empty>还没有栏目。用「管理」建一个，或 CLI：nx-sk section add --template job</Empty>}
+            </RootDrop>
+
+            {hiddenIds.length ? (
+              <div className="navtree-hidden">
+                <div className="hint">已隐藏（{hiddenIds.length}）</div>
+                {hiddenIds.map((id) => {
+                  const s = sections.find((x) => x.id === id);
+                  return (
+                    <div key={id} className="nrow hidden-row">
+                      <span className="nlabel nowrap muted">{s ? s.title : id}</span>
+                      <button type="button" className="btn small ghost" onClick={() => unhide(id)}>显示</button>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : null}
           </div>
-        ) : null}
-
-        <RootDrop>
-          {tree.length ? (
-            <NodeList
-              nodes={tree}
-              depth={0}
-              open={open}
-              busy={busy}
-              countOf={countOf}
-              entryListOf={entryListOf}
-              onToggle={toggleOpen}
-              onOpenSection={openSection}
-              onOpenEntry={openEntry}
-              onHide={hideSection}
-              activeView={ui.view}
-              activeEntry={ui.entry}
-            />
-          ) : <Empty>还没有栏目。用「管理」建一个，或 CLI：nx-sk section add --template job</Empty>}
-        </RootDrop>
-
-        {hiddenIds.length ? (
-          <div className="navtree-hidden">
-            <div className="hint">已隐藏（{hiddenIds.length}）</div>
-            {hiddenIds.map((id) => {
-              const s = sections.find((x) => x.id === id);
-              return (
-                <div key={id} className="nrow hidden-row">
-                  <span className="nlabel nowrap muted">{s ? s.title : id}</span>
-                  <button type="button" className="btn small ghost" onClick={() => unhide(id)}>显示</button>
-                </div>
-              );
-            })}
-          </div>
-        ) : null}
-      </div>
-    </DndContext>
+        </DndContext>
+      )}
+    </div>
   );
 }
 

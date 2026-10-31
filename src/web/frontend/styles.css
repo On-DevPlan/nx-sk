@@ -1130,15 +1130,6 @@ a.file-name:hover { text-decoration: underline; }
 .tf-colrow input, .tf-colrow select { font-size: 11px; padding: 2px 5px; }
 .btn.ghost.on { background: var(--soft-2); color: var(--ink); }
 
-/* ============ 左右栏拖宽（条目列表 ↔ 内容） ============ */
-/* margin: 0 -14px 让把手恰好骑在 .cols 的 14px 间隙上——间距节奏不变，命中区变成整条间隙 */
-.col-splitter {
-  flex: 0 0 14px; margin: 0 -14px; align-self: stretch;
-  cursor: col-resize; position: relative; z-index: 1; border-radius: 3px; min-width: 0;
-}
-.col-splitter:hover, .col-splitter.active { background: var(--soft-2); }
-body.col-resizing, body.col-resizing * { cursor: col-resize !important; user-select: none !important; }
-
 /* ============ 原始资料袋（source） ============ */
 /* 折叠条 → 右侧抽屉：左清单 + 中正文。容器一律不投影（全站不变量：立体感只给可按的元素）。 */
 .source-field { display: flex; flex-direction: column; gap: 4px; }
@@ -1380,8 +1371,33 @@ body.col-resizing, body.col-resizing * { cursor: col-resize !important; user-sel
 .dbtable .missing { color: var(--mid); font-style: italic; }
 .dbtable th .hint { font-weight: 400; }
 
-/* 看板视图不放开列宽拖拽：板列固定 240、详情列固定 460，拖了也不改变什么 */
-.cols.board-mode .col-splitter { display: none; }
+/* ── 详细页 = 双栏面板（各自独立滚动）────────────────────────────
+   之前是文档流：详情表单有多高（长 SOP 条目 12000px+），整个面板就有多高——
+   左边的表格/列表卡悬在角落，旁边是一整片空白，滚动条管的是整页。
+   现在面板高度固定：toolbar / 视图 chips 钉在顶部，左右两栏**等高**、
+   各自独立滚动——表格栏的横向滚动条常驻在栏底，详情栏的 sticky 头保持钉住。
+   section-wrap 用 absolute inset 定位（不依赖中间包装层的高度链）。 */
+.section-wrap { position: absolute; inset: 0; display: flex; flex-direction: column; min-height: 0; }
+.section-wrap > .toolbar, .section-wrap > .viewbar { flex-shrink: 0; }
+.section-wrap .cols { flex: 1 1 0; min-height: 0; align-items: stretch; }
+.section-wrap .cols > .col { display: flex; flex-direction: column; min-height: 0; }
+.section-wrap .cols > .col > .card { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.section-wrap .cols > .col > .card > .colhead { flex-shrink: 0; }
+/* 表格栏：colhead 固定，表格自己是滚动容器（横向滚动条常驻在栏底） */
+.section-wrap .colbody.table-colbody { display: flex; flex-direction: column; overflow: hidden; }
+.section-wrap .colbody.table-colbody .dbtable-wrap { flex: 1 1 0; min-height: 0; max-height: none; }
+/* 看板栏同理 */
+.section-wrap .colbody.board-body { display: flex; flex-direction: column; overflow: hidden; }
+.section-wrap .colbody.board-body .board { flex: 1 1 0; min-height: 0; max-height: none; }
+/* 清单栏：colbody 自己滚 */
+.section-wrap .cols > .col > .card > .colbody { flex: 1 1 0; min-height: 0; overflow-y: auto; }
+/* 详情面板（独立面板）：整块自己滚，sticky 头钉在面板顶部 */
+.detail-pane {
+  position: absolute; inset: 0; display: flex; flex-direction: column;
+  min-height: 0; padding: 0 0 14px;
+}
+.detail-pane > .card { flex: 1 1 0; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; }
+.detail-pane > .card > .colhead { flex-shrink: 0; }
 
 /* ============ 看板视图（S3） ============ */
 /* 列宽固定 240px、列多就横滚 —— 不压缩卡片，「标题 + 两列摘要」才读得出来 */
@@ -1527,7 +1543,30 @@ body.col-resizing, body.col-resizing * { cursor: col-resize !important; user-sel
 .drawer-docks { padding: 0 6px 4px; }
 
 /* ── 目录树 ─────────────────────────────────────────── */
+.navtree-host { height: 100%; min-height: 0; }
 .navtree { display: flex; flex-direction: column; height: 100%; min-height: 0; overflow: auto; }
+/* 目录的收起态：一条窄轨。宽度 < 140px 自动进这态（树没法用），**整条轨都是展开的命中区**。
+   视觉与全站一致：容器不投影；键平时无形，悬停才浮现背景（立体感只给可按的元素）。 */
+.navtree-rail {
+  height: 100%; min-width: 30px;
+  display: flex; flex-direction: column; align-items: center; gap: 12px;
+  padding: 10px 0 14px; overflow: hidden;
+  cursor: pointer; border-right: var(--border);
+}
+.navtree-rail:hover { background: var(--soft); }
+.navtree-rail .rail-btn {
+  font: inherit; font-size: 12px; width: 24px; height: 24px;
+  border: 0; border-radius: 6px; background: transparent; color: var(--ink);
+  cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
+}
+.navtree-rail:hover .rail-btn { background: var(--soft-2); }
+.navtree-rail .rail-label {
+  writing-mode: vertical-rl; letter-spacing: 6px; color: var(--mid); font-size: 11px;
+  user-select: none;
+}
+/* 收起态藏掉页签条：39px 宽的 tabset 挤不出一行页签，残字比空更难看 */
+.flexlayout__tabset:has(.navtree-rail) .flexlayout__tabset_tabbar_outer { display: none; }
+
 .navtree-head {
   position: sticky; top: 0; z-index: 1;
   display: flex; align-items: center; gap: 8px;
