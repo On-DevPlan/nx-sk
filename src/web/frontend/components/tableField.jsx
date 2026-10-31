@@ -179,8 +179,15 @@ export function TableFieldControl({ def, value, onChange }) {
   };
   const removeRow = (i) => commit({ rows: rows.filter((_, idx) => idx !== i) });
   // 拖拽排序：落点给的是**插入位**，行 / 列各自一份（互不干扰：一边在拖时另一边不接管 dragover）
-  const rowDrag = useListDrag((from, insertAt) => commit({ rows: reorderAt(rows, from, insertAt) }), { axis: 'y' });
-  const colDrag = useListDrag((from, insertAt) => commit({ columns: reorderAt(cols.map(columnToDef), from, insertAt) }), { axis: 'x' });
+  // 拖回原位时 reorderAt 返回**同一个数组**——这时不 commit，否则条目会被标成「有改动」而其实没动。
+  const rowDrag = useListDrag((from, insertAt) => {
+    const next = reorderAt(rows, from, insertAt);
+    if (next !== rows) commit({ rows: next });
+  }, { axis: 'y' });
+  const colDrag = useListDrag((from, insertAt) => {
+    const next = reorderAt(cols.map(columnToDef), from, insertAt);
+    if (next !== cols) commit({ columns: next });
+  }, { axis: 'x' });
 
   const patchColumn = (i, patch) => {
     const oldKey = cols[i].key;
