@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { TABLE_CELL_TYPES, computeTable, columnToDef, formatCellValue } from '../../../shared/table.js';
 import { useStore } from '../store.jsx';
+import { reorderAt, useListDrag } from './listDrag.jsx';
 
 /**
  * 表格字段（`type: 'table'`）的编辑界面。
@@ -17,9 +18,14 @@ import { useStore } from '../store.jsx';
  *      录一张表时手不用离开键盘，这是「像表格」和「像一堆输入框」的分界。
  *   4. 每行都是**独立 grid**（与 entrylist 同一手法）：列宽只由列定义决定，
  *      内容再长也不会把某一行撑歪。
+ *   5. **行与列都能拖**：行把手在行尾的操作区，列直接拖表头（列设置里也有把手）。
+ *      排序是最常见的编辑动作之一，一排 ↑↓ 按钮既占地方又说不清「会插到哪」，
+ *      拖拽 + 一条插入线是唯一能表达「插在这里」的交互（↑↓ 保留，hover 才出现）。
  */
 
-const GUTTER = 72;
+// 行尾操作区：把手 14 + 三个 16 的小键 + 间距。它是「操作列」，不是内容列，
+// 所以宽度写死 —— 列多了是内容区横向滚动，不该把这一列压扁。
+const GUTTER = 78;
 
 const alignOf = (col) => col.align || (col.type === 'number' ? 'right' : (col.type === 'bool' ? 'center' : 'left'));
 
@@ -172,6 +178,16 @@ export function TableFieldControl({ def, value, onChange }) {
     commit({ rows: next });
   };
   const removeRow = (i) => commit({ rows: rows.filter((_, idx) => idx !== i) });
+  // 拖拽排序：落点给的是**插入位**，行 / 列各自一份（互不干扰：一边在拖时另一边不接管 dragover）
+  // 拖回原位时 reorderAt 返回**同一个数组**——这时不 commit，否则条目会被标成「有改动」而其实没动。
+  const rowDrag = useListDrag((from, insertAt) => {
+    const next = reorderAt(rows, from, insertAt);
+    if (next !== rows) commit({ rows: next });
+  }, { axis: 'y' });
+  const colDrag = useListDrag((from, insertAt) => {
+    const next = reorderAt(cols.map(columnToDef), from, insertAt);
+    if (next !== cols) commit({ columns: next });
+  }, { axis: 'x' });
 
   const patchColumn = (i, patch) => {
     const oldKey = cols[i].key;
@@ -247,13 +263,15 @@ export function TableFieldControl({ def, value, onChange }) {
       {cols.length ? (
         <div className="tf-scroll">
           <div className="tf-body" style={{ minWidth }}>
-            {/* 表头 */}
+            {/* 表头：整格可拖（里面没有输入框，不会跟文本选择打架）—— 拖表头就是搬这一列 */}
             <div className="tf-row tf-head" style={{ gridTemplateColumns: grid }}>
-              {cols.map((c) => (
+              {cols.map((c, idx) => (
                 <div
                   key={c.key}
-                  className={`tf-th ${alignOf(c)}`}
-                  title={c.hint || (c.computed ? `计算列：${c.formula}` : '')}
+                  className={`tf-th ${alignOf(c)}${colDrag.dropClass(idx)}`}
+                  title={(c.hint || (c.computed ? `计算列：${c.formula}` : '拖动表头可调整列顺序')) || undefined}
+                  {...colDrag.dragStartProps(idx)}
+                  {...colDrag.itemProps(idx)}
                 >
                   <span className="tf-th-label">{c.label}</span>
                   {c.computed ? <span className="tf-badge" title={`计算列：${c.formula}`}>算</span> : null}
@@ -266,7 +284,12 @@ export function TableFieldControl({ def, value, onChange }) {
 
             {/* 数据行 */}
             {table.rows.map((row, i) => (
-              <div key={i} className="tf-row" style={{ gridTemplateColumns: grid }}>
+              <div
+                key={i}
+                className={`tf-row${rowDrag.draggingIndex === i ? ' dragging' : ''}${rowDrag.dropClass(i)}`}
+                style={{ gridTemplateColumns: grid }}
+                {...rowDrag.itemProps(i)}
+              >
                 {cols.map((c) => {
                   const err = row.errors[c.key];
                   if (c.computed) {
@@ -292,6 +315,7 @@ export function TableFieldControl({ def, value, onChange }) {
                   );
                 })}
                 <div className="tf-td tf-acts">
+                  <span {...rowDrag.handleProps(i)}>⠿</span>
                   <button type="button" className="tf-mini" title="上移这一行" disabled={i === 0} onClick={() => moveRow(i, -1)}>↑</button>
                   <button type="button" className="tf-mini" title="下移这一行" disabled={i === rows.length - 1} onClick={() => moveRow(i, 1)}>↓</button>
                   <button type="button" className="tf-mini" title="删除这一行" onClick={() => removeRow(i)}>×</button>
@@ -351,10 +375,12 @@ export function TableFieldControl({ def, value, onChange }) {
           <div className="hint">
             列定义跟着**这条数据**走（不写进栏目字典），所以这里加列只影响这一条。
             计算列写 JS 表达式：可用同行的列 key 或中文列名，也可用 rows / col("列名") / sum / countTrue。
+            排序用拖：**拖表头**搬列，拖行尾的 ⠿ 搬行（松手前会有一条插入线告诉你落在哪）。
           </div>
           {cols.map((c, i) => (
-            <div key={c.key} className="tf-colrow">
+            <div key={c.key} className={`tf-colrow${colDrag.dropClass(i)}`} {...colDrag.itemProps(i)}>
               <div className="tf-colrow-main">
+                <span {...colDrag.handleProps(i)}>⠿</span>
                 <input
                   style={{ width: 108 }}
                   value={c.key}

@@ -4,7 +4,7 @@ import { constants } from 'node:fs';
 import { APP_LABEL, APP_NAME, ENV_HOME, ENV_PASSPHRASE, ENV_STORE, VERSION, appHome, displayPath, storeFile } from '../../core/paths.js';
 import { loadStore, corruptNote, downgradeNote, migrationNote, storePathInUse } from '../../core/store.js';
 import { vaultStatus } from '../../core/vault.js';
-import { FIELD_TYPES, FIELD_TYPE_LABELS, templateSummaries } from '../../core/fields.js';
+import { FIELD_TYPES, FIELD_TYPE_LABELS, SOURCE_FIELD, SOURCE_GROUP, templateSummaries } from '../../core/fields.js';
 import { blocked } from '../../core/errors.js';
 import { compileRoute, usageOf } from '../../runtime/spec.js';
 
@@ -50,6 +50,9 @@ export async function bootstrapInfo() {
     fieldTypes: FIELD_TYPES,
     // 类型的中文名，只给面板下拉框用（渲染成「图文（可贴图）（md）」）
     fieldTypeLabels: FIELD_TYPE_LABELS,
+    // 每个非 KV 栏目自带的「原始资料」分组与字段：面板要在结构上把它们标成**不可删**
+    // （删了下回读又会被补回来，等于删了个寂寞）。常量在 core/fields.js，这里只做下发。
+    builtin: { group: SOURCE_GROUP.id, field: SOURCE_FIELD.key },
     corrupt: corruptNote(),
     migration: migrationNote(),
     // 降级运行（磁盘 store 比当前程序新）要**主动说**：不能等用户写一次被 BLOCKED 才知道。

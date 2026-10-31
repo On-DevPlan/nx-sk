@@ -208,7 +208,8 @@ nx-sk section update job --fields @fields.json
 > `type: 'entrylist'` 是**结构清单字段**：值 = 行对象的**数组**，行数不限（变长）；列（子字段）
 > 在字段定义的 `fields` 里声明。适合「一个条目挂多组 链接/账号/密码」这类密集结构——
 > tags 存不了结构，拆成多个字段又不知道会有几组。声明 `sensitive: true` 的列与顶层敏感字段
-> 同一条边界：密文落盘、默认原文、`--mask` 打码。面板渲染成密集迷你表，直接增删行。
+> 同一条边界：密文落盘、默认原文、`--mask` 打码。面板渲染成密集迷你表，直接增删行，
+> **拖行尾的 ⠿ 调行序**（行内操作键是小图标键，不抢内容的注意力）。
 >
 > ```bash
 > # 建字段（面板「新增字段」选「结构清单」会预填 名称/链接/账号/密码(密文) 四列）
@@ -227,6 +228,7 @@ nx-sk section update job --fields @fields.json
 > 还能有**计算列**（JS 表达式）与**表尾统计**。最根本的差别是**结构归数据**：列定义、行、公式、
 > 统计配置全部存在**条目值里**（`{v, columns, rows, totals?, summary?}`），字段定义里的 `columns`
 > 只是「新建时的初始列」。所以「这一条想多一列」不必改 schema，也不影响同栏目其它条目。
+> 面板上**行与列都能拖**：拖表头搬列、拖行尾的 ⠿ 搬行（松手前有插入线）。
 >
 > ```bash
 > nx-sk section update mysec --add-field '{"key":"tasks","label":"任务表","type":"table"}'
@@ -254,6 +256,37 @@ nx-sk section update job --fields @fields.json
 > - 老栏目是模板实例化时建的、当时还没有这个字段 → `nx-sk source ensure` 一次补齐。
 
 > `select` 的 `options` 是**候选项不是白名单**：真实值（如某个少数民族）不在候选里也允许写入。
+
+### 栏目结构：分组也是数据，面板里就能改
+
+栏目 = 分组（`section.groups`）+ 字段字典（`section.fields`），两样都只是**数据**：
+分组是条目表单里的小标题，**顺序就是它们出现的先后**。面板「编辑栏目」里能直接增删改序，
+CLI 用同一批 action —— 不存在「哪一边功能少一点」。
+
+```bash
+nx-sk section update job --add-group '{"id":"contact","title":"联系信息"}'
+nx-sk section update job --rename-group '{"id":"contact","title":"联系方式"}'
+nx-sk section update job --rename-group '{"id":"contact","title":"联系方式","newId":"reach"}'  # 换 id：组里字段的 group 跟着改
+nx-sk section update job --move-group '{"id":"reach","dir":"up"}'
+nx-sk section update job --remove-group reach                        # 空组才能删
+nx-sk section update job --set-field '{"key":"phone","label":"手机号","group":"reach"}'
+nx-sk section update job --move-field '{"key":"phone","dir":"up"}'   # 在自己的分组内换位置
+```
+
+每次改动都会把**新旧值**打进输出（`字段 phone：分组 contact → reach`）——
+「已更新栏目 job：fields」这种输出等于没说，改错了没法回溯。
+
+三条规矩，全是**拦下来**而不是悄悄做：
+
+| 规矩 | 为什么 |
+| --- | --- |
+| 分组 id 唯一 | 重复报 CONFLICT，绝不覆盖同名分组（改名用 `--rename-group`） |
+| 非空分组不给删 | 字段上挂着每个条目的值；先把字段挪走（改它的「分组」）或删掉 |
+| 字段 key 不可改 | 值按 key 存在条目里，改 key = 已有值读不出来。要换就新增字段再搬值 |
+
+另外两条边界：内置的「原始资料」分组与字段**删不掉**（每个栏目自带，删了下回读又补回来）；
+清单类字段（`entrylist` / `table`）的列是字段自己的结构，所以**不提供就地换类型**——
+要建就在「新增字段」里连列一起建。
 
 ### 填写策略 `fill`：有些格子填了反而减分
 
@@ -306,6 +339,9 @@ nx-sk entry get 张三
 - 栏目页（数据库面板）顶部是**视图 chips**（表格 / 精简 / 看板 / KV，见 §六）；
   左侧条目列表带完整度，右侧按分组渲染的字段表单。
 - 密文字段默认显示原文；顶栏「打码」等价于 `--mask`（选择持久化在 localStorage）；
+- **栏目结构自己能搭**：栏目面板里点某个栏目的「编辑」，弹窗里分组可新增 / 改名（含换 id）/
+  上下挪 / 删（空的才让删），字段可改标签 / 类型 / 分组 / 提示 / 必填策略、组内上下挪、删除
+  —— 一次改动一次落盘，与 CLI 的 `--add-group` 等是同一批 action（见 §七「栏目结构」）。
 - 保存是 **PATCH**：只有被你改动过的字段才会发出去（面板会显示「N 处改动」）；
 - 详细页下半部分是**块面板**（见 §五），AI 提议是评审条：渲染 diff + 应用 / 拒绝。
 

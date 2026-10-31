@@ -82,11 +82,14 @@ export function StoreProvider({ children }) {
   // 包装函数必须**透传参数**：大量 guard(async (row) => …) 形式的行级操作
   // 靠调用方传入对象——不透传的话 row 恒为 undefined，
   // 抛 "Cannot read properties of undefined (reading 'name')"（真实事故：密钥页 CRUD 全挂）。
+  // 返回值也要透传（失败时给 undefined）：调用处据此决定「要不要清空刚填的表单」，
+  // 否则失败的输入被清掉，用户只能重打一遍。
   const guard = useCallback((fn) => async (...args) => {
     try {
-      await fn(...args);
+      return await fn(...args);
     } catch (e) {
       toast(e?.message || String(e), 'bad');
+      return undefined;
     }
   }, [toast]);
 

@@ -141,13 +141,14 @@ step('中文键直接可用（不必记英文别名）', ledger.sections[0].fiel
 // 缺省视图是**推断**的（不落盘）；第一次改视图才固化 —— 这条语义在单测里钉过，
 // 这里验的是「CLI 真能改、改完真落盘、导出包真带走」。
 const vInfer = await cliJson(['section', 'view', 'list', 'job']);
-step('视图缺省推断：表格 / 精简 / 看板三条，标 provisional', vInfer.provisional === true && vInfer.views.length === 3, `${vInfer.views.length} 个`);
+step('视图缺省推断：列表(缺省) / 表格 / 精简 / 看板四条，标 provisional',
+  vInfer.provisional === true && vInfer.views.length === 4 && vInfer.views[0].id === 'list-default', `${vInfer.views.length} 个`);
 
 const vAdd = await cliJson(['section', 'view', 'add', 'job', '--type', 'table', '--title', '只看状态', '--columns', '姓名,目标岗位']);
-step('view add 把推断视图一并固化（chips 不会凭空消失）', vAdd.added === true && vAdd.views === 4, `${vAdd.views} 个`);
+step('view add 把推断视图一并固化（chips 不会凭空消失）', vAdd.added === true && vAdd.views === 5, `${vAdd.views} 个`);
 
 const vAfter = await cliJson(['section', 'view', 'list', 'job']);
-step('落盘后 provisional 变 false', vAfter.provisional === false && vAfter.count === 4);
+step('落盘后 provisional 变 false', vAfter.provisional === false && vAfter.count === 5);
 
 const vUpd = await cliJson(['section', 'view', 'update', 'job', vAdd.view.id, '--set', 'col.name.width=160', '--sort', 'name:desc']);
 step('view update 改列宽 + 排序（列宽拖拽结束 = 一次 update）', vUpd.changed.includes('columns') && vUpd.changed.includes('sort'), vUpd.changed.join(','));
@@ -173,7 +174,7 @@ const zgot = await cliJson(['entry', 'get', '冒烟测试', '--section', 'jobcop
 step('导入后的条目可读（字段与值都在）', zgot.values.name === '冒烟测试' && zgot.values.phone === '13800000000');
 
 const zimViews = await cliJson(['section', 'view', 'list', 'jobcopy']);
-step('导出→导入：视图配置跟着包走（profiles 不是推断出来的）', zimViews.provisional === false && zimViews.count === 4, `count=${zimViews.count}`);
+step('导出→导入：视图配置跟着包走（profiles 不是推断出来的）', zimViews.provisional === false && zimViews.count === 5, `count=${zimViews.count}`);
 
 const zskip = await cliJson(['transfer', 'import', 'jobcopy', '--file', zipPath, '--on-conflict', 'skip']);
 step('重复导入默认跳过冲突', zskip.entries.skipped === exp.entries && zskip.entries.added === 0);
@@ -683,6 +684,22 @@ step('删完回到空序列', apiBlocksBack.body.data.count === 0);
 
 const apiBlocked = await j('/api/sections/job', { method: 'DELETE', body: {} });
 step('栏目非空删除报 409 blocked', apiBlocked.status === 409 && apiBlocked.body.code === 'BLOCKED');
+
+// ── 栏目结构：面板「改分组 / 改字段」走的就是这几个 PATCH ──
+// 面板过去只能加字段、连分组都建不了；现在结构能自己搭，冒烟必须钉住这条链路，
+// 不然「后端有、面板接口没有」这种错只有点开面板才知道。
+const apiAddGroup = await j('/api/sections/job', { method: 'PATCH', body: { 'add-group': { id: 'smokeg', title: '冒烟分组' } } });
+step('PATCH 加分组（面板的「＋ 添加分组」）', apiAddGroup.status === 200 && apiAddGroup.body.data.ops[0].includes('新增分组 smokeg'));
+const apiSecGroups = await j('/api/sections/job');
+step('分组进了 groupList（面板据此渲染结构）', apiSecGroups.body.data.groupList.some((g) => g.id === 'smokeg'));
+const apiRmBusy = await j('/api/sections/job', { method: 'PATCH', body: { 'remove-group': 'contact' } });
+step('非空分组不给删（409 BLOCKED，并报出是哪个字段）', apiRmBusy.status === 409 && apiRmBusy.body.code === 'BLOCKED' && apiRmBusy.body.error.includes('phone'), apiRmBusy.body?.error);
+const apiRmGroup = await j('/api/sections/job', { method: 'PATCH', body: { 'remove-group': 'smokeg' } });
+step('空分组可删', apiRmGroup.status === 200 && apiRmGroup.body.data.ops[0].includes('删除分组 smokeg'));
+const apiSetField = await j('/api/sections/job', { method: 'PATCH', body: { 'set-field': { key: 'phone', label: '手机号(改)' } } });
+step('改字段标签（key 不动，已填的值不丢）', apiSetField.status === 200 && apiSetField.body.data.ops[0].includes('手机号(改)'));
+const apiFieldBack = await j('/api/sections/job');
+step('改的是 label，key 仍是 phone', apiFieldBack.body.data.fieldList.some((f) => f.key === 'phone' && f.label === '手机号(改)'));
 
 const apiNotFound = await j('/api/entries/不存在的东西');
 step('不存在的条目报 404 NOT_FOUND', apiNotFound.status === 404 && apiNotFound.body.code === 'NOT_FOUND');
