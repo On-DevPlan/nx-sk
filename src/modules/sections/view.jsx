@@ -285,6 +285,45 @@ export default function SectionsView() {
     await load();
   });
 
+  // —— 结构改动（分组 / 字段）——
+  // 每个操作都是**一次 PATCH + 立刻回读**：模态框里显示的是 GET 回来的字典，
+  // 改完不回读就会停在旧数据上，看上去像「点了没生效」。
+  // 不做「本地改完点保存」的批量草稿：批量保存要在面板里再养一份结构与冲突处理，
+  // 而分组/字段的每次改动本身就要过后端校验（id 唯一、非空不许删、key 不许改），
+  // 一次一改 = 出错时知道是哪一步错的。
+  const patchSection = async (m, body, okMsg) => {
+    await api(`/api/sections/${encodeURIComponent(m.id)}`, { method: 'PATCH', body });
+    const fresh = await api(`/api/sections/${encodeURIComponent(m.id)}`);
+    setModal((cur) => (cur && cur.id === m.id ? { ...cur, full: fresh } : cur));
+    if (okMsg) toast(okMsg);
+    await load();
+    await reload();
+  };
+
+  const addGroup = guard(async (m, g) => {
+    const id = String(g.id || '').trim();
+    if (!/^[a-z][a-z0-9_-]{0,63}$/.test(id)) { toast('分组 id 必须是小写字母开头，仅含 a-z 0-9 _ -', 'bad'); return false; }
+    await patchSection(m, { 'add-group': { id, title: String(g.title || '').trim() || id } }, `已新增分组 ${id}`);
+    return true;
+  });
+
+  const renameGroup = guard(async (m, id, title, newId) => {
+    const body = { id, title };
+    if (newId && newId !== id) body.newId = newId;
+    await patchSection(m, { 'rename-group': body }, `分组已改名为「${title}」`);
+  });
+
+  const moveGroup = guard(async (m, id, dir) => { await patchSection(m, { 'move-group': { id, dir } }); });
+
+  const removeGroup = guard(async (m, id) => {
+    await patchSection(m, { 'remove-group': id }, `已删除分组 ${id}`);
+  });
+
+  const setField = guard(async (m, key, patch) => { await patchSection(m, { 'set-field': { key, ...patch } }); });
+  const moveField = guard(async (m, key, dir) => { await patchSection(m, { 'move-field': { key, dir } }); });
+  // 填写策略走早就有的 --fill：必填 / 选填（不计完整度）/ 避免填（不计且提示别填）
+  const setFill = guard(async (m, key, policy) => { await patchSection(m, { fill: { [key]: policy } }); });
+
   const handleZip = guard(async (file) => {
     if (!file) return;
     const bad = checkZipFile(file);
@@ -487,11 +526,19 @@ export default function SectionsView() {
               modal={modal}
               types={types}
               labels={labels}
+              builtin={boot?.builtin || {}}
               onChange={(f) => setModal((m) => ({ ...m, form: { ...m.form, ...f } }))}
               onSave={() => saveEdit(modal)}
               onSync={() => syncFields(modal)}
               onAddField={(def) => addField(modal, def)}
+              onSetField={(key, patch) => setField(modal, key, patch)}
+              onMoveField={(key, dir) => moveField(modal, key, dir)}
+              onSetFill={(key, policy) => setFill(modal, key, policy)}
               onRemoveField={(key) => removeField(modal, key)}
+              onAddGroup={(g) => addGroup(modal, g)}
+              onRenameGroup={(id, title, newId) => renameGroup(modal, id, title, newId)}
+              onMoveGroup={(id, dir) => moveGroup(modal, id, dir)}
+              onRemoveGroup={(id) => removeGroup(modal, id)}
               onClose={() => setModal(null)}
               toast={toast}
             />
@@ -655,10 +702,40 @@ const COL_TYPES = [
 
 const colKind = (c) => (c.type === 'formula-num' || c.type === 'formula-text' ? c.type : (c.type || 'text'));
 
-function EditForm({ modal, types, labels, onChange, onSave, onSync, onAddField, onRemoveField, onClose, toast }) {
+// 清单类字段（entrylist / table）：列是字段自己的结构，所以已有字段**不提供就地换成这两种类型**
+// ——换过去等于换一个字段。要建就在「新增字段」里连列一起建。
+const LIST_TYPES = ['entrylist', 'table'];
+
+/**
+ * 栏目结构：分组 + 字段字典，两项都**可增删改序**。
+ *
+ * 为什么把「加分组」做成一等公民：栏目是文件夹，分组是它里面的小标题；
+ * 只有字段没有分组时，十几二十个字段会摊成一张没有层次的清单。
+ * 过去面板只能加字段、连分组都建不了（要建得去 CLI 或换模板），
+ * 于是「结构」这件事实际上只有命令行能控制——面板就不是控制面板了。
+ *
+ * 三条刻意的取舍：
+ *   1. **一次改动一次保存**（不攒草稿）：分组/字段的每次改动都要过后端校验
+ *      （id 唯一、非空分组不许删、key 不许改），一次一改，出错时知道是哪一步。
+ *      攒草稿要在面板里再养一份结构与一份冲突处理，代价远大于收益。
+ *   2. **非空分组不给删**（按钮置灰 + 说明）：删组连带删字段，而字段上挂着
+ *      每个条目的值——拦下来比事后找补便宜。
+ *   3. **key 只读**：值按 key 存，改 key = 让已有值读不出来。要换就新增再搬。
+ */
+function EditForm({
+  modal, types, labels, builtin, onChange, onSave, onSync,
+  onAddField, onSetField, onMoveField, onSetFill, onRemoveField,
+  onAddGroup, onRenameGroup, onMoveGroup, onRemoveGroup,
+  onClose, toast,
+}) {
   const [nf, setNf] = useState({ key: '', label: '', type: 'text', group: '' });
+  const [ng, setNg] = useState({ id: '', title: '' });
   const full = modal.full;
   const groups = full?.groupList || [];
+  const fields = full?.fieldList || [];
+  // 引用了未声明分组的字段：存量数据 / 手改 store 才可能出现。给它们单独一块，
+  // 让人一眼看见并挪回某个分组，而不是混在分组里「看起来正常」。
+  const orphans = fields.filter((f) => !groups.some((g) => g.id === (f.group || 'other')));
   // 列编辑只在清单类字段出现；cols 为 null 表示还没动过 → 用该类型的默认列
   const defaultCols = nf.type === 'entrylist' ? ENTRYLIST_DEFAULT_COLS : (nf.type === 'table' ? TABLE_DEFAULT_COLS : []);
   const cols = (nf.type === 'entrylist' || nf.type === 'table') ? (nf.cols || defaultCols) : null;
@@ -666,6 +743,14 @@ function EditForm({ modal, types, labels, onChange, onSave, onSync, onAddField, 
   const setCol = (i, patch) => setNf((m) => ({ ...m, cols: (m.cols || defaultCols).map((c, idx) => (idx === i ? { ...c, ...patch } : c)) }));
   const addCol = () => setNf((m) => ({ ...m, cols: [...(m.cols || defaultCols), { key: '', label: '', type: 'text' }] }));
   const removeCol = (i) => setNf((m) => ({ ...m, cols: (m.cols || defaultCols).filter((_, idx) => idx !== i) }));
+
+  /** 新增分组：回车与点按钮走同一处，失败时输入框不清空（改个字母就能重试）。 */
+  const submitGroup = async () => {
+    const id = ng.id.trim();
+    if (!id) { toast('填一下分组 id（小写字母开头，如 contact）', 'bad'); return; }
+    const ok = await onAddGroup({ id, title: ng.title.trim() });
+    if (ok) setNg({ id: '', title: '' });
+  };
 
   const buildDef = () => {
     const def = { key: nf.key.trim(), label: nf.label.trim() || nf.key.trim(), type: nf.type };
@@ -752,40 +837,102 @@ function EditForm({ modal, types, labels, onChange, onSave, onSync, onAddField, 
       ) : null}
 
       <div className="card" style={{ border: '1px solid var(--soft-2)', borderRadius: 4 }}>
-        <div className="colhead">字段字典（{full?.fieldList?.length || 0}）</div>
+        <div className="colhead">
+          分组（{groups.length}）
+          <span className="hint" style={{ fontWeight: 400 }}>分组 = 条目表单里的小标题；顺序就是它们出现的先后</span>
+        </div>
         <div className="colbody">
-          {groups.map((g) => (
-            <div key={g.id}>
-              <div className="group-title">{g.title}（{g.id}）</div>
-              {(full.fieldList || []).filter((f) => f.group === g.id).map((f) => (
-                <div key={f.key} className="row">
-                  <span className="name">{f.label}</span>
-                  <span className="mono muted">{f.key}</span>
-                  <Tag>{f.type}</Tag>
-                  {f.sensitive ? <Tag kind="bad">密文</Tag> : null}
-                  <span className="desc">
-                    {f.hint || ''}
-                    {f.type === 'entrylist' && Array.isArray(f.fields) && f.fields.length
-                      ? `${f.hint ? '　' : ''}列：${f.fields.map((s) => `${s.label}${s.sensitive ? '（密文）' : ''}`).join(' / ')}`
-                      : ''}
-                    {f.type === 'table' && Array.isArray(f.columns) && f.columns.length
-                      ? `${f.hint ? '　' : ''}列：${f.columns.map((s) => `${s.label}${s.formula ? '（算）' : ''}`).join(' / ')}`
-                      : ''}
-                  </span>
-                  <span className="acts"><button className="btn small ghost" onClick={() => onRemoveField(f.key)}>删除</button></span>
+          {groups.length ? groups.map((g, i) => (
+            <GroupRow
+              key={g.id}
+              g={g}
+              index={i}
+              total={groups.length}
+              fields={fields}
+              builtinId={builtin.group}
+              onRename={onRenameGroup}
+              onMove={onMoveGroup}
+              onRemove={onRemoveGroup}
+            />
+          )) : (
+            <div className="pad hint">还没有分组：字段会全部堆在一个小标题下。先建一个。</div>
+          )}
+          <div className="row" style={{ flexWrap: 'wrap' }}>
+            <input
+              style={{ width: 170 }}
+              placeholder="分组 id（小写字母开头）"
+              value={ng.id}
+              onChange={(e) => setNg({ ...ng, id: e.target.value })}
+              onKeyDown={(e) => { if (e.key === 'Enter') submitGroup(); }}
+            />
+            <input
+              style={{ width: 170 }}
+              placeholder="分组名（如 联系信息）"
+              value={ng.title}
+              onChange={(e) => setNg({ ...ng, title: e.target.value })}
+              onKeyDown={(e) => { if (e.key === 'Enter') submitGroup(); }}
+            />
+            <button type="button" className="btn small" onClick={submitGroup}>＋ 添加分组</button>
+            <span className="hint">新分组建在末尾，用 ↑↓ 挪到想要的位置；分组里没有字段才能删。</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="card" style={{ border: '1px solid var(--soft-2)', borderRadius: 4 }}>
+        <div className="colhead">
+          字段字典（{fields.length}）
+          <span className="hint" style={{ fontWeight: 400 }}>标签 / 类型 / 分组 / 提示 / 必填策略都能改；key 只读（值按 key 存）</span>
+        </div>
+        <div className="colbody">
+          {groups.map((g) => {
+            const list = fields.filter((f) => (f.group || 'other') === g.id);
+            return (
+              <div key={g.id}>
+                <div className="group-title">
+                  {g.title}　<span className="mono">{g.id}</span>　{list.length} 字段
                 </div>
+                {list.length ? list.map((f, i) => (
+                  <FieldRow
+                    key={f.key}
+                    f={f}
+                    groups={groups}
+                    types={types}
+                    labels={labels}
+                    locked={builtin.field && f.key === builtin.field}
+                    first={i === 0}
+                    last={i === list.length - 1}
+                    onSet={(patch) => onSetField(f.key, patch)}
+                    onMove={(dir) => onMoveField(f.key, dir)}
+                    onFill={(p) => onSetFill(f.key, p)}
+                    onRemove={() => onRemoveField(f.key)}
+                  />
+                )) : <div className="pad hint">（这一组还没有字段）</div>}
+              </div>
+            );
+          })}
+          {orphans.length ? (
+            <div>
+              <div className="group-title">未声明分组（{orphans.length}）</div>
+              {orphans.map((f) => (
+                <FieldRow
+                  key={f.key}
+                  f={f}
+                  groups={groups}
+                  types={types}
+                  labels={labels}
+                  locked={false}
+                  first
+                  last
+                  onSet={(patch) => onSetField(f.key, patch)}
+                  onMove={(dir) => onMoveField(f.key, dir)}
+                  onFill={(p) => onSetFill(f.key, p)}
+                  onRemove={() => onRemoveField(f.key)}
+                />
               ))}
+              <div className="pad hint">这些字段的分组没有在「分组」里声明，挪到某个分组下即可（分组声明 ⊇ 字段引用）。</div>
             </div>
-          ))}
-          {(full?.fieldList || []).filter((f) => !groups.some((g) => g.id === f.group)).map((f) => (
-            <div key={f.key} className="row">
-              <span className="name">{f.label}</span>
-              <span className="mono muted">{f.key}</span>
-              <Tag>{f.type}</Tag>
-              <span className="desc">分组 {f.group}（不在 groups 列表里）</span>
-              <span className="acts"><button className="btn small ghost" onClick={() => onRemoveField(f.key)}>删除</button></span>
-            </div>
-          ))}
+          ) : null}
+          {!fields.length ? <div className="pad hint">这个栏目还没有字段，在下面「新增字段」里加。</div> : null}
         </div>
       </div>
 
@@ -840,6 +987,165 @@ function EditForm({ modal, types, labels, onChange, onSave, onSync, onAddField, 
           <span className="hint">加完立刻生效：CLI 与面板都能填它。</span>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** 回车即失焦：文本类改动在 blur 时提交，回车提交比「点别处」更符合手感。 */
+const blurOnEnter = (e) => { if (e.key === 'Enter') e.currentTarget.blur(); };
+
+/**
+ * 一行 = 一个分组：id / 名字可改，可上下挪，空了才能删。
+ *
+ * 两个输入都不走「受控 + 每次按键都 PATCH」：那样每敲一个字就是一次写库，
+ * 而且中文输入法下会把中间态写进去。本地存草稿、失焦时才提交。
+ */
+function GroupRow({ g, index, total, fields, builtinId, onRename, onMove, onRemove }) {
+  const [id, setId] = useState(g.id);
+  const [title, setTitle] = useState(g.title);
+  // 服务端回读后（改名成功 / 被拒绝）以服务端为准，本地草稿不留在旧值上
+  useEffect(() => { setId(g.id); setTitle(g.title); }, [g.id, g.title]);
+  const n = fields.filter((f) => (f.group || 'other') === g.id).length;
+  const isBuiltin = !!builtinId && g.id === builtinId;
+
+  const commit = () => {
+    const nid = id.trim();
+    const ntitle = title.trim();
+    if (!nid || !ntitle) { setId(g.id); setTitle(g.title); return; } // 空值不提交：等于没改
+    if (nid === g.id && ntitle === g.title) return;
+    onRename(g.id, ntitle, nid);
+  };
+
+  return (
+    <div className="row" style={{ flexWrap: 'wrap' }}>
+      <input
+        style={{ width: 140 }}
+        value={id}
+        disabled={isBuiltin}
+        onChange={(e) => setId(e.target.value)}
+        onBlur={commit}
+        onKeyDown={blurOnEnter}
+        title="分组 id（小写字母开头；改 id 时组里字段的引用会跟着改）"
+      />
+      <input
+        style={{ width: 170 }}
+        value={title}
+        onChange={(e) => setTitle(e.target.value)}
+        onBlur={commit}
+        onKeyDown={blurOnEnter}
+        title="分组名：条目表单里的小标题"
+      />
+      <Tag>{n} 字段</Tag>
+      {isBuiltin ? <span className="hint">内置分组：每个栏目自带，删了下回读又会补回来</span> : null}
+      <span className="acts">
+        <button type="button" className="tf-mini" disabled={index === 0} onClick={() => onMove('up')} title="上移（分组顺序 = 表单里的先后）">↑</button>
+        <button type="button" className="tf-mini" disabled={index === total - 1} onClick={() => onMove('down')} title="下移">↓</button>
+        <button
+          type="button"
+          className="btn small ghost danger-ghost"
+          disabled={isBuiltin || n > 0}
+          onClick={() => onRemove(g.id)}
+          title={n > 0 ? `这组里还有 ${n} 个字段：先在下面把它们挪到别的分组或删掉` : '删除这个分组（必须是空的）'}
+        >
+          删除
+        </button>
+      </span>
+    </div>
+  );
+}
+
+/**
+ * 一行 = 一个字段：标签 / 类型 / 分组 / 提示 / 必填策略都能改，key 只读。
+ *
+ * 「类型」下拉里 entrylist / table **置灰**（已是清单类型的除外）：它们的列
+ * （entrylist 的 fields、table 的 columns）是字段自己的结构，就地改类型等于
+ * 换一个字段——要建就走下面的「新增字段」，连列一起建，别在这儿变魔术。
+ */
+function FieldRow({ f, groups, types, labels, locked, first, last, onSet, onMove, onFill, onRemove }) {
+  const [label, setLabel] = useState(f.label);
+  const [hint, setHint] = useState(f.hint || '');
+  useEffect(() => { setLabel(f.label); setHint(f.hint || ''); }, [f.label, f.hint]);
+  const isList = LIST_TYPES.includes(f.type);
+  const cols = isList ? (f.fields || f.columns || []) : [];
+  // 字段的分组没被声明时（存量数据）也要出现在下拉里，否则一改别的项就被静默改组
+  const gid = f.group || 'other';
+  const groupOptions = groups.some((g) => g.id === gid) ? groups : [{ id: gid, title: `${gid}（未声明）` }, ...groups];
+
+  const commitLabel = () => {
+    const v = label.trim();
+    if (!v || v === f.label) { setLabel(f.label); return; }
+    onSet({ label: v });
+  };
+  const commitHint = () => {
+    const v = hint.trim();
+    if (v === (f.hint || '')) return;
+    onSet({ hint: v });
+  };
+
+  return (
+    <div className="row" style={{ flexWrap: 'wrap' }}>
+      <input
+        style={{ width: 118 }}
+        value={label}
+        onChange={(e) => setLabel(e.target.value)}
+        onBlur={commitLabel}
+        onKeyDown={blurOnEnter}
+        title="字段标签（改名不影响已填的值）"
+      />
+      <span className="mono muted" title="key 不能改：条目里的值按 key 存，改了就读不出来了">{f.key}</span>
+      <select
+        style={{ width: 140 }}
+        value={f.type}
+        onChange={(e) => onSet({ type: e.target.value })}
+        title="字段类型"
+      >
+        {types.map((t) => (
+          <option key={t} value={t} disabled={LIST_TYPES.includes(t) && !isList}>
+            {labels[t] ? `${labels[t]}（${t}）` : t}
+          </option>
+        ))}
+      </select>
+      <select
+        style={{ width: 116 }}
+        value={gid}
+        onChange={(e) => onSet({ group: e.target.value })}
+        title="挪到哪个分组"
+      >
+        {groupOptions.map((g) => <option key={g.id} value={g.id}>{g.title}</option>)}
+      </select>
+      <input
+        style={{ flex: '1 1 140px', minWidth: 120 }}
+        placeholder="提示（hint）"
+        value={hint}
+        onChange={(e) => setHint(e.target.value)}
+        onBlur={commitHint}
+        onKeyDown={blurOnEnter}
+      />
+      <select
+        style={{ width: 76 }}
+        value={f.fill || 'normal'}
+        onChange={(e) => onFill(e.target.value)}
+        title="必填策略：选填与避免填都不计入完整度（避免填还会提示别填）"
+      >
+        <option value="normal">必填</option>
+        <option value="optional">选填</option>
+        <option value="avoid">避免填</option>
+      </select>
+      {isList ? <Tag>{cols.length} 列</Tag> : null}
+      {f.sensitive ? <Tag kind="bad">密文</Tag> : null}
+      <span className="acts">
+        <button type="button" className="tf-mini" disabled={first} onClick={() => onMove('up')} title="在本组内上移">↑</button>
+        <button type="button" className="tf-mini" disabled={last} onClick={() => onMove('down')} title="在本组内下移">↓</button>
+        <button
+          type="button"
+          className="btn small ghost danger-ghost"
+          disabled={locked}
+          onClick={onRemove}
+          title={locked ? '「原始资料」是每个栏目自带的字段，删了下回读又会补回来' : '从字典里删掉这个字段（已填的值会留在条目里，只是不再显示/校验）'}
+        >
+          删除
+        </button>
+      </span>
     </div>
   );
 }
