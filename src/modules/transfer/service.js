@@ -37,6 +37,7 @@ const FORMAT = 'nx-sk.section';
 // 升版本不是为了迁移（两条都是可选键），是为了**让老版本读到新包时明确拒绝**——
 // 老版本的白名单会静默丢掉这两个键，用户会以为「导出时没带上」。
 const FORMAT_VERSION = 2;
+export { FORMAT_VERSION };
 const CONFLICT_POLICIES = ['skip', 'copy', 'overwrite'];
 
 /**

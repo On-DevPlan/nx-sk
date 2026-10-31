@@ -241,6 +241,12 @@ export function migrationNote() {
   return cacheMigrationNote;
 }
 
+/** 降级运行时的说明（磁盘版本 > 当前版本，写入会被拒）；正常时是 null。bootstrap / health 会展示。 */
+export function downgradeNote() {
+  if (cacheDiskVersion <= STORE_VERSION) return null;
+  return { disk: cacheDiskVersion, current: STORE_VERSION };
+}
+
 export async function loadStore(explicitPath) {
   const p = explicitPath || storeFile();
   try {

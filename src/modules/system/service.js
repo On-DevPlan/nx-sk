@@ -2,7 +2,7 @@
 import fsp from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { APP_LABEL, APP_NAME, ENV_HOME, ENV_PASSPHRASE, ENV_STORE, VERSION, appHome, displayPath, storeFile } from '../../core/paths.js';
-import { loadStore, corruptNote, migrationNote, storePathInUse } from '../../core/store.js';
+import { loadStore, corruptNote, downgradeNote, migrationNote, storePathInUse } from '../../core/store.js';
 import { vaultStatus } from '../../core/vault.js';
 import { FIELD_TYPES, FIELD_TYPE_LABELS, templateSummaries } from '../../core/fields.js';
 import { blocked } from '../../core/errors.js';
@@ -52,6 +52,8 @@ export async function bootstrapInfo() {
     fieldTypeLabels: FIELD_TYPE_LABELS,
     corrupt: corruptNote(),
     migration: migrationNote(),
+    // 降级运行（磁盘 store 比当前程序新）要**主动说**：不能等用户写一次被 BLOCKED 才知道。
+    downgrade: downgradeNote(),
     commands,
   };
 }
@@ -80,6 +82,10 @@ export async function healthInfo() {
     sections = s.sections.length;
     entries = s.entries.length;
     storeDetail = `${sections} 栏目 / ${entries} 条目`;
+    // 读是好的、写会被拒——所以 ok 保持 true，降级单独说（health 的职责是「现在能不能用」：
+    // 能读能看，只是改不了）。
+    const dg = downgradeNote();
+    if (dg) storeDetail += `（降级运行：磁盘 v${dg.disk} > 当前 v${dg.current}，写入被拒，请升级 nx-sk）`;
   } catch (e) {
     storeOk = false;
     storeDetail = String(e && e.message);
@@ -101,7 +107,7 @@ export async function healthInfo() {
       { checks },
     );
   }
-  return { status: 'ok', app: APP_NAME, version: VERSION, cwd: process.cwd(), sections, entries, vault, checks };
+  return { status: 'ok', app: APP_NAME, version: VERSION, cwd: process.cwd(), sections, entries, vault, downgrade: downgradeNote(), checks };
 }
 
 export async function routesInfo({ module, http } = {}) {
@@ -135,6 +141,10 @@ export function renderBootstrap(info) {
     `密钥:   ${info.vault.source === 'env' ? '口令模式（NX_SK_PASSPHRASE）' : `本机密钥文件 ${info.vault.keyFile}`}`,
   ];
   if (info.corrupt) lines.push(`注意: 上次读取时发现损坏文件，已挪到 ${info.corrupt.to}`);
+  if (info.downgrade) {
+    lines.push(`注意: 这份 store 由更新版本的 nx-sk 写入（磁盘 v${info.downgrade.disk} > 当前 v${info.downgrade.current}），`
+      + '写入会被拒绝——请升级 nx-sk 后再修改。');
+  }
   lines.push('', '栏目一览：');
   for (const s of info.sections) lines.push(`  ${s.id.padEnd(12)} ${s.title}　${s.entries} 条 / ${s.fields} 字段`);
   lines.push('', `提示: ${APP_NAME} help 看全部命令；加 --json 得机器可读输出。`);
@@ -143,6 +153,9 @@ export function renderBootstrap(info) {
 
 export function renderHealth(h) {
   const lines = [`${h.status === 'ok' ? '正常' : '异常'} · ${h.app} v${h.version}`, `cwd: ${h.cwd}`];
+  if (h.downgrade) {
+    lines.push(`!! 降级运行：磁盘 store 是 v${h.downgrade.disk}，当前程序是 v${h.downgrade.current}——读得到、写入会被拒，请升级 nx-sk。`);
+  }
   for (const c of h.checks) lines.push(`  [${c.ok ? 'ok' : '!!'}] ${c.name.padEnd(12)} ${c.detail}`);
   return lines.join('\n');
 }
