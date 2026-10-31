@@ -81,6 +81,34 @@ export function applyGlobalAttrs(model) {
   return model;
 }
 
+/**
+ * 剪掉空 tabset（children 为空的面板组），以及修剪后变空的 row。
+ *
+ * **为什么要剪**：FlexLayout 的 toJson 会把空 tabset 原样写进布局——
+ * 拖动/关闭面板的某些路径会留下空面板组，存盘后每次恢复都渲染成一块白板
+ * （状态条数出「N 个面板组」，里面却一个面板都没有）。
+ * 恢复时剪 = 已经存坏的布局自动愈合；存盘前剪 = 不再产生新的。
+ *
+ * 纯函数：输入输出都是布局 JSON（不是 Model 实例），单测直接覆盖。
+ * 返回 null 表示根被剪空（一个可用面板组都不剩），调用方决定回退到初始布局。
+ */
+export function pruneEmptyTabsets(json) {
+  if (!json || json.type !== 'row' || !Array.isArray(json.children)) return json;
+  const walk = (node) => {
+    if (node.type !== 'row') return node;
+    node.children = (node.children || [])
+      .map((c) => (c.type === 'row' ? walk(c) : c))
+      .filter((c) => {
+        if (c.type === 'tabset') return (c.children || []).length > 0;
+        if (c.type === 'row') return (c.children || []).length > 0;
+        return true;
+      });
+    return node;
+  };
+  const layout = walk(json);
+  return layout.children.length ? json : null;
+}
+
 /** 读盘 → 模型；坏数据不吞掉整台应用，退回初始布局 */
 export function loadModel() {
   try {
@@ -88,6 +116,8 @@ export function loadModel() {
     if (!raw) return applyGlobalAttrs(Model.fromJson(initialLayoutJson()));
     const json = JSON.parse(raw);
     if (!json || !json.layout) return applyGlobalAttrs(Model.fromJson(initialLayoutJson()));
+    // 剪空面板组：老布局里已经存进去的空 tabset 在这一步愈合，不用用户点「重置布局」
+    if (!pruneEmptyTabsets(json.layout)) return applyGlobalAttrs(Model.fromJson(initialLayoutJson()));
     return applyGlobalAttrs(Model.fromJson(json));
   } catch {
     return applyGlobalAttrs(Model.fromJson(initialLayoutJson()));
@@ -97,7 +127,12 @@ export function loadModel() {
 /** 落盘：布局 JSON */
 export function saveModel(model) {
   try {
-    localStorage.setItem(WORKSPACE_KEY, JSON.stringify(model.toJson()));
+    const out = model.toJson();
+    // 存盘前剪空面板组：库自己不删（见 pruneEmptyTabsets 的注释）。
+    // 剪完为空（理论到不了：关掉最后一个面板时库会连 tabset 一起收）就不写，留着上一份。
+    if (out.layout && pruneEmptyTabsets(out.layout)) {
+      localStorage.setItem(WORKSPACE_KEY, JSON.stringify(out));
+    }
   } catch {
     /* 配额 / 隐私模式：布局不落盘不影响本次会话使用 */
   }
