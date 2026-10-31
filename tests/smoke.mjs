@@ -141,13 +141,14 @@ step('中文键直接可用（不必记英文别名）', ledger.sections[0].fiel
 // 缺省视图是**推断**的（不落盘）；第一次改视图才固化 —— 这条语义在单测里钉过，
 // 这里验的是「CLI 真能改、改完真落盘、导出包真带走」。
 const vInfer = await cliJson(['section', 'view', 'list', 'job']);
-step('视图缺省推断：表格 / 精简 / 看板三条，标 provisional', vInfer.provisional === true && vInfer.views.length === 3, `${vInfer.views.length} 个`);
+step('视图缺省推断：列表(缺省) / 表格 / 精简 / 看板四条，标 provisional',
+  vInfer.provisional === true && vInfer.views.length === 4 && vInfer.views[0].id === 'list-default', `${vInfer.views.length} 个`);
 
 const vAdd = await cliJson(['section', 'view', 'add', 'job', '--type', 'table', '--title', '只看状态', '--columns', '姓名,目标岗位']);
-step('view add 把推断视图一并固化（chips 不会凭空消失）', vAdd.added === true && vAdd.views === 4, `${vAdd.views} 个`);
+step('view add 把推断视图一并固化（chips 不会凭空消失）', vAdd.added === true && vAdd.views === 5, `${vAdd.views} 个`);
 
 const vAfter = await cliJson(['section', 'view', 'list', 'job']);
-step('落盘后 provisional 变 false', vAfter.provisional === false && vAfter.count === 4);
+step('落盘后 provisional 变 false', vAfter.provisional === false && vAfter.count === 5);
 
 const vUpd = await cliJson(['section', 'view', 'update', 'job', vAdd.view.id, '--set', 'col.name.width=160', '--sort', 'name:desc']);
 step('view update 改列宽 + 排序（列宽拖拽结束 = 一次 update）', vUpd.changed.includes('columns') && vUpd.changed.includes('sort'), vUpd.changed.join(','));
@@ -173,7 +174,7 @@ const zgot = await cliJson(['entry', 'get', '冒烟测试', '--section', 'jobcop
 step('导入后的条目可读（字段与值都在）', zgot.values.name === '冒烟测试' && zgot.values.phone === '13800000000');
 
 const zimViews = await cliJson(['section', 'view', 'list', 'jobcopy']);
-step('导出→导入：视图配置跟着包走（profiles 不是推断出来的）', zimViews.provisional === false && zimViews.count === 4, `count=${zimViews.count}`);
+step('导出→导入：视图配置跟着包走（profiles 不是推断出来的）', zimViews.provisional === false && zimViews.count === 5, `count=${zimViews.count}`);
 
 const zskip = await cliJson(['transfer', 'import', 'jobcopy', '--file', zipPath, '--on-conflict', 'skip']);
 step('重复导入默认跳过冲突', zskip.entries.skipped === exp.entries && zskip.entries.added === 0);

@@ -661,7 +661,7 @@ function validateViewType(section, raw) {
     throw badInput('KV 栏目的视图只能是 kv 类型（D1：KV 栏目就是一张表，没有别的读法）');
   }
   if (section.kv !== true && type === 'kv') {
-    throw badInput('只有 KV 栏目能建 kv 视图；普通栏目用 table / board');
+    throw badInput('只有 KV 栏目能建 kv 视图；普通栏目用 list / table / board');
   }
   return type;
 }

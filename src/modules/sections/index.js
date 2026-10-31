@@ -155,7 +155,7 @@ export default {
       summary: '新增视图（第一次 add 把当前生效的推断视图一并固化落盘，chips 不会凭空消失）。board 必须给 --groupby',
       args: ['ref'],
       flags: {
-        type: { type: 'string', default: 'table', hint: 'table | board | kv（KV 栏目只能 kv）' },
+        type: { type: 'string', default: 'table', hint: 'list | table | board | kv（KV 栏目只能 kv）。list = 条目列表 + 详情（缺省形态）；table 把条目摊成大表' },
         title: { type: 'string', hint: '显示名；缺省用类型名' },
         columns: { type: 'array', hint: '列投影：字段 key 或标签，逗号分隔（缺省 = 全部非 source 字段）' },
         groupby: { type: 'string', hint: '看板按哪个 select 字段分组' },

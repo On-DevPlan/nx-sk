@@ -13,11 +13,18 @@
 //   ② 缺省视图**只在读路径推断，不落盘** —— 用户第一次改视图才写 section.views。
 //      这不是洁癖：落盘会让「字典加了字段、视图自动跟上」失效，也让回退失去意义。
 
-/** 视图类型（§19.1）。gallery 下一版预留，v1 不收。 */
-export const VIEW_TYPES = ['table', 'board', 'kv'];
+/**
+ * 视图类型（§19.1）。gallery 下一版预留，v1 不收。
+ *
+ * `list` 是**缺省视图**：左边条目列表（标题 + 完整度）+ 右边详情——这是「打开一个栏目」
+ * 该看到的样子。表格 / 看板是**可选投影**：把条目摊成一张大表（字段全是列）对字段多的栏目
+ * 是一场灾难（80 个字段 = 80 列横滚，详情被挤成一条竖缝），作为缺省不成立，
+ * 但「横着对比一批条目」它确实是对的工具，所以留在 chips 里随取随用。
+ */
+export const VIEW_TYPES = ['list', 'table', 'board', 'kv'];
 
 /** 类型的中文名。CLI 渲染与面板 chips 共用 —— 两处各写一套必然分叉。 */
-export const VIEW_LABELS = { table: '表格', board: '看板', kv: 'KV' };
+export const VIEW_LABELS = { list: '列表', table: '表格', board: '看板', kv: 'KV' };
 
 /** 视图 id：机器定位串（`table-default` / `v_xxx`），只收 ASCII —— 它是引用，不是标题。 */
 const VIEW_ID_RE = /^[A-Za-z0-9_.:-]{1,64}$/;
@@ -86,7 +93,8 @@ export function normalizeViews(list) {
 /**
  * 缺省推断（§19.3，**只读路径，不落盘**）。
  *
- *   非 KV 栏目 → 表格（除 source 外全部字段）／精简（标题字段 + 第一个 select）／
+ *   非 KV 栏目 → 列表（缺省：条目列表 + 详情，见 VIEW_TYPES 里 list 的说明）／
+ *                表格（除 source 外全部字段）／精简（标题字段 + 第一个 select）／
  *                看板（第一个 select 分组，没有 select 就不出）
  *   KV 栏目   → 一条 kv
  *
@@ -104,13 +112,16 @@ export function inferViews(section) {
     || (fields.find((f) => f.type === 'text' || f.type === 'textarea') || {}).key
     || null;
 
-  const out = [{
+  // 缺省是**列表**：条目就是条目，不是一张大表的行（用户原话：「左边的条目栏别出现表格」）
+  const out = [{ id: 'list-default', type: 'list', title: VIEW_LABELS.list, provisional: true }];
+
+  out.push({
     id: 'table-default',
     type: 'table',
     title: VIEW_LABELS.table,
     columns: visible.map((f) => ({ key: f.key })),
     provisional: true,
-  }];
+  });
 
   const compactCols = [];
   if (titleKey) compactCols.push({ key: titleKey });
