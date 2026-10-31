@@ -231,6 +231,112 @@ test('deploy 栏目：YAML 正文写入后原样读回（换行与缩进不能�
   assert.equal(got.values.content, yaml);
 });
 
+// —— 栏目结构（分组 + 字段）在面板里可增删改序 ——
+// 背景：面板过去只能「加字段」，分组连建都建不了，结构实际上只有 CLI 能改。
+// 这批操作是面板与 CLI 共用的同一份规则，钉住三条：**id 唯一**、**非空分组不给删**、
+// **字段 key 不可改**（值按 key 存）。
+
+test('add-group：建分组；重复 id 冲突而不是覆盖', async () => {
+  await service.addSection({ id: 'structsec', title: '结构', fields: [{ key: 'a', label: 'A', type: 'text', group: 'g1' }], groups: [{ id: 'g1', title: '一组' }] });
+  const r = await service.updateSection('structsec', { 'add-group': { id: 'g2', title: '二组' } });
+  assert.equal(r.status, 'ok');
+  const s = await service.getSection('structsec');
+  assert.deepEqual(s.groupList.map((g) => g.id), ['g1', 'g2', 'source']);
+  assert.equal(s.groupList.find((g) => g.id === 'g2').title, '二组');
+  await assert.rejects(
+    service.updateSection('structsec', { 'add-group': { id: 'g2', title: '又来' } }),
+    /分组已存在/,
+  );
+});
+
+test('rename-group：改名字；换 id 时组里字段的引用跟着改', async () => {
+  await service.updateSection('structsec', { 'add-field': { key: 'b', label: 'B', type: 'text', group: 'g2' } });
+  await service.updateSection('structsec', { 'rename-group': { id: 'g2', title: '第二组' } });
+  let s = await service.getSection('structsec');
+  assert.equal(s.groupList.find((g) => g.id === 'g2').title, '第二组');
+
+  await service.updateSection('structsec', { 'rename-group': { id: 'g2', title: '联系方式', newId: 'reach' } });
+  s = await service.getSection('structsec');
+  assert.ok(s.groupList.some((g) => g.id === 'reach' && g.title === '联系方式'), JSON.stringify(s.groupList));
+  assert.ok(!s.groupList.some((g) => g.id === 'g2'), '旧 id 不该留着');
+  // 字段跟着改组：不然整组字段会从表单里消失
+  assert.equal(s.fieldList.find((f) => f.key === 'b').group, 'reach');
+});
+
+test('rename-group：分组不存在 / 空名字都报错', async () => {
+  await assert.rejects(service.updateSection('structsec', { 'rename-group': { id: 'nope', title: 'X' } }), /分组不存在/);
+  await assert.rejects(service.updateSection('structsec', { 'rename-group': { id: 'reach', title: '  ' } }), /新名字不能为空/);
+});
+
+test('move-group：换顺序；已在头尾时报清楚', async () => {
+  const r = await service.updateSection('structsec', { 'move-group': { id: 'reach', dir: 'up' } });
+  assert.ok(r.ops[0].includes('上移'), JSON.stringify(r.ops));
+  const s = await service.getSection('structsec');
+  assert.equal(s.groupList[0].id, 'reach');
+  await assert.rejects(service.updateSection('structsec', { 'move-group': { id: 'reach', dir: 'up' } }), /已经是第一个/);
+  await assert.rejects(service.updateSection('structsec', { 'move-group': { id: 'nope', dir: 'down' } }), /分组不存在/);
+});
+
+test('remove-group：非空分组拦下来并报出字段；内置「原始资料」不给删；空组可删', async () => {
+  await assert.rejects(
+    service.updateSection('structsec', { 'remove-group': 'reach' }),
+    /分组 reach 里还有 1 个字段：b/,
+  );
+  await assert.rejects(service.updateSection('structsec', { 'remove-group': 'source' }), /内置分组/);
+  await assert.rejects(service.updateSection('structsec', { 'remove-group': 'nope' }), /分组不存在/);
+
+  // 搬走字段后就能删了
+  await service.updateSection('structsec', { 'set-field': { key: 'b', group: 'g1' } });
+  const r = await service.updateSection('structsec', { 'remove-group': 'reach' });
+  assert.ok(r.ops.some((x) => x.includes('删除分组 reach')), JSON.stringify(r.ops));
+  const s = await service.getSection('structsec');
+  assert.ok(!s.groupList.some((g) => g.id === 'reach'));
+});
+
+test('set-field：改标签 / 类型 / 分组 / 提示都能落盘，并在 ops 里报出新旧值', async () => {
+  const r = await service.updateSection('structsec', { 'set-field': { key: 'a', label: 'A改', hint: '提示', group: 'g1' } });
+  assert.ok(r.ops[0].includes('标签 A → A改'), JSON.stringify(r.ops));
+  const s = await service.getSection('structsec');
+  const f = s.fieldList.find((x) => x.key === 'a');
+  assert.equal(f.label, 'A改');
+  assert.equal(f.hint, '提示');
+});
+
+test('set-field：key 不能改 —— 值按 key 存，只有「新增字段再搬值」这一条路', async () => {
+  // 传一个不存在的 key = 找不到字段，而不是「改名为新 key」
+  await assert.rejects(service.updateSection('structsec', { 'set-field': { key: 'zz', label: 'A' } }), /字段不存在/);
+  const s = await service.getSection('structsec');
+  assert.ok(s.fieldList.some((f) => f.key === 'a'), '原 key 必须还在');
+  assert.ok(!s.fieldList.some((f) => f.key === 'zz'), '不该凭空多出 zz');
+});
+
+test('move-field：在自己的分组内换位置；到头报错', async () => {
+  await service.updateSection('structsec', { 'add-field': { key: 'c', label: 'C', type: 'text', group: 'g1' } });
+  const before = (await service.getSection('structsec')).fieldList.filter((f) => f.group === 'g1').map((f) => f.key);
+  assert.ok(before.includes('a') && before.includes('c'));
+  await service.updateSection('structsec', { 'move-field': { key: 'c', dir: 'up' } });
+  const after = (await service.getSection('structsec')).fieldList.filter((f) => f.group === 'g1').map((f) => f.key);
+  assert.ok(after.indexOf('c') < before.indexOf('c'), `${before} → ${after}`);
+  await assert.rejects(service.updateSection('structsec', { 'move-field': { key: 'nope', dir: 'up' } }), /字段不存在/);
+  await assert.rejects(service.updateSection('structsec', { 'move-field': { key: 'c', dir: 'sideways' } }), /dir 只能是 up \/ down/);
+});
+
+test('renderSectionChange：结构改动按条打印，而不是只说「fields, groups」', () => {
+  const out = renderSectionChange({
+    status: 'ok', id: 'demo', changed: ['groups'], added: [], removed: [], fillChanged: [],
+    ops: ['新增分组 contact（联系信息）', '字段 phone：分组 contact → reach'],
+  });
+  assert.match(out, /新增分组 contact/);
+  assert.match(out, /字段 phone：分组 contact → reach/);
+});
+
+test('bootstrap 下发 builtin：面板据此把「原始资料」标成不可删', async () => {
+  const { bootstrapInfo } = await import('../../src/modules/system/service.js');
+  const boot = await bootstrapInfo();
+  assert.equal(boot.builtin.group, 'source');
+  assert.equal(boot.builtin.field, 'source');
+});
+
 test('entry get 把多行正文按行拆开（否则整段从第 0 列掉出去）', async () => {
   const entries = await import('../../src/modules/entries/service.js');
   const out = entries.renderEntryGet({
