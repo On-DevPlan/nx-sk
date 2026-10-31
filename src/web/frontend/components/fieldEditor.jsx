@@ -8,6 +8,7 @@ import { Lightbox } from './lightbox.jsx';
 import { MdView, imageRecord } from './mdView.jsx';
 import { SourceFieldControl } from './sourcePanel.jsx';
 import { TableFieldControl } from './tableField.jsx';
+import { reorderAt, useListDrag } from './listDrag.jsx';
 import { imageRefs, linkCount } from '../mdInline.js';
 import { smartStats } from '../mdSmart.js';
 import { taskStats, toggleTaskAtLine } from '../mdSource.js';
@@ -573,6 +574,8 @@ export function EntryListFieldControl({ def, value, onChange }) {
   const setRow = (i, key, v) => onChange(rows.map((r, idx) => (idx === i ? { ...r, [key]: v } : r)));
   const addRow = () => onChange([...rows, {}]);
   const removeRow = (i) => onChange(rows.filter((_, idx) => idx !== i));
+  // 行拖拽：清单的输入框里要能选词，所以**只有把手可拖**（与表格同一套）
+  const rowDrag = useListDrag((from, insertAt) => onChange(reorderAt(rows, from, insertAt)));
 
   if (!subs.length) {
     return <span className="hint">这个清单字段没有声明列（子字段），渲染不出输入格。用 section update 把字段的 fields 子字段补上。</span>;
@@ -590,7 +593,12 @@ export function EntryListFieldControl({ def, value, onChange }) {
         <span />
       </div>
       {rows.map((row, i) => (
-        <div key={i} className="entrylist-row" style={{ gridTemplateColumns: template }}>
+        <div
+          key={i}
+          className={`entrylist-row${rowDrag.draggingIndex === i ? ' dragging' : ''}${rowDrag.dropClass(i)}`}
+          style={{ gridTemplateColumns: template }}
+          {...rowDrag.itemProps(i)}
+        >
           {subs.map((s) => (
             <input
               key={s.key}
@@ -601,12 +609,17 @@ export function EntryListFieldControl({ def, value, onChange }) {
               onChange={(e) => setRow(i, s.key, e.target.value)}
             />
           ))}
-          <button type="button" className="btn small ghost" title="删除这一行" onClick={() => removeRow(i)}>×</button>
+          {/* 行内操作一律小图标键（不是 btn）：这是密集迷你表，一颗正常大小的按钮
+              会把一行的高度和注意力都吃掉 —— 与表格字段同一口径 */}
+          <span className="entrylist-acts">
+            <span {...rowDrag.handleProps(i)}>⠿</span>
+            <button type="button" className="tf-mini" title="删除这一行" onClick={() => removeRow(i)}>×</button>
+          </span>
         </div>
       ))}
       <div className="entrylist-add">
         <button type="button" className="btn small" onClick={addRow}>＋ 添加一行</button>
-        <span className="hint">{rows.length ? `${rows.length} 行` : '还没有行'}　·　变长，空行保存时自动剔除</span>
+        <span className="hint">{rows.length ? `${rows.length} 行` : '还没有行'}　·　变长，空行保存时自动剔除　·　拖 ⠿ 可调顺序</span>
       </div>
     </div>
   );
