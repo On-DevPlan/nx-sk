@@ -22,6 +22,10 @@ import {
   BLOCK_LABELS, BLOCK_TYPES, appendBlock, findBlock, findContainer, moveToIndex, normalizeBlock,
   removeBlock as removeBlockIn, replaceBlock, updateBlock, validateBlocks,
 } from '../../shared/blocks.js';
+import {
+  blockHash, createPending, deletePending, listPending, publicPending, readPending, writePending,
+  renderAiApply, renderAiList, renderAiReject, renderAiSuggest,
+} from './aiPending.js';
 
 /**
  * 「这一格拿到的是打码占位吗」。
@@ -1757,8 +1761,8 @@ async function sealBlocks(blocks) {
 }
 
 /**
- * 整份正文写入（导入路径用）。校验不过就**整份拒绝**——与块 CRUD 同一条「写入即体检」，
- * 免得半份合法的正文落盘（导出的包坏了，应该在边界处停下，而不是存一半）。
+ * 整份正文写入（导入 / AI 应用两条路径共用）。校验不过就**整份拒绝**——与块 CRUD 同一条
+ * 「写入即体检」，免得半份合法的正文落盘（包坏了 / 提议坏了，都该在边界处停下）。
  *
  * 空数组 = 清掉正文（键删除，不是留一个空 body：老数据里「没有正文」就是这个形状）。
  */
@@ -1774,6 +1778,177 @@ export async function setEntryBody(entryId, blocks) {
   });
   return { status: 'ok', id: entryId, blocks: sealed.length };
 }
+
+// —— 块级 AI（pending，S4）——
+//
+// 铁律：**AI 永不直接改数据**。suggest 只落一条 pending（不碰 store），apply 才写，
+// reject 只删文件。所以「AI 改块」永远有一次显式确认。
+//
+// 谁产生提议：不是这里。nx-sk 不自带大模型——提议由调用方（agent 或外部模型）产出后
+// 经 `--from @proposal.json` 交进来，CLI 与面板因此同语义：
+// agent 走 CLI 落 pending，人在面板上审同一条。
+
+function aiCounts(rec) {
+  return {
+    changed: (rec.diffs || []).length,
+    added: (rec.newBlocks || []).length,
+    removed: (rec.removedIds || []).length,
+  };
+}
+
+/**
+ * 差异判定用的「明文正文」：store 里的 secret 块是密文，而提议里是明文
+ * （AI 拿到的通常是 `entry block list` 的输出）。用明文比才判得准「密钥到底动没动」；
+ * 直接比哈希会把一个没改的密钥报成改动，用户看到「密文块已变更」就会白审一遍。
+ *
+ * 解不开（换过密钥）就跳过该块 —— 退回按密文比，最坏是多报一条，不会漏报。
+ */
+async function plainBodyForDiff(body) {
+  const map = new Map();
+  const walk = async (list) => {
+    for (const b of list || []) {
+      if (b.type === 'secret' && isCipherBlob(b.value)) {
+        try {
+          const { key } = await resolveVaultKey();
+          map.set(b.id, { ...b, value: decryptValue(key, b.value) });
+        } catch { /* 见上：解不开就按密文比 */ }
+      }
+      if (Array.isArray(b.children)) await walk(b.children);
+    }
+  };
+  await walk(body);
+  return map;
+}
+
+/**
+ * 生成提议（不写 store）。
+ *
+ * `--from` 收 `{ blocks: [...] }` 或直接一个块数组——那是 AI 给出的**最终正文**
+ * （不是补丁：补丁要发明一套补丁语言，而正文本来就是自描述的）。
+ */
+export async function aiSuggest(ref, { prompt, from, block, section, 'dry-run': dryRun } = {}) {
+  const instruction = String(prompt || '').trim();
+  if (!instruction) throw badInput('缺少指令：--prompt "把自我介绍改短"');
+  if (!from) {
+    throw badInput('缺少提议正文：--from @proposal.json（nx-sk 不自带大模型——提议由调用方产出后交进来；'
+      + '文件形如 {"blocks":[…]} 或直接是块数组）');
+  }
+  const proposal = Array.isArray(from) ? from : (from.blocks || from.body);
+  if (!Array.isArray(proposal)) throw badInput('--from 的文件里要有 blocks 数组');
+
+  const store = await loadStore();
+  const entry = resolveEntry(store, ref, section);
+  const sectionObj = findSection(store, entry.section);
+  const plain = await plainBodyForDiff(Array.isArray(entry.body) ? entry.body : []);
+  const rec = createPending({
+    entry, section: sectionObj, blocks: proposal, prompt: instruction,
+    scopeBlockId: block, dryRun: true, plain,
+  });
+  const counts = aiCounts(rec);
+
+  if (!counts.changed && !counts.added && !counts.removed) {
+    // 没有差异就不留 pending：留一条「什么都没改」的待审是噪声
+    return { status: 'noop', entryId: entry.id, entryTitle: entry.title, prompt: instruction, ...counts };
+  }
+  if (dryRun) {
+    return { status: 'skipped', dryRun: true, entryId: entry.id, entryTitle: entry.title, wouldApply: counts };
+  }
+
+  writePending(rec);
+  return {
+    status: 'pending',
+    pendingId: rec.id,
+    entryId: entry.id,
+    entryTitle: entry.title,
+    sectionId: rec.sectionId,
+    sectionTitle: rec.sectionTitle,
+    scopeBlockId: rec.scopeBlockId,
+    prompt: instruction,
+    ...counts,
+  };
+}
+
+/**
+ * 应用提议（唯一会写 store 的一步）。
+ *
+ * 冲突检测：pending 记了每块应用前的 baseHash，应用时**服务端重算**当前块的哈希；
+ * 不一致（或块已被删）就报 CONFLICT 且一个字都不写——覆盖用户的改动必须显式 `--force`。
+ */
+export async function aiApply(pendingId, { block, force, 'dry-run': dryRun } = {}) {
+  const rec = readPending(pendingId);
+  const store = await loadStore();
+  const entry = store.entries.find((e) => e.id === rec.entryId);
+  if (!entry) throw notFound(`pending 指向的条目已不存在: ${rec.entryId}`);
+  const current = Array.isArray(entry.body) ? entry.body : [];
+  const target = block ? String(block) : '';
+
+  if (target && !(rec.diffs || []).some((d) => d.blockId === target)) {
+    throw badInput(`pending ${rec.id} 里没有块 ${target} 的改动（用 entry ai list 看有哪些）`);
+  }
+
+  const conflicts = [];
+  for (const d of rec.diffs || []) {
+    if (target && d.blockId !== target) continue;
+    const now = findBlock(current, d.blockId);
+    if (!now || blockHash(now) !== d.baseHash) conflicts.push(d.blockId);
+  }
+  if (conflicts.length && !force) {
+    return { status: 'conflict', pendingId: rec.id, entryId: entry.id, entryTitle: entry.title, conflictIds: conflicts };
+  }
+
+  let finalBlocks = rec.blocks;
+  if (target) {
+    // 部分应用：只把那一块换成提议里的最终内容，其余保持调用方此刻的样子
+    const proposed = findBlock(rec.blocks, target);
+    if (!proposed) throw badInput(`pending 的最终正文里找不到块 ${target}`);
+    finalBlocks = replaceBlock(current, target, proposed);
+  }
+
+  const counts = aiCounts(rec);
+  const applied = target
+    ? { changed: 1, added: 0, removed: 0 }
+    : counts;
+
+  if (dryRun) {
+    return { status: 'skipped', dryRun: true, pendingId: rec.id, entryId: entry.id, entryTitle: entry.title, ...applied };
+  }
+
+  const written = await setEntryBody(rec.entryId, finalBlocks);
+  // pending 是运行态，不是历史：应用完就删（同一条被反复应用只会制造歧义）
+  deletePending(rec.id);
+  return {
+    status: 'ok',
+    pendingId: rec.id,
+    entryId: entry.id,
+    entryTitle: entry.title,
+    blocks: written.blocks,
+    ...applied,
+  };
+}
+
+/** 拒绝提议：**真删文件**，不是打个标记（pending 是运行态，不是历史）。 */
+export async function aiReject(pendingId, { 'dry-run': dryRun } = {}) {
+  const rec = readPending(pendingId);
+  if (dryRun) return { status: 'skipped', dryRun: true, pendingId: rec.id, entryId: rec.entryId };
+  deletePending(rec.id);
+  return { status: 'ok', pendingId: rec.id, entryId: rec.entryId, entryTitle: rec.entryTitle };
+}
+
+/** 查待审提议（新的在前）。带 ref 只看这一条条目的，不带就看全部。 */
+export async function aiList({ ref, section } = {}) {
+  let entryId = '';
+  let entryTitle = '';
+  if (ref) {
+    const store = await loadStore();
+    const entry = resolveEntry(store, ref, section);
+    entryId = entry.id;
+    entryTitle = entry.title;
+  }
+  const pendings = listPending({ entryId }).map(publicPending);
+  return { entryId, entryTitle, count: pendings.length, pendings };
+}
+
+export { renderAiApply, renderAiList, renderAiReject, renderAiSuggest };
 
 // —— 块正文（v4）的 CLI 渲染 ——
 //

@@ -30,12 +30,14 @@ import { ensureDir, fileSize, writeAtomic } from '../../core/fsx.js';
 import { addEntry, setEntryBody, updateEntry } from '../entries/service.js';
 import { addSection, updateSection } from '../sections/service.js';
 import { normalizeViews } from '../../shared/views.js';
+import { walkBlocks } from '../../shared/blocks.js';
 
 const FORMAT = 'nx-sk.section';
 // v1 → v2：包里多了 `entries[].body`（块正文）与 `section.views`（视图配置）。
 // 升版本不是为了迁移（两条都是可选键），是为了**让老版本读到新包时明确拒绝**——
 // 老版本的白名单会静默丢掉这两个键，用户会以为「导出时没带上」。
 const FORMAT_VERSION = 2;
+export { FORMAT_VERSION };
 const CONFLICT_POLICIES = ['skip', 'copy', 'overwrite'];
 
 /**
@@ -512,18 +514,24 @@ export async function previewImport(ref, buffer, { fileName, passphrase, encrypt
 
   // 打码凭据：导入时不能把 `******` 当新密码存进去，只能跳过并提示重填
   let maskedSecrets = 0;
+  let maskedBlocks = 0;
   const sensitiveKeys = new Set((manifest.section.fields || []).filter((f) => f.sensitive || f.type === 'secret').map((f) => f.key));
   for (const e of manifest.entries) {
     for (const k of sensitiveKeys) {
       const v = e.values?.[k];
       if (typeof v === 'string' && v.includes('******')) maskedSecrets += 1;
     }
+    // 密钥块同一条口径（统计扩到块：预览不能一边说「明文随包」一边包里躺着掩码）
+    walkBlocks(Array.isArray(e.body) ? e.body : [], (b) => {
+      if (b && b.type === 'secret' && typeof b.value === 'string' && b.value.includes('******')) maskedBlocks += 1;
+    });
   }
 
   const notBundled = manifest.files.filter((f) => f.bundled === false).length;
   const warnings = [];
   if (notBundled) warnings.push(`${notBundled} 个附件未随包（导出时没勾「携带附件」），导入后这些引用会指向不存在的附件`);
   if (!manifest.withSecrets && maskedSecrets) warnings.push(`${maskedSecrets} 个凭据字段在导出时已打码，导入后需要重新填写`);
+  if (maskedBlocks) warnings.push(`${maskedBlocks} 个密钥块在导出时已打码，导入后将清空待重填（星号不能存成密钥）`);
   if (fileIssues.length) warnings.push(`${fileIssues.length} 个附件有问题（缺失或校验失败），将被跳过`);
   // 只有「显式指定了目标栏目」时这句才成立；零配置导入是新建，说「当前栏目」会误导
   if (ref && manifest.section.id !== targetId) warnings.push(`ZIP 来自栏目「${manifest.section.title}」（${manifest.section.id}），将导入到当前栏目`);
@@ -568,7 +576,7 @@ export async function previewImport(ref, buffer, { fileName, passphrase, encrypt
       // 导出时选了「不带附件」：台账记录还在（知道有哪些引用），但没有原件可落
       notBundled: manifest.files.filter((f) => f.bundled === false).length,
     },
-    secrets: { sensitiveFields: sensitiveKeys.size, masked: maskedSecrets },
+    secrets: { sensitiveFields: sensitiveKeys.size, masked: maskedSecrets, maskedBlocks },
     warnings,
   };
 }
@@ -702,6 +710,18 @@ export async function applyImport(ref, buffer, { fileName, onConflict = 'skip', 
   let overwritten = 0;
   let skipped = 0;
   let maskedSkipped = 0;
+  let maskedBlocks = 0;
+
+  // 与字段同一条口径：打码的密钥块不能把 `******` 加密存盘（那等于把星号存成密钥）。
+  // 块保留、值清空（value=null 过得了块校验），让用户导入后重填 —— 静默丢块更糟。
+  const unmaskSecretBlocks = (list) => (list || []).map((b) => {
+    if (b.type === 'secret' && typeof b.value === 'string' && b.value.includes('******')) {
+      maskedBlocks += 1;
+      return { ...b, value: null };
+    }
+    if (Array.isArray(b.children)) return { ...b, children: unmaskSecretBlocks(b.children) };
+    return b;
+  });
 
   for (const src of manifest.entries) {
     const values = remapValues(section, src.values || {}, idMap);
@@ -712,7 +732,7 @@ export async function applyImport(ref, buffer, { fileName, onConflict = 'skip', 
     }
     const hit = byId.get(src.id) || existing.find((e) => e.title === src.title);
     // 块正文随条目走：附件 id 先在包内重映射，再由 setEntryBody 加密落盘（secret 块）
-    const body = Array.isArray(src.body) && src.body.length ? remapBlocks(src.body, idMap) : null;
+    const body = Array.isArray(src.body) && src.body.length ? unmaskSecretBlocks(remapBlocks(src.body, idMap)) : null;
     if (hit) {
       if (onConflict === 'skip') { skipped += 1; continue; }
       if (onConflict === 'overwrite') {
@@ -744,6 +764,7 @@ export async function applyImport(ref, buffer, { fileName, onConflict = 'skip', 
     fieldsAdded,
     viewsApplied,
     maskedSkipped,
+    maskedBlocks,
     preview,
   };
 }
@@ -1015,7 +1036,7 @@ export function renderImport(d) {
         ? `视图: 包内 ${s.views.packaged} 个${s.views.stored ? `，目标已有 ${s.views.stored} 个（不覆盖）` : '（将应用）'}`
         : '',
       `附件: 新增 ${d.files.new}，复用 ${d.files.reused}，${(d.files.bytes / 1024).toFixed(1)}KB`,
-      `凭据: ${d.secrets.masked ? `${d.secrets.masked} 个需重填` : '随包（明文，靠口令保护）'}${d.encrypted ? ' · 已加密' : ''}`,
+      `凭据: ${d.secrets.masked ? `${d.secrets.masked} 个需重填` : '随包（明文，靠口令保护）'}${d.secrets.maskedBlocks ? ` · 密钥块打码 ${d.secrets.maskedBlocks} 个` : ''}${d.encrypted ? ' · 已加密' : ''}`,
     ];
     if (d.entries.conflicts.length) {
       lines.push('冲突（默认跳过，可用 --on-conflict copy|overwrite）:');
@@ -1032,6 +1053,7 @@ export function renderImport(d) {
     d.fieldsAdded.length ? `新增字段: ${d.fieldsAdded.join(', ')}` : '',
     d.viewsApplied ? `应用 ${d.viewsApplied} 个视图配置` : '',
     d.maskedSkipped ? `跳过 ${d.maskedSkipped} 个打码凭据（需重新填写）` : '',
+    d.maskedBlocks ? `清空 ${d.maskedBlocks} 个打码密钥块（待重填）` : '',
   ].filter(Boolean).join('\n');
 }
 

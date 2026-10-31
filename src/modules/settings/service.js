@@ -3,8 +3,9 @@
 import { loadStore, mutateStore } from '../../core/store.js';
 import { findSection } from '../../core/fields.js';
 import { badInput, notFound } from '../../core/errors.js';
+import { isGroupId, resolveNavTree } from '../../shared/navTree.js';
 
-export const SETTING_KEYS = ['defaultSection', 'navGroups', 'navHidden', 'navOrder'];
+export const SETTING_KEYS = ['defaultSection', 'navGroups', 'navHidden', 'navOrder', 'navTree'];
 
 const SCHEMA = {
   defaultSection: {
@@ -17,6 +18,7 @@ const SCHEMA = {
   navGroups: { type: 'json', hint: '头部导航分组：[{title, sections:[栏目id…]}]，数组顺序 = 显示顺序', coerce: coerceNavGroups },
   navHidden: { type: 'json', hint: '头部隐藏的栏目 id（入口不显示，`#/栏目` 直达仍可用）', coerce: coerceNavHidden },
   navOrder: { type: 'json', hint: '平铺区的显示顺序（栏目 id 数组；没列进去的按栏目自身顺序跟在后面）', coerce: coerceNavOrder },
+  navTree: { type: 'json', hint: '目录树（可任意嵌套）：[{kind:"section",id}|{kind:"group",title,children:[…]}]；不配则从上面三项推断', coerce: coerceNavTree },
 };
 
 export function settingsSchema() {
@@ -25,14 +27,21 @@ export function settingsSchema() {
 
 export async function getSettings() {
   const store = await loadStore();
+  // 栏目清单随设置一起给：面板的「栏目管理」按它渲染，CLI 也能一次看全
+  const sections = store.sections.map((s) => ({
+    id: s.id,
+    title: s.title,
+    order: s.order,
+    entries: store.entries.filter((e) => e.section === s.id).length,
+  }));
+  // 生效的目录树：显式 navTree 优先，否则从老三套**推断**（只读、不写回）。
+  // 面板与 CLI 读同一棵树 —— 否则「设置页说分了三组、侧边栏却平铺」这种分叉查不出来。
+  const nav = resolveNavTree(sections, store.settings);
   return {
     settings: store.settings,
-    // 栏目清单随设置一起给：面板的「栏目管理」按它渲染，CLI 也能一次看全
-    sections: store.sections.map((s) => ({
-      id: s.id,
-      title: s.title,
-      entries: store.entries.filter((e) => e.section === s.id).length,
-    })),
+    sections,
+    navTree: nav.tree,
+    navTreeSource: nav.source,
     schema: settingsSchema(),
   };
 }
@@ -120,6 +129,62 @@ function coerceNavOrder(value, store) {
 }
 
 /**
+ * 目录树（`settings.navTree`）的形状校验。
+ *
+ * 与 navGroups 同一条原则：**写坏了就报错，不静默丢**。这里比 navGroups 更该严格——
+ * 树是递归结构，静默丢一个节点，用户看到的是「我某一栏目消失了」，而不是「写错了」。
+ * 四条拒绝：kind 不认识 / 栏目不存在 / 同一栏目挂两处 / 空分组。
+ *
+ * 归一：栏目可以写 id 也可以写标题（统一存 id）；分组 id 缺失时按标题生成（`group:标题`）。
+ * 注意 section 节点**不写 children**（空数组落盘只是噪音）。
+ */
+function coerceNavTree(value, store) {
+  let arr = value;
+  if (typeof value === 'string') {
+    try {
+      arr = JSON.parse(value);
+    } catch (e) {
+      throw badInput(`navTree 需要 JSON 数组（${e.message}）：[{"kind":"section","id":"job"},{"kind":"group","title":"工作","children":[…]}]]`);
+    }
+  }
+  if (!Array.isArray(arr)) {
+    throw badInput('navTree 需要是数组：[{kind:"section",id}|{kind:"group",title,children:[…]}, …]');
+  }
+
+  const seen = new Set();
+  const walk = (nodes, where) => nodes.map((n, i) => {
+    const at = `${where}第 ${i + 1} 项`;
+    if (!n || typeof n !== 'object') throw badInput(`${at}不是对象`);
+    if (n.kind === 'section') {
+      const sec = findSection(store, String(n.id ?? '').trim());
+      if (!sec) throw badInput(`${at}指向的栏目不存在: ${JSON.stringify(n.id)}`);
+      if (seen.has(sec.id)) throw badInput(`栏目 ${sec.id} 在目录树里出现了两次——一个栏目只能挂一处`);
+      seen.add(sec.id);
+      const node = { kind: 'section', id: sec.id };
+      if (n.expanded === true) node.expanded = true;
+      if (n.compact === true) node.compact = true;
+      return node;
+    }
+    if (n.kind === 'group') {
+      const title = String(n.title ?? '').trim();
+      if (!title) throw badInput(`${at}缺少 title（组名）`);
+      const rawId = String(n.id ?? '').trim();
+      const id = isGroupId(rawId) ? rawId : `group:${title}`;
+      if (seen.has(id)) throw badInput(`${at}的分组 id 重复: ${id}`);
+      seen.add(id);
+      const children = walk(Array.isArray(n.children) ? n.children : [], `${where}› 「${title}」`);
+      if (!children.length) throw badInput(`分组「${title}」没有任何栏目——要么放一个进去，要么删掉这个分组`);
+      const node = { kind: 'group', id, title, children };
+      if (n.expanded === true) node.expanded = true;
+      return node;
+    }
+    throw badInput(`${at}的 kind 只能是 section / group，收到 ${JSON.stringify(n.kind)}`);
+  });
+
+  return walk(arr, '目录树');
+}
+
+/**
  * 默认栏目必须指向**真实存在**的栏目（空 = 交给面板取第一个）。
  *
  * 不校验的后果是配置静默失效：删掉某栏目之后 defaultSection 还指着它，
@@ -202,6 +267,24 @@ export function renderSettings(data) {
   if (data.sections?.length) {
     const ranked = order.filter((id) => data.sections.some((s) => s.id === id));
     if (ranked.length) lines.push(`平铺顺序（前 ${ranked.length} 个已显式排序）: ${ranked.join(' → ')}`);
+  }
+
+  // 目录树：侧边栏真正渲染的结构。source=inferred 时说明「这是从老三套推断的，不是你配的树」——
+  // 不写清这一句，用户会以为自己配过树（而实际上第一次改树才会落盘）。
+  const tree = data.navTree || [];
+  if (tree.length) {
+    lines.push('', `目录树（源：${data.navTreeSource === 'explicit' ? '显式 settings.navTree' : '从 navGroups / navHidden / navOrder 推断'}）`);
+    const walk = (nodes, depth) => {
+      for (const n of nodes || []) {
+        const pad = '  '.repeat(depth + 1);
+        if (n.kind === 'section') lines.push(`${pad}· ${n.id}`);
+        else {
+          lines.push(`${pad}▸ ${n.title}`);
+          walk(n.children, depth + 1);
+        }
+      }
+    };
+    walk(tree, 0);
   }
 
   const groups = settings.navGroups || [];

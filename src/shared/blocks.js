@@ -301,3 +301,100 @@ export function mdImageIdsInBlocks(blocks) {
   });
   return out;
 }
+
+// ── 块级 AI：可比较的文本 + 字符级差异（S4）────────────────────
+//
+// 差异计算放在这里（而不是服务端或前端各写一份）的理由与 shared/table.js 同一条：
+// 「这两块算不算改了」只能有一个判定。服务端用它算 pending，前端用它渲染红删绿增，
+// 两边算法不一致 = 用户看到的 diff 和实际应用的内容对不上。
+
+/** 参与差异比较的文本。非文本块返回空串（它们的差异由「结构是否变化」表达）。 */
+export function blockText(block) {
+  if (!block || typeof block !== 'object') return '';
+  if (keepsText(block.type)) return String(block.text ?? '');
+  return '';
+}
+
+/**
+ * 字符级差异 → `[{op:'same'|'del'|'ins', text}]`。
+ *
+ * 用 LCS（不是按行 diff）：块正文常是一两句话，按字符才看得出「改了哪个词」。
+ * 代价是 O(n·m)，所以有两道闸：超过 `maxCells` 直接退化成「整段删 + 整段增」，
+ * 保证最坏情况不把服务端拖死（一段 4000 字的长文就是 1600 万格，够卡 100ms+）。
+ */
+export function diffText(before, after, { maxCells = 1_000_000 } = {}) {
+  const a = String(before ?? '');
+  const b = String(after ?? '');
+  if (a === b) return a ? [{ op: 'same', text: a }] : [];
+  if (!a) return [{ op: 'ins', text: b }];
+  if (!b) return [{ op: 'del', text: a }];
+
+  const n = a.length;
+  const m = b.length;
+  if (n * m > maxCells) return [{ op: 'del', text: a }, { op: 'ins', text: b }];
+
+  const w = m + 1;
+  const dp = new Uint32Array((n + 1) * w);
+  for (let i = n - 1; i >= 0; i -= 1) {
+    for (let j = m - 1; j >= 0; j -= 1) {
+      dp[i * w + j] = a[i] === b[j]
+        ? dp[(i + 1) * w + j + 1] + 1
+        : Math.max(dp[(i + 1) * w + j], dp[i * w + j + 1]);
+    }
+  }
+
+  const raw = [];
+  let i = 0;
+  let j = 0;
+  while (i < n && j < m) {
+    if (a[i] === b[j]) { raw.push(['same', a[i]]); i += 1; j += 1; }
+    else if (dp[(i + 1) * w + j] >= dp[i * w + j + 1]) { raw.push(['del', a[i]]); i += 1; }
+    else { raw.push(['ins', b[j]]); j += 1; }
+  }
+  while (i < n) { raw.push(['del', a[i]]); i += 1; }
+  while (j < m) { raw.push(['ins', b[j]]); j += 1; }
+
+  const out = [];
+  for (const [op, ch] of raw) {
+    const last = out[out.length - 1];
+    if (last && last.op === op) last.text += ch;
+    else out.push({ op, text: ch });
+  }
+  return out;
+}
+
+const DIFF_OPS = new Set(['same', 'del', 'ins']);
+
+/**
+ * pending 结构体检（应用前必过）。
+ *
+ * 为什么要校验一份「自己刚写出去的文件」：pending 落在 `~/nx-sk/pending/` 里，
+ * 用户可能手改、也可能被别的进程写坏。坏文件直接应用 = 把脏块写进 store，
+ * 所以宁可明确报错（`INVALID_INPUT`）也不猜。
+ */
+export function validatePending(raw) {
+  const errors = [];
+  if (!raw || typeof raw !== 'object') return ['pending 不是对象'];
+  if (!String(raw.id || '')) errors.push('pending 缺少 id');
+  if (!String(raw.entryId || '')) errors.push('pending 缺少 entryId');
+  if (!Array.isArray(raw.blocks)) errors.push('pending 缺少 blocks（最终块正文）');
+  if (!Array.isArray(raw.diffs)) errors.push('pending 缺少 diffs');
+
+  for (const [i, d] of (Array.isArray(raw.diffs) ? raw.diffs.entries() : [])) {
+    if (!d || typeof d !== 'object') { errors.push(`diffs[${i}] 不是对象`); continue; }
+    if (!String(d.blockId || '')) errors.push(`diffs[${i}] 缺少 blockId`);
+    if (!String(d.baseHash || '')) errors.push(`diffs[${i}] 缺少 baseHash（服务端算，客户端不许自带）`);
+    if (!Array.isArray(d.segments)) { errors.push(`diffs[${i}] 缺少 segments`); continue; }
+    for (const [k, s] of d.segments.entries()) {
+      if (!s || !DIFF_OPS.has(s.op)) errors.push(`diffs[${i}].segments[${k}] 的 op 非法`);
+      else if (typeof s.text !== 'string') errors.push(`diffs[${i}].segments[${k}] 的 text 不是字符串`);
+    }
+  }
+  for (const [i, b] of (Array.isArray(raw.newBlocks) ? raw.newBlocks.entries() : [])) {
+    if (!b || !b.id || !BLOCK_TYPES.includes(b.type)) errors.push(`newBlocks[${i}] 不是合法块`);
+  }
+  for (const [i, id] of (Array.isArray(raw.removedIds) ? raw.removedIds.entries() : [])) {
+    if (!String(id || '')) errors.push(`removedIds[${i}] 不是块 id`);
+  }
+  return errors;
+}

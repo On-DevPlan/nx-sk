@@ -1209,6 +1209,46 @@ body.col-resizing, body.col-resizing * { cursor: col-resize !important; user-sel
 .blk-id { font-size: 10px; opacity: .7; }
 .blk-head .more > summary { height: 20px; min-height: 20px; padding: 0 8px; line-height: 18px; }
 .blk-body { padding: 4px 14px 10px; }
+
+/* ============ 块级 AI 提议条（S4） ============ */
+/* 全站不变量是「唯一彩色 = 语义红」，diff 是**唯一有意例外**：
+   删/增的语义靠颜色一秒可辨，单色表达不了。所以只用三档极浅底 + 深色字，
+   不做高饱和块面（那会破坏单色密度）。 */
+.aibar { border-bottom: var(--border); background: var(--paper); }
+.aibar-head {
+  display: flex; align-items: center; gap: 8px;
+  min-height: var(--row-h); padding: 4px 14px;
+  background: var(--soft);
+  font-size: 12px;
+}
+.aibar-body { padding: 8px 14px 10px; display: flex; flex-direction: column; gap: 8px; }
+.ai-card { border: var(--border); border-radius: 6px; padding: 8px 10px; }
+.ai-card-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.ai-prompt { font-weight: 600; }
+.ai-diff { padding: 4px 0; border-top: 1px dashed var(--soft-2); }
+.ai-diff:first-of-type { border-top: 0; }
+.ai-diff-head { display: flex; align-items: center; gap: 6px; font-size: 11px; margin-bottom: 2px; }
+.ai-diff-body { line-height: 1.7; word-break: break-word; }
+.ai-same { color: var(--ink); }
+.ai-del { background: #fdecea; color: #b3261e; text-decoration: line-through; }
+.ai-ins { background: #e8f5ec; color: #1f6b3a; }
+.ai-new {
+  display: flex; gap: 8px; align-items: baseline;
+  margin-top: 4px; padding: 4px 8px; border-radius: 4px;
+  background: #f2faf4; color: #1f6b3a;
+}
+.ai-new-tag { flex-shrink: 0; font-size: 10px; opacity: .8; }
+.ai-removed {
+  display: flex; gap: 8px; align-items: baseline;
+  margin-top: 4px; padding: 4px 8px;
+  color: var(--mid); text-decoration: line-through;
+}
+.ai-warn {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin-top: 6px; padding: 6px 8px; border-radius: 4px;
+  background: #fdf3e7; color: #7a4a12;
+}
+.ai-card-foot { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
 .blk-body:empty { padding-bottom: 0; }
 
 /* 文本块：双击编辑。空块给一句占位——不然它在屏幕上「不存在」 */
@@ -1230,6 +1270,14 @@ body.col-resizing, body.col-resizing * { cursor: col-resize !important; user-sel
 .blk-md { cursor: text; }
 .blk-md .md-preview, .blk-md > * { font-size: var(--fs-core); }
 .blk-heading { display: flex; align-items: flex-start; gap: 6px; }
+/* 块拖拽把手：只在块头出现；平时半隐，hover 显出来 */
+.blk-drag {
+  flex: 0 0 16px; width: 16px; text-align: center;
+  color: var(--mid); cursor: grab; user-select: none;
+  opacity: .45;
+}
+.blk-head:hover .blk-drag { opacity: 1; }
+.blk-drag:active { cursor: grabbing; }
 .blk-level {
   flex: 0 0 auto; height: 22px; font: inherit; font-size: 10px;
   padding: 0 2px; border: var(--border); border-radius: 4px;
@@ -1295,4 +1343,201 @@ body.col-resizing, body.col-resizing * { cursor: col-resize !important; user-sel
 
 /* 表格视图下不按拖拽宽度分栏：表格要空间，详情保底 520px（S3 换成 FlexLayout 后取消） */
 .cols.table-mode .col-splitter { display: none; }
+
+/* ============ 看板视图（S3） ============ */
+/* 列宽固定 240px、列多就横滚 —— 不压缩卡片，「标题 + 两列摘要」才读得出来 */
+.board {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 10px; overflow: auto; max-height: calc(100vh - 230px);
+}
+.board-col { flex: 0 0 240px; display: flex; flex-direction: column; min-width: 0; }
+.board-colhead {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 0 4px 6px; height: 24px; font-size: 11px; font-weight: 600;
+}
+.board-drop {
+  display: flex; flex-direction: column; gap: 6px; min-height: 72px; padding: 6px;
+  border: 1px dashed transparent; border-radius: 6px;
+}
+/* 落点提示只给「真能落」的列：未分组列不接受落点，所以它不该亮 */
+.board-drop.over { border-color: var(--ink); background: var(--soft); }
+.board-drop.readonly { background: var(--soft); }
+.board-empty { padding: 4px 2px; font-size: 11px; }
+.board-card {
+  padding: 6px 8px; border: var(--border); border-radius: 4px; background: var(--paper);
+  font-size: var(--fs-core); cursor: grab; user-select: none;
+}
+.board-card:hover { background: var(--soft); }
+.board-card:active { cursor: grabbing; }
+.board-card.on { box-shadow: inset 2px 0 0 var(--ink); }
+.board-card-title { font-weight: 600; }
+.board-card-meta { margin-top: 2px; font-size: 11px; color: var(--mid); }
+
+/* ============ 工作区壳（S3）：FlexLayout + 目录树 ============ */
+
+/* 只借 FlexLayout 的**结构**（盒模型 / 拖拽几何），配色全部走它自己的变量：
+   变量写在 :root → 浮窗（float）、子布局、弹出窗用的是同一批值，不会「主区变了、浮窗还是老样子」 */
+:root {
+  --flexlayout-color-text: var(--ink);
+  --flexlayout-color-background: var(--paper);
+  --flexlayout-color-base: var(--paper);
+  --flexlayout-color-1: var(--soft);
+  --flexlayout-color-2: var(--soft-2);
+  --flexlayout-color-3: #e3e6e9;
+  --flexlayout-color-4: #dcdfe3;
+  --flexlayout-color-5: #d5d9dd;
+  --flexlayout-color-6: #ced2d7;
+
+  --flexlayout-font-family: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+  --flexlayout-font-size: 12px;
+  --flexlayout-font-weight: 400;
+
+  --flexlayout-color-tab-content: var(--paper);
+  --flexlayout-color-tab-selected: var(--ink);
+  --flexlayout-color-tab-selected-background: var(--paper);
+  --flexlayout-color-tab-unselected: var(--mid);
+  --flexlayout-color-tab-unselected-background: transparent;
+  --flexlayout-color-tab-textbox: var(--ink);
+  --flexlayout-color-tab-textbox-background: var(--paper);
+
+  --flexlayout-color-tabset-background: var(--paper);
+  --flexlayout-color-tabset-background-selected: var(--paper);
+  --flexlayout-color-tabset-background-maximized: var(--paper);
+  --flexlayout-color-tabset-divider-line: var(--soft-2);
+
+  --flexlayout-color-border: var(--soft-2);
+  --flexlayout-color-border-background: var(--paper);
+  --flexlayout-color-border-divider-line: var(--soft-2);
+  --flexlayout-color-border-tab-content: var(--paper);
+  --flexlayout-color-border-tab-selected: var(--ink);
+  --flexlayout-color-border-tab-selected-background: var(--paper);
+  --flexlayout-color-border-tab-unselected: var(--mid);
+  --flexlayout-color-border-tab-unselected-background: var(--soft);
+
+  --flexlayout-color-splitter: var(--soft-2);
+  --flexlayout-color-splitter-hover: var(--mid);
+  --flexlayout-color-splitter-drag: var(--mid);
+  --flexlayout-color-splitter-handle: var(--soft-2);
+  --flexlayout-splitter-size: 5px;
+  --flexlayout-splitter-active-size: 5px;
+  --flexlayout-splitter-handle-visibility: hidden;
+
+  --flexlayout-color-drag1: var(--mid);
+  --flexlayout-color-drag2: var(--mid);
+  --flexlayout-color-drag1-background: rgba(139, 144, 150, .14);
+  --flexlayout-color-drag2-background: rgba(139, 144, 150, .08);
+  --flexlayout-color-drag-rect: var(--ink);
+  --flexlayout-color-drag-rect-background: rgba(255, 255, 255, .92);
+  --flexlayout-color-drag-rect-border: var(--mid);
+
+  --flexlayout-color-edge-icon: var(--mid);
+  --flexlayout-color-edge-marker: var(--mid);
+
+  --flexlayout-color-popup-border: var(--soft-2);
+  --flexlayout-color-popup-unselected: var(--ink);
+  --flexlayout-color-popup-unselected-background: var(--paper);
+  --flexlayout-color-popup-selected: var(--ink);
+  --flexlayout-color-popup-selected-background: var(--soft);
+
+  --flexlayout-color-icon: var(--mid);
+  --flexlayout-color-focus: var(--mid);
+  --flexlayout-color-overflow: var(--mid);
+  --flexlayout-color-mini-scroll-indicator: var(--soft-2);
+  --flexlayout-color-mini-scroll-indicator-hovered: var(--mid);
+  --flexlayout-size-mini-scroll-indicator: 3px;
+}
+
+/* 页签高度对齐全站的行高（28px）：库默认偏矮，和工具条并排时像两个密度体系 */
+.flexlayout__tab_button {
+  height: var(--row-h);
+  padding: 0 10px;
+  font-size: var(--fs-core);
+  border-radius: 0;
+}
+.flexlayout__tab_button--selected { box-shadow: inset 0 -2px 0 var(--ink); }
+.flexlayout__tabset_header { border-bottom: var(--border); }
+.flexlayout__splitter { background: var(--soft-2); }
+
+/* 工作区：Layout 需要父容器有确定高度 */
+.workarea { flex: 1; min-height: 0; position: relative; }
+.workarea .flexlayout__layout { inset: 0; position: absolute; }
+
+.statusbar {
+  display: flex; align-items: center; gap: 10px;
+  height: 26px; padding: 0 10px;
+  border-top: var(--border);
+  color: var(--mid); font-size: 11px;
+}
+.statusbar .btn { height: 20px; padding: 0 8px; font-size: 11px; }
+
+/* 面板抽屉：顶栏右侧下拉，不是模态（选完就消失） */
+.drawer {
+  position: absolute; right: 12px; top: 44px; z-index: 40;
+  min-width: 200px; padding: 4px;
+  background: var(--paper); border: var(--border); border-radius: 8px;
+  box-shadow: 0 6px 24px rgba(20, 22, 26, .12);
+}
+.drawer .hd { padding: 4px 8px; color: var(--mid); font-size: 11px; }
+.drawer .it {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 5px 8px; border: 0; border-radius: 6px;
+  background: transparent; color: var(--ink); font: inherit; text-align: left; cursor: pointer;
+}
+.drawer .it:hover { background: var(--soft); }
+.drawer .sep { height: 1px; margin: 4px 2px; background: var(--soft-2); }
+.drawer-docks { padding: 0 6px 4px; }
+
+/* ── 目录树 ─────────────────────────────────────────── */
+.navtree { display: flex; flex-direction: column; height: 100%; min-height: 0; overflow: auto; }
+.navtree-head {
+  position: sticky; top: 0; z-index: 1;
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 8px; border-bottom: var(--border); background: var(--paper);
+}
+.navtree-note { padding: 6px 10px 2px; }
+.navtree-body { flex: 1; min-height: 0; padding: 4px 0 8px; }
+.navtree-body.over { background: var(--soft); }
+.nlist { margin: 0; padding: 0; list-style: none; }
+
+.nrow {
+  display: flex; align-items: center; gap: 2px;
+  height: var(--row-h); padding-right: 6px;
+  cursor: default;
+}
+.nrow:hover { background: var(--soft); }
+.nrow.on { background: var(--soft-2); }
+/* 落点用一条底线表示「插到这里」，不用整行高亮——整行高亮分不清「插在其前还是其后」 */
+.nrow.over { box-shadow: inset 0 -2px 0 var(--ink); }
+.nrow.dragging { opacity: .45; }
+.nrow[data-depth="1"] { padding-left: 12px; }
+.nrow[data-depth="2"] { padding-left: 26px; }
+.nrow[data-depth="3"] { padding-left: 40px; }
+
+.ntwist {
+  flex: 0 0 18px; width: 18px; height: 22px;
+  border: 0; background: transparent; color: var(--mid);
+  font-size: 10px; line-height: 1; cursor: pointer;
+}
+.ntwist[aria-hidden] { display: inline-block; cursor: default; }
+.nlabel {
+  flex: 1; min-width: 0; height: 22px; padding: 0 4px;
+  display: flex; align-items: center; gap: 4px;
+  border: 0; border-radius: 4px; background: transparent;
+  color: var(--ink); font: inherit; text-align: left; cursor: pointer;
+}
+.nlabel:hover { background: var(--soft-2); }
+.group-label { font-weight: 600; cursor: default; }
+.ncount { flex: 0 0 auto; font-size: 11px; font-variant-numeric: tabular-nums; }
+.nact {
+  flex: 0 0 18px; width: 18px; height: 18px;
+  border: 0; border-radius: 4px; background: transparent;
+  color: var(--mid); cursor: pointer; opacity: 0;
+}
+.nrow:hover .nact { opacity: 1; }
+.nrow .hint.nrow { cursor: default; }
+.navtree-hidden { padding: 6px 8px 10px; border-top: var(--border); }
+.hidden-row { padding-left: 2px; }
+
+.welcome { max-width: 620px; }
+.welcome code { background: var(--soft); padding: 1px 4px; border-radius: 3px; }
 

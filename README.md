@@ -177,6 +177,10 @@ CLI 与 API 同源，skill 驱动 agent**。落到具体功能上：
 | `nx-sk entry block move <ref> <块id> --to <index>` | 移动块（拖拽落点 = 一次 move） |
 | `nx-sk entry block remove \\| remove-many <ref> <块id…>` | 删块；批量时找不到的跳过并报告 |
 | `nx-sk entry body <ref> [--mask]` | 读块正文（人读渲染；`--mask` 只作用于密钥块） |
+| `nx-sk entry ai suggest <ref> --prompt "改短一点" --from @proposal.json [--block <块id>]` | 生成一条**AI 提议**：只落 pending，不写 store。`--from` 是 AI 给出的最终正文（nx-sk 不自带大模型） |
+| `nx-sk entry ai list <ref>` | 看待审提议（新的在前）。pending 是运行态，不进 store、不进导出包 |
+| `nx-sk entry ai apply <pendingId> [--block <块id>] [--force]` | 应用提议（**唯一会写 store 的一步**）；块被改过 → `CONFLICT`，`--force` 才覆盖 |
+| `nx-sk entry ai reject <pendingId>` | 拒绝提议：删掉 pending 文件，数据一个字不动 |
 | `nx-sk section view list <id>` | 列视图配置；**没配过时给缺省推断**（表格/精简/看板，标 provisional，不落盘） |
 | `nx-sk section view add <id> --type table\\|board\\|kv [--title 名] [--columns 姓名,状态] [--groupby 字段] [--sort 字段:desc]` | 新增视图（第一次 add 把当前生效的推断视图一起固化，chips 不会凭空消失） |
 | `nx-sk section view update <id> <viewId> [--title] [--columns] [--sort] [--set col.字段.width=120]` | 改视图；列宽拖拽结束 = 一次 update |

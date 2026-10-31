@@ -419,6 +419,68 @@ const blkDel = await cliJson(['entry', 'block', 'remove-many', '冒烟测试', `
 step('remove-many 部分命中报 partial 并列出跳过项',
   blkDel.status === 'partial' && blkDel.removed.includes(blkT.blockId) && blkDel.skipped.includes('b_nope'));
 
+// ── 块级 AI（pending，S4）──────────────────────────────────
+// 提议由调用方产出（--from）；suggest 只落 pending，apply 才写 store，reject 只删文件。
+const aiBody0 = (await cliJson(['entry', 'block', 'list', '冒烟测试'])).blocks;
+const aiFile1 = join(home, 'ai-1.json');
+await writeFile(aiFile1, JSON.stringify({ blocks: [...aiBody0, { type: 'paragraph', text: 'AI 加的一段' }] }));
+const aiSug = await cliJson(['entry', 'ai', 'suggest', '冒烟测试', '--prompt', '加一段', '--from', `@${aiFile1}`]);
+step('entry ai suggest 只落 pending（status=pending，id 带 p_）',
+  aiSug.status === 'pending' && /^p_/.test(aiSug.pendingId), aiSug.pendingId);
+const aiList1 = await cliJson(['entry', 'ai', 'list', '冒烟测试']);
+step('entry ai list 看得到这条提议，且不带最终正文（面板形状不含 blocks）',
+  aiList1.count === 1 && !Object.prototype.hasOwnProperty.call(aiList1.pendings[0], 'blocks'));
+step('suggest 没写 store（正文块数不变）',
+  (await cliJson(['entry', 'block', 'list', '冒烟测试'])).count === aiBody0.length);
+
+const aiApply1 = await cliJson(['entry', 'ai', 'apply', aiSug.pendingId]);
+step('entry ai apply 写入 store 并删掉 pending',
+  aiApply1.status === 'ok' && (await cliJson(['entry', 'ai', 'list', '冒烟测试'])).count === 0);
+const aiBody1 = (await cliJson(['entry', 'block', 'list', '冒烟测试'])).blocks;
+step('应用后正文 = 提议内容（多出 AI 那一段）',
+  aiBody1.length === aiBody0.length + 1 && aiBody1.some((b) => b.text === 'AI 加的一段'));
+const aiStore = await readFile(join(home, 'store.json'), 'utf8');
+step('pending 的字段名不进 store.json（结构层隔离）',
+  ['baseHash', 'segments', 'removedIds'].every((k) => !aiStore.includes(k)));
+
+// 冲突：提议之后块被改过 → CONFLICT，不覆盖用户的改动
+const aiPara = aiBody1.find((b) => b.type === 'paragraph');
+const aiFile2 = join(home, 'ai-2.json');
+await writeFile(aiFile2, JSON.stringify({
+  blocks: aiBody1.map((b) => (b.id === aiPara.id ? { ...b, text: 'AI 想改成这句' } : b)),
+}));
+const aiSug2 = await cliJson(['entry', 'ai', 'suggest', '冒烟测试', '--prompt', '改一段', '--from', `@${aiFile2}`]);
+await cliJson(['entry', 'block', 'update', '冒烟测试', aiPara.id, '--data', '{"text":"用户手写"}']);
+const aiConflict = await cliJson(['entry', 'ai', 'apply', aiSug2.pendingId]);
+step('块被改过 → apply 返回 conflict 且不覆盖',
+  aiConflict.status === 'conflict' && aiConflict.conflictIds.includes(aiPara.id));
+step('conflict 后 pending 仍在（等人决定）',
+  (await cliJson(['entry', 'ai', 'list', '冒烟测试'])).count === 1);
+const aiForced = await cliJson(['entry', 'ai', 'apply', aiSug2.pendingId, '--force']);
+step('--force 才覆盖',
+  aiForced.status === 'ok'
+  && (await cliJson(['entry', 'block', 'list', '冒烟测试'])).blocks.find((b) => b.id === aiPara.id).text === 'AI 想改成这句');
+
+// 拒绝与「没改动」：都不该留下一条悬着的待审
+const aiFile3 = join(home, 'ai-3.json');
+await writeFile(aiFile3, JSON.stringify({ blocks: (await cliJson(['entry', 'block', 'list', '冒烟测试'])).blocks }));
+const aiNoop = await cliJson(['entry', 'ai', 'suggest', '冒烟测试', '--prompt', '不变', '--from', `@${aiFile3}`]);
+step('提议与现状一致 → noop，不留待审', aiNoop.status === 'noop'
+  && (await cliJson(['entry', 'ai', 'list', '冒烟测试'])).count === 0);
+
+const aiFile4 = join(home, 'ai-4.json');
+const aiBody2 = (await cliJson(['entry', 'block', 'list', '冒烟测试'])).blocks;
+await writeFile(aiFile4, JSON.stringify({
+  blocks: aiBody2.map((b) => (b.id === aiPara.id ? { ...b, text: '这条会被拒绝' } : b)),
+}));
+const aiSug4 = await cliJson(['entry', 'ai', 'suggest', '冒烟测试', '--prompt', '拒绝我', '--from', `@${aiFile4}`]);
+const aiRej = await cliJson(['entry', 'ai', 'reject', aiSug4.pendingId]);
+step('entry ai reject 删掉 pending 且数据不动',
+  aiRej.status === 'ok'
+  && (await cliJson(['entry', 'ai', 'list', '冒烟测试'])).count === 0
+  && (await cliJson(['entry', 'block', 'list', '冒烟测试'])).blocks.find((b) => b.id === aiPara.id).text === 'AI 想改成这句');
+
+
 // 可读导出（JSON / Markdown）已删除：备份与它都是「往本机目录留副本」，
 // 与 transfer 的 ZIP 导出重复。这里钉住**命令确实没了**，别哪天又被加回来。
 const goneExport = await cliError(['export', 'run']);

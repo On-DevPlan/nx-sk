@@ -5,7 +5,7 @@
 // 浏览器里看起来「一切正常」，所以只能靠断言钉住。
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { LEGACY_VIEW, normalizeViewId, resolveActiveView } from '../../src/web/frontend/activeView.js';
+import { LEGACY_VIEW, buildHash, normalizeViewId, parseHash, resolveActiveView, resolveDeepLink } from '../../src/web/frontend/activeView.js';
 
 const S = (id) => ({ id, kind: 'section' });
 const V = (id) => ({ id, kind: 'view' });
@@ -43,4 +43,34 @@ test('旧别名仍可解析（#/backup → 设置：备份模块已删，落到�
   assert.equal(normalizeViewId('backup'), 'settings');
   assert.equal(normalizeViewId(''), '');
   assert.equal(resolveActiveView('backup', [V('settings')], '').id, 'settings');
+});
+
+// —— 深链两段（S3）：地址栏 = 当前打开的面板 ——
+
+test('parseHash：两段深链 / 空 hash / 带查询串 / 坏转义都不炸', () => {
+  assert.deepEqual(parseHash('#/job'), { sectionId: 'job', entryId: '' });
+  assert.deepEqual(parseHash('#/job/e_abc'), { sectionId: 'job', entryId: 'e_abc' });
+  assert.deepEqual(parseHash('#/job?x=1'), { sectionId: 'job', entryId: '' }, '旧书签带的查询串要忽略');
+  assert.deepEqual(parseHash(''), { sectionId: '', entryId: '' });
+  assert.deepEqual(parseHash('#/'), { sectionId: '', entryId: '' });
+  assert.deepEqual(parseHash('#/%E6%B1%82%E8%81%8C'), { sectionId: '求职', entryId: '' }, '中文栏目 id 走 URL 编码');
+  assert.deepEqual(parseHash('#/%zz'), { sectionId: '%zz', entryId: '' }, '坏转义原样返回，不抛');
+  assert.deepEqual(parseHash('#/backup'), { sectionId: 'settings', entryId: '' }, '旧别名在这一层就归一');
+});
+
+test('buildHash 与 parseHash 互逆；没有栏目时给空串（不硬凑深链）', () => {
+  assert.equal(buildHash('job'), '#/job');
+  assert.equal(buildHash('job', 'e_1'), '#/job/e_1');
+  assert.equal(buildHash('', 'e_1'), '', '没有栏目就没有可写的深链');
+  assert.deepEqual(parseHash(buildHash('求职', 'e_1')), { sectionId: '求职', entryId: 'e_1' });
+});
+
+test('resolveDeepLink：栏目 / 条目不存在要能说清是哪一级缺失', () => {
+  const secs = [{ id: 'job', entries: [{ id: 'e_1' }] }];
+  assert.deepEqual(resolveDeepLink('#/job', secs), { sectionId: 'job', entryId: '', missing: null });
+  assert.deepEqual(resolveDeepLink('#/job/e_1', secs), { sectionId: 'job', entryId: 'e_1', missing: null });
+  assert.equal(resolveDeepLink('#/ghost', secs).missing, 'section');
+  assert.equal(resolveDeepLink('#/job/e_9', secs).missing, 'entry');
+  // 条目清单还没拉到（entries 缺席）时不误报「条目不存在」——加载中不等于没有
+  assert.equal(resolveDeepLink('#/job/e_9', [{ id: 'job' }]).missing, null);
 });

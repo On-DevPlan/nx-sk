@@ -105,7 +105,64 @@ nx-sk entry get 张三 --json
 - 身份证号、手机号、紧急联系人电话这类字段，写之前跟用户确认一次来源。
 - 每次批量写之前先 `--dry-run`。
 
-## 五、扩字段字典（不写代码）
+## 五、块正文与 AI 提议（entry.body / entry ai）
+
+条目除了结构化字段还有**块正文**（`entry.body`，可选键）：段落 / 标题 / 图文 / 表格 / 清单 /
+附件 / 密钥七种叶块，加内嵌栏目（`section`）与分栏（`column`)两种容器块。
+
+```bash
+# 建块 / 看块
+nx-sk entry block add <ref> --type paragraph --data '{"text":"第一段"}'
+nx-sk entry block list <ref>          # secret 块默认原文，--mask 打码
+nx-sk entry block update <ref> <块id> --data @块.json
+nx-sk entry block move <ref> <块id> --to 0
+
+# AI 提议：**AI 永不直接改数据**
+#   ① 你（agent / 外部模型）产出提议正文 = 该条目的最终块数组
+#   ② suggest 只落一条 pending（~/nx-sk/pending/，运行态，不进 store / 导出包）
+#   ③ 人或你在面板/CLI 上 apply（才写 store）或 reject（只删文件）
+nx-sk entry ai suggest <ref> --prompt "把自我介绍改短" --from @proposal.json
+nx-sk entry ai list <ref>
+nx-sk entry ai apply <pendingId>      # 块被改过 → CONFLICT，--force 才覆盖
+nx-sk entry ai reject <pendingId>
+```
+
+**纪律**：
+
+- proposal.json 是 `{"blocks":[…]}` 或直接块数组；给**最终正文**，不是补丁。
+- 建议先 `nx-sk entry block list <ref> --json` 拿现正文再改，块 id 保持不变
+  （同 id 不同内容 = 一次「修改」，出现新 id = 「新增」，缺了的 id = 「删除」）。
+- 密钥块在提议里是明文——pending 落在本机运行态目录（0600），这是有意设计；
+  但**不要**把 pending 文件内容贴进对话或日志。
+- 应用前想留底就先 `transfer export`（apply 写 store，与手改同一条边界）。
+
+## 六、数据库视图（section.views / section view）
+
+视图是**同一批条目的多种投影**：表格（列 = 字段投影）、精简（两列）、看板（按 select 字段分列）、
+KV 栏目的键值面。配置存在 `section.views` / `section.defaultView`（可选键）。
+
+```bash
+nx-sk section view list <id>            # 没配过时给缺省推断（provisional: true，不落盘）
+nx-sk section view add <id> --type board --title 按状态 --groupby status
+nx-sk section view update <id> <viewId> --set col.状态.width=180 --sort 状态:desc
+nx-sk section view set-default <id> <viewId>
+nx-sk section view remove <id> <viewId>
+```
+
+**语义**：
+
+- **缺省视图是推断的、不落盘**：非 KV 栏目给「表格 / 精简 / 看板」，KV 栏目给「KV」。
+  第一次改视图才固化（把当时生效的那套推断视图一起写进去——只写用户新建的那条，
+  其余 chips 会凭空消失）。`views: []` 与「没配过」行为一致，都走推断。
+- 投影只存 `key / width / hidden`；标签与类型回查字段字典。引用的字段被删 → 列还在，
+  表头写「已删字段」、单元格「—」（不炸、也不静默消失）。
+- **看板的拖卡 = 写操作**：等于 `entry update --set <groupby字段>=<列值>`；
+  空值与候选外的值落「未分组」列——展示可以，**不是拖拽落点**（拖进去等于写一个不存在的值）。
+- **没有筛选 DSL**（`--filter` 明确不做）：存一个不生效的配置比没有更糟。
+- 视图随导出包往返；导入只在「新建栏目」或「目标没配过视图」时应用——
+  目标已有视图说明用户自己配过，不静默覆盖（预览里给警告）。
+
+## 七、扩字段字典（不写代码）
 
 **最省事的做法：直接写。** 字典里没有的键会自动登记（键名就是它本身），类型按值推断
 （`是/否` → bool，数组 → tags，其余 → text）。
@@ -266,15 +323,24 @@ nx-sk entry get 张三
 > ② 两者都**不要**出现在「还缺什么」的清单里；③ 用户说「这个不用填」时，
 > 用 `--fill <字段>=avoid` 记下来，而不是靠下一轮上下文记住。
 
-## 六、Web 面板
+## 八、Web 面板
 
-`nx-sk serve` → 每个栏目一个 tab，共用同一个条目视图：
+`nx-sk serve` 打开的是**可停靠的工作区**（Notion 式壳），不是一栏一页：
 
-- 左侧条目列表（带完整度），右侧按分组渲染的字段表单；
-- **「栏目」页的「编辑」弹窗能改整个结构**：分组可新增 / 改名（含换 id）/ 上下挪 / 删（空的才让删），
-  字段可改标签、类型、分组、提示、必填策略、组内上下挪、删除 —— 一次改动一次落盘；
-- 密文字段默认显示原文；「打码显示（投屏/截图时用）」勾选等价于 `--mask`（选择持久化在 localStorage）；
+- **目录树**（左侧面板）：栏目 + 分组 + 条目子节点。拖拽重排与嵌套——第一次拖动会把
+  「从旧导航配置推断出的树」固化成显式 `settings.navTree`（`settings get` 里
+  `navTreeSource: explicit`，之前始终 `inferred` 只读不写回）；隐藏的栏目收在树底，一键恢复。
+- **布局 = FlexLayout 模型**：数据库 / 资料 / 文件 / 导出 / 设置都是面板，可拖到任意一边拆分、
+  弹出成浮窗；布局存 localStorage（`nx-sk-ui.workspace`），跨会话恢复，顶栏可撤销/重做。
+- **两段深链**：`#/栏目` 开该栏目的数据库面板，`#/栏目/条目` 再定位到条目；
+  栏目 / 条目缺失时明确提示是哪一级没了。
+- 栏目页（数据库面板）顶部是**视图 chips**（表格 / 精简 / 看板 / KV，见 §六）；
+  左侧条目列表带完整度，右侧按分组渲染的字段表单。
+- 密文字段默认显示原文；顶栏「打码」等价于 `--mask`（选择持久化在 localStorage）；
+- **栏目结构自己能搭**：栏目面板里点某个栏目的「编辑」，弹窗里分组可新增 / 改名（含换 id）/
+  上下挪 / 删（空的才让删），字段可改标签 / 类型 / 分组 / 提示 / 必填策略、组内上下挪、删除
+  —— 一次改动一次落盘，与 CLI 的 `--add-group` 等是同一批 action（见 §七「栏目结构」）。
 - 保存是 **PATCH**：只有被你改动过的字段才会发出去（面板会显示「N 处改动」）；
-- 每个页面底部会派生显示该模块的 CLI 等价命令（可点击复制）。
+- 详细页下半部分是**块面板**（见 §五），AI 提议是评审条：渲染 diff + 应用 / 拒绝。
 
 面板上没有 CLI 做不到的事——两边共享同一套 action 声明。

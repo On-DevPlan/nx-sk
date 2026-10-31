@@ -1,97 +1,135 @@
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { SECTION_VIEW, VIEWS } from './registry.js';
-import { Copyable, DialogHost, ErrorBoundary, Toasts } from './components/ui.jsx';
-import { useStore } from './store.jsx';
-import { normalizeViewId, resolveActiveView } from './activeView.js';
-import { groupSectionCount } from './components/navModel.js';
+/* 应用壳 —— 顶栏 + FlexLayout 工作区 + 状态条（S3 §十五 15.1）
+ *
+ * 这一层只做四件事：
+ *   1. 把 FlexLayout 的 Layout 摆进骨架（顶栏 / 工作区 / 状态条）
+ *   2. 顶栏只放**全局动作**——栏目不进顶栏，栏目只从目录树进（两处入口必然分叉）
+ *   3. 布局 = 模型（model.toJson()）→ 落 localStorage；改布局 = 改模型
+ *   4. 深链：`#/栏目` 开该栏目的数据库面板，`#/栏目/条目` 再定位到条目
+ *
+ * 撤销/重试用 flexlayout-react 自带的 useUndo：整段拖拽折叠成一步。
+ */
 
-function viewFromHash() {
-  const m = /^#\/?([^?/]*)/.exec(window.location.hash || '');
-  const id = m ? decodeURIComponent(m[1]) : '';
-  return normalizeViewId(id);
-}
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Layout, defaultKeyMap, getNodeContextMenuItems, showPopupMenu, useUndo,
+} from 'flexlayout-react';
+import { Copyable, DialogHost, Toasts } from './components/ui.jsx';
+import { useStore } from './store.jsx';
+import { PANELS, PANEL_ORDER, factory } from './panels.jsx';
+import { resolveDeepLink } from './activeView.js';
+import { WORKSPACE_KEY, clearStoredModel, layoutStats, loadModel, openPanel, saveModel } from './workspace.js';
+
+/** FlexLayout 自带的右键菜单是英文。只翻译**用得到的**几条；没翻的原样透出（不吞）。 */
+const I18N = {
+  close: '关闭',
+  rename: '重命名',
+  maximize: '最大化',
+  restore: '还原',
+  float: '浮窗',
+  dock: '停靠',
+  popout: '弹出到新窗口',
+  'Close': '关闭',
+  'Rename': '重命名',
+  'Maximize': '最大化',
+  'Restore': '还原',
+  'Float': '浮窗',
+  'Dock': '停靠',
+  'Popout': '弹出到新窗口',
+};
+const translate = (msg) => I18N[msg] || msg;
+
+const DOCKS = [
+  ['center', '中间'],
+  ['left', '左'],
+  ['right', '右'],
+  ['top', '上'],
+  ['bottom', '下'],
+];
 
 export default function App() {
   const { boot, bootError, ui, patchUi, reload } = useStore();
-  const view = normalizeViewId(ui.view);
-  // 展开着哪个分组入口（按下标记）：**同一时刻只开一个**。
-  // 交给 App 托管而不是各组件各开各的——否则快速划过两个分组会叠出两个菜单。
-  const [openGroup, setOpenGroup] = useState(null);
+  const { model, setModel, undo, redo, canUndo, canRedo, undoCount, redoCount } = useUndo(() => loadModel());
+  const [drawer, setDrawer] = useState(null); // { dock }
+  const [note, setNote] = useState('');
+  const [stats, setStats] = useState({ tabsets: 0, tabs: 0 });
+  const layoutRef = useRef(null);
 
-  // 栏目 tab 是**数据驱动**的（bootstrap.sections）；分组与隐藏来自 settings（设置页可配）；
-  // 静态 tab 来自前端注册表。渲染顺序：未分组栏目（按 order）→ 分组（按配置顺序）→ 工具（按 order）。
-  const nav = useMemo(() => {    const all = (boot?.sections || []).map((s) => ({
-      id: s.id, title: s.title, order: s.order, kind: 'section', count: s.entries,
-    }));
-    // 隐藏**只隐藏入口**：`#/栏目id` 直达仍然渲染，所以 all 里保留全部栏目
-    const hidden = new Set(boot?.settings?.navHidden || []);
-    const visible = all.filter((s) => !hidden.has(s.id));
-
-    // 分组是**显示配置**：成员栏目被删掉时优雅降级（过滤掉、配置保留），成员全没了就不显示这个组；
-    // 被隐藏的成员在入口里同样不出现
-    const groups = (boot?.settings?.navGroups || [])
-      .map((g) => ({
-        title: g.title,
-        sections: (g.sections || [])
-          .map((sid) => visible.find((s) => s.id === sid))
-          .filter(Boolean),
-      }))
-      .filter((g) => g.sections.length);
-    const grouped = new Set(groups.flatMap((g) => g.sections.map((s) => s.id)));
-    // 平铺顺序：settings.navOrder 里显式排过的优先（按它的次序），其余按栏目自己的 order 跟在后面
-    const rank = new Map((boot?.settings?.navOrder || []).map((id, i) => [id, i]));
-    const rankOf = (s) => (rank.has(s.id) ? rank.get(s.id) : Number.MAX_SAFE_INTEGER);
-    const flat = visible.filter((s) => !grouped.has(s.id))
-      .sort((a, b) => rankOf(a) - rankOf(b) || (a.order ?? 50) - (b.order ?? 50));
-    const stat = VIEWS.filter((v) => v.tab !== false)
-      .map((v) => ({ id: v.id, title: v.title, order: v.order, kind: 'view', component: v.component }))
-      .filter((v) => !all.some((s) => s.id === v.id))
-      .sort((a, b) => (a.order ?? 50) - (b.order ?? 50));
-    const hiddenItems = all.filter((s) => hidden.has(s.id));
-    return { flat, groups, tools: stat, all: [...flat, ...groups.flatMap((g) => g.sections), ...stat, ...hiddenItems] };
-  }, [boot]);
-
-  // 没 boot 之前**不要**拿第一个 tab 兜底：那时动态栏目还没到，nav 里只有静态视图，
-  // 兜底会选中第一个静态视图并由下面的 effect 写进 ui —— 于是「默认视图」被顶掉、
-  // 头部高亮也错位，连 `#/job` 这类深链都会被首屏覆盖。
-  // 规则本体在 ./activeView.js（纯函数，单测覆盖）：深链 > 本次选择 > 默认栏目 > 第一个 tab。
-  const booted = !!boot;
-  const current = resolveActiveView(ui.view, nav.all, boot?.settings?.defaultSection, { booted });
-  // 高亮/分组展开都按**解析后**的 tab 算：view 可能是空串（没选过）或已失效的 id
-  const currentId = current ? current.id : '';
-
-  // hash → ui：挂载时把深链里的选择写回 ui，之后交给 hashchange
+  // —— 布局落盘：模型变了就存 ——
   useEffect(() => {
-    const fromHash = viewFromHash();
-    if (fromHash && fromHash !== view) patchUi({ view: fromHash });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (!model) return undefined;
+    const listener = { onAfterAction: () => saveModel(model) };
+    model.addChangeListener(listener);
+    saveModel(model);
+    setStats(layoutStats(model));
+    return () => model.removeChangeListener(listener);
+  }, [model]);
+
+  const linkSections = useMemo(
+    () => (boot?.sections || []).map((s) => ({ id: s.id, title: s.title })),
+    [boot],
+  );
+
+  /**
+   * 深链 → 开面板。
+   * 没有深链时**不兜底**：用存下来的工作区布局（老壳的「默认栏目」由布局接手）。
+   * 已删栏目 / 已删条目要说清是哪一级缺失，不静默什么都不做。
+   */
+  const applyDeepLink = useCallback((hash) => {
+    if (!model) return;
+    const t = resolveDeepLink(hash, linkSections);
+    if (!t.sectionId) return;
+    if (t.missing === 'section') {
+      setNote(`深链指向的栏目「${t.sectionId}」不存在`);
+      return;
+    }
+    const sec = linkSections.find((s) => s.id === t.sectionId);
+    openPanel(model, { component: 'database', name: sec ? sec.title : t.sectionId, config: { section: t.sectionId } });
+    patchUi({ view: t.sectionId });
+    if (t.entryId) {
+      patchUi({ entry: t.entryId });
+      setNote(t.missing === 'entry'
+        ? `深链里的条目已不存在，只开了栏目面板（${t.sectionId}）`
+        : `已按深链打开：${sec ? sec.title : t.sectionId} / ${t.entryId}`);
+    } else {
+      setNote('');
+    }
+  }, [model, linkSections, patchUi]);
+
+  // 首次加载 + hashchange
+  useEffect(() => {
+    applyDeepLink(window.location.hash);
+    const onHash = () => applyDeepLink(window.location.hash);
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, [applyDeepLink]);
+
+  // 右键菜单：FlexLayout 不自带；条目用官方 getNodeContextMenuItems（标签走 translate）
+  const onContextMenu = useCallback((node, event) => {
+    if (event && event.preventDefault) event.preventDefault();
+    const items = getNodeContextMenuItems(node);
+    showPopupMenu({
+      anchor: { x: (event && event.clientX) || 0, y: (event && event.clientY) || 0 },
+      container: layoutRef.current && layoutRef.current.getRootDiv ? layoutRef.current.getRootDiv() : undefined,
+      items,
+      onClose: () => {},
+    });
   }, []);
 
-  useEffect(() => {
-    const on = () => { const v = viewFromHash(); if (v) patchUi({ view: v }); };
-    window.addEventListener('hashchange', on);
-    return () => window.removeEventListener('hashchange', on);
-  }, [patchUi]);
-
-  // 注意：这里**刻意不**给「兜底选出来的 tab」补一个 hash：
-  // 一旦补上（无论是 location.hash 还是 replaceState），下次打开地址栏里就带着它，
-  // 于是深链优先 → 设置里的「默认栏目」又变成一个永远不生效的配置。
-  // 规则因此是：地址栏里只有**用户真的点过**的栏目；没有就按默认栏目落地。
-  const go = (id) => {
-    patchUi({ view: id });
-    window.location.hash = `#/${id}`;
+  const resetLayout = () => {
+    clearStoredModel();
+    setModel(loadModel()); // 存盘已清空 → loadModel 自然给回初始的两栏布局
   };
 
-  // 分组入口的开关（稳定引用：子组件的监听/定时器不会因为父组件重渲染而反复重挂）
-  const openGroupAt = useCallback((gi) => setOpenGroup(gi), []);
-  // 只关**自己**：A 组的「离开延迟关闭」可能晚于 B 组的展开，不加这个判断会把刚开的 B 关掉
-  const closeGroupAt = useCallback((gi) => setOpenGroup((cur) => (cur === gi ? null : cur)), []);
+  const openFromDrawer = (component, location) => {
+    if (model) {
+      openPanel(model, { component, name: PANELS[component].title, config: {}, location });
+    }
+    setDrawer(null);
+  };
 
   return (
     <div className="app">
-      {/* 身份栏：左边只说「我是谁」，右边才是「存储在哪 / 能做什么」。
-          原先 4 段信息（品牌 / 副标题 / 版本 / 存储路径）平铺成一行、字号相近，
-          读起来分不出主次；现在按 品牌 ▸ 定位 ▸ 版本 三级收拢，元信息整体右移。 */}
+      {/* 顶栏：只有全局动作，**没有栏目 tab** */}
       <header className="top">
         <span className="brand">
           <img src="/logo-rounded.png" alt="" />
@@ -99,59 +137,75 @@ export default function App() {
         </span>
         <span className="tagline">本机个人资源管理器</span>
         {boot ? <span className="ver mono">v{boot.app.version}</span> : null}
-        <span className="right rowgap">
-          {boot ? (
-            <span className="store" title={`存储目录：${boot.storePathRaw}`}>
-              <span className="store-label">存储</span>
-              <Copyable className="mono nowrap" text={boot.storePathRaw}>{boot.storePath}</Copyable>
-            </span>
-          ) : null}
-          <button className="btn small ghost" onClick={() => reload()}>刷新数据</button>
-        </span>
+        <span className="grow" />
+        {boot ? (
+          <span className="store" title={`存储目录：${boot.storePathRaw}`}>
+            <span className="store-label">存储</span>
+            <Copyable className="mono nowrap" text={boot.storePathRaw}>{boot.storePath}</Copyable>
+          </span>
+        ) : null}
+        <label className="inline hint" title="密文字段打码显示（投屏 / 截图时用）">
+          <input type="checkbox" checked={!!ui.mask} onChange={() => patchUi({ mask: !ui.mask })} />
+          打码
+        </label>
+        <button className="btn small ghost" onClick={() => setDrawer({ dock: 'center' })} title="打开一个面板">＋ 面板</button>
+        <button className="btn small ghost" onClick={undo} disabled={!canUndo} title="撤销布局改动">撤销{undoCount ? ` (${undoCount})` : ''}</button>
+        <button className="btn small ghost" onClick={redo} disabled={!canRedo} title="重做布局改动">重做{redoCount ? ` (${redoCount})` : ''}</button>
+        <button
+          className="btn small ghost"
+          onClick={() => { if (model) openPanel(model, { component: 'settings', name: '设置', config: {} }); }}
+        >设置</button>
+        <button className="btn small ghost" onClick={() => reload()}>刷新数据</button>
       </header>
 
-      {/* 导航栏：内容（栏目）与工具（附件/导出/设置/…）之间加一道细线分组。
-          同域栏目可以在**设置页**收拢成一个分组入口（settings.navGroups）——
-          悬浮或点击展开上下列表，栏目一多也不会连成一排分不出主次。 */}
-      <nav className="tabs">
-        {nav.flat.map((t) => (
-          <button key={t.id} className={`tab ${t.id === current?.id ? 'active' : ''}`} onClick={() => go(t.id)}>
-            {t.title}
-            {typeof t.count === 'number' ? <span className="count">{t.count}</span> : null}
-          </button>
-        ))}
-        {nav.groups.map((g, gi) => (
-          <GroupTab key={gi} gi={gi} group={g} currentId={currentId}
-            open={openGroup === gi} onOpen={openGroupAt} onClose={closeGroupAt} onGo={go} />
-        ))}
-        {nav.tools.length ? <span className="tabs-sep" aria-hidden /> : null}
-        {nav.tools.map((t) => (
-          <button key={t.id} className={`tab ${t.id === current?.id ? 'active' : ''}`} onClick={() => go(t.id)}>
-            {t.title}
-          </button>
-        ))}
-        {!nav.all.length ? <span className="muted">正在装载…</span> : null}
-      </nav>
-
-      <main className="body">
+      {/* 工作区 */}
+      <div className="workarea">
         {bootError ? (
           <div className="pad stack">
             <div className="bad"><strong>读不到后端上下文</strong></div>
             <pre className="block">{bootError}</pre>
             <div className="hint">确认 nx-sk serve 正在运行；或点右上角「刷新数据」重试。</div>
           </div>
+        ) : !boot ? (
+          <div className="pad muted">正在装载…</div>
+        ) : model ? (
+          <Layout
+            ref={layoutRef}
+            model={model}
+            factory={factory}
+            onContextMenu={onContextMenu}
+            onAction={(action) => action}
+            onModelChange={() => setStats(layoutStats(model))}
+            i18nTranslator={translate}
+            // 默认只有「关闭页签 / 重命名」有键位；焦点在面板组之间移动的三条默认是关的——
+            // 不开它们，键盘用户进得来出不去
+            keyMap={{
+              ...defaultKeyMap,
+              focusTabToggle: 'F6',
+              focusNextTabset: 'Ctrl+F6',
+              focusPreviousTabset: 'Ctrl+Shift+F6',
+            }}
+          />
         ) : null}
-        {!bootError && !booted ? <div className="pad muted">正在装载…</div> : null}
-        {!bootError && booted && current ? (
-          <ErrorBoundary key={current.id}>
-            <Suspense fallback={<div className="pad muted">加载中…</div>}>
-              {current.kind === 'section'
-                ? <SectionPane sectionId={current.id} />
-                : <current.component />}
-            </Suspense>
-          </ErrorBoundary>
-        ) : null}
-      </main>
+      </div>
+
+      <div className="statusbar">
+        <span>工作区：{stats.tabsets} 个面板组 · {stats.tabs} 个面板</span>
+        <span className="grow" />
+        <span className="mono">布局 → localStorage('{WORKSPACE_KEY}')</span>
+        <span className="mono">深链 {window.location.hash || '#/'}</span>
+        {note ? <span className="muted">{note}</span> : null}
+        <button type="button" className="btn small ghost" onClick={resetLayout} title="丢掉存下来的布局，回到初始的两栏">重置布局</button>
+      </div>
+
+      {drawer ? (
+        <PanelDrawer
+          dock={drawer.dock}
+          onDock={(dock) => setDrawer({ dock })}
+          onPick={(component) => openFromDrawer(component, drawer.dock)}
+          onClose={() => setDrawer(null)}
+        />
+      ) : null}
 
       <Toasts />
       <DialogHost />
@@ -159,116 +213,28 @@ export default function App() {
   );
 }
 
-/** 栏目 tab 的动态挂载点：共用 entries 模块的视图，把 sectionId 传进去。 */
-function SectionPane({ sectionId }) {
-  const View = SECTION_VIEW;
-  return <View sectionId={sectionId} />;
-}
-
-// 悬浮展开的两个时间常数：
-//   OPEN  —— 悬停**意图**：停住才展开。少了这道延迟，鼠标横穿导航栏去点右边的 tab 时，
-//            路过的分组会被顺带弹开又收起，一眼看过去就是「乱闪」。
-//   CLOSE —— 从 pill 划到菜单行要时间（中间还隔着 4px 空隙），太快就是「刚展开就消失」。
-const OPEN_INTENT_MS = 130;
-const CLOSE_DELAY_MS = 180;
-
-/**
- * 只有**真能悬浮**的设备才走 hover 这条路。
- * 触屏 tap 会先合成 mouseenter 再发 click：悬停逻辑先把它打开，click 的「切换」
- * 随即又关上——菜单在手机上等于永远出不来。所以按 `(hover: hover)` 分流。
- */
-const canHover = () => (typeof window === 'undefined' ? false : window.matchMedia('(hover: hover)').matches);
-
-/**
- * 头部的一个**分组入口**：一个 pill 收拢多个栏目（同域栏目不再挤成一排）。
- * 悬浮展开（带意图延迟）、点击切换（触屏没有 hover，只走这条路）；点行切换栏目。
- *
- * 展开态**由 App 托管**（`open` 受控、同一时刻只开一个）：各开各的会在快速划过时
- * 叠出两个菜单。外点关闭用 `pointerdown`——`click` 与触发按钮自己的 onClick
- * 同阶段冒泡，会「点一下关了又弹开」；不用纯 CSS hover 而用受控状态，
- * 是为了能用键盘 Esc 关、也为了「只开一个」这条约束。
- */
-function GroupTab({ group, gi, currentId, open, onOpen, onClose, onGo }) {
-  const ref = useRef(null);
-  const intentTimer = useRef(null); // 悬停意图：还没到点就离开 → 撤销
-  const closeTimer = useRef(null); // 离开后的宽限期：划进菜单就撤销
-  const active = group.sections.some((s) => s.id === currentId);
-  // 角标是**栏目数**，不是条目数之和 —— 组是容器，不是「一条栏目」；展开后每行有自己的条目数
-  const sectionCount = groupSectionCount(group);
-
-  const drop = (t) => { if (t.current) { clearTimeout(t.current); t.current = null; } };
-  const openNow = () => { drop(intentTimer); drop(closeTimer); onOpen(gi); };
-  const closeNow = () => { drop(intentTimer); drop(closeTimer); onClose(gi); };
-
-  const onEnter = () => {
-    if (!canHover()) return;
-    drop(closeTimer); // 从菜单划回 pill：本来要关，撤销
-    if (open) return;
-    drop(intentTimer);
-    intentTimer.current = setTimeout(() => { intentTimer.current = null; onOpen(gi); }, OPEN_INTENT_MS);
-  };
-  const onLeave = () => {
-    if (!canHover()) return;
-    drop(intentTimer); // 只是路过，别开
-    drop(closeTimer);
-    closeTimer.current = setTimeout(() => { closeTimer.current = null; onClose(gi); }, CLOSE_DELAY_MS);
-  };
-
-  useEffect(() => () => {
-    if (intentTimer.current) clearTimeout(intentTimer.current);
-    if (closeTimer.current) clearTimeout(closeTimer.current);
-  }, []);
-
-  // 已经开着（点开 / 别的组让位 / 换了栏目）→ 清掉还没生效的意图
-  useEffect(() => {
-    if (open && intentTimer.current) { clearTimeout(intentTimer.current); intentTimer.current = null; }
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return undefined;
-    const onDown = (e) => { if (ref.current && !ref.current.contains(e.target)) onClose(gi); };
-    const onKey = (e) => { if (e.key === 'Escape') onClose(gi); };
-    document.addEventListener('pointerdown', onDown);
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('pointerdown', onDown);
-      document.removeEventListener('keydown', onKey);
-    };
-  }, [open, gi, onClose]);
-
+/** 面板抽屉：选类型 + 选停靠位（DockLocation.getByName 认的那五个值） */
+function PanelDrawer({ dock, onPick, onDock, onClose }) {
   return (
-    <span
-      className="tab-group"
-      ref={ref}
-      onMouseEnter={onEnter}
-      onMouseLeave={onLeave}
-    >
-      <button
-        className={`tab ${active ? 'active' : ''}`}
-        aria-expanded={open}
-        aria-haspopup="menu"
-        onClick={() => (open ? closeNow() : openNow())}
-        title={`${group.title}：${sectionCount} 个栏目`}
-      >
-        {group.title}
-        <span className="count">{sectionCount}</span>
-        <span className="caret" aria-hidden />
-      </button>
-      {open ? (
-        <div className="tab-menu" role="menu">
-          {group.sections.map((s) => (
-            <button
-              key={s.id}
-              role="menuitem"
-              className={`tab-menu-row ${s.id === currentId ? 'current' : ''}`}
-              onClick={() => { closeNow(); onGo(s.id); }}
-            >
-              <span className="grow nowrap">{s.title}</span>
-              {typeof s.count === 'number' ? <span className="count">{s.count}</span> : null}
-            </button>
-          ))}
-        </div>
-      ) : null}
-    </span>
+    <div className="drawer panel-drawer">
+      <div className="hd">停靠位置</div>
+      <div className="rowgap drawer-docks">
+        {DOCKS.map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            className={`vchip${dock === id ? ' on' : ''}`}
+            onClick={() => onDock(id)}
+          >{label}</button>
+        ))}
+      </div>
+      <div className="sep" />
+      <div className="hd">面板</div>
+      {PANEL_ORDER.map((id) => (
+        <button key={id} type="button" className="it" onClick={() => onPick(id)}>{PANELS[id].title}</button>
+      ))}
+      <div className="sep" />
+      <button type="button" className="it" onClick={onClose}>关闭</button>
+    </div>
   );
 }

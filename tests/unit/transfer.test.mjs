@@ -9,7 +9,7 @@ import { useTempHome } from '../helpers.mjs';
 await useTempHome();
 
 const { readZip, createZip } = await import('../../src/core/zip.js');
-const { needsPassphrase } = await import('../../src/modules/transfer/service.js');
+const { needsPassphrase, FORMAT_VERSION } = await import('../../src/modules/transfer/service.js');
 const sections = await import('../../src/modules/sections/service.js');
 const entries = await import('../../src/modules/entries/service.js');
 const files = await import('../../src/modules/files/service.js');
@@ -110,6 +110,29 @@ test('旧版打码包仍被正确跳过：不会把 ****** 当新密码', async 
   assert.ok(r.maskedSkipped >= 1, '打码字段应被跳过并计数');
   const got = await entries.getEntry('部署教程', { section: 'maskdst' });
   assert.equal(got.values.token, null, '打码占位不能被当成新密码存进去');
+});
+
+test('旧版打码包里的密钥块：值清空待重填（星号不能被加密存盘）', async () => {
+  // 与上一条同一类缺陷的块版本：预览要统计到块，导入要清空而不是把星号加密
+  const zip = await transfer.buildSectionZip(SRC);
+  const man = manifestOf(zip.buffer);
+  man.withSecrets = false;
+  man.entries[0].body = [{ id: 'b_mask1', type: 'secret', label: 'K', value: 'sk-m******xyzw' }];
+  const old = createZip([
+    { name: 'manifest.json', data: JSON.stringify(man) },
+    { name: 'README.txt', data: 'legacy' },
+  ]);
+
+  const prev = await transfer.previewImport('maskblk', old, { fileName: 'x.zip' });
+  assert.equal(prev.secrets.maskedBlocks, 1, '预览的掩码统计要扩到块');
+  assert.ok(prev.warnings.some((w) => w.includes('密钥块')), prev.warnings.join('; '));
+
+  const r = await transfer.applyImport('maskblk', old, { onConflict: 'skip' });
+  assert.equal(r.maskedBlocks, 1);
+  const got = await entries.getEntry('部署教程', { section: 'maskblk' });
+  const blk = (got.body || []).find((b) => b.type === 'secret');
+  assert.ok(blk, '块保留（静默丢块比留个空块更糟）');
+  assert.equal(blk.value, null, '值清空待重填');
 });
 
 test('预览不落盘：previewImport 前后条目数不变', async () => {
@@ -374,4 +397,45 @@ test('预览冲突明细：区分同 id / 同标题，并给出另存后的新�
   const p3 = await transfer.previewImport('conf-fresh', zip.buffer, {});
   assert.equal(p3.entries.conflicts.length, 0);
   assert.equal(p3.entries.fresh, p3.entries.total);
+});
+
+test('包版本分支：旧包（manifest 没有 formatVersion）视为 v1，照常导入', async () => {
+  // S5 验收矩阵「旧包 → 新库」：0.20 及更早的包没有这个键，缺省就是 1；
+  // v1 包里没有 body / views，导入侧不需要任何特殊处理（缺席即缺省）。
+  const zip = await transfer.buildSectionZip(SRC, { withSecrets: true });
+  const man = manifestOf(zip.buffer);
+  delete man.formatVersion;
+  const old = createZip([
+    { name: 'manifest.json', data: JSON.stringify(man) },
+    { name: 'README.txt', data: 'legacy' },
+  ]);
+
+  const prev = await transfer.previewImport('v1dst', old, { fileName: 'x.zip' });
+  assert.ok(prev.entries.total >= 1, '预览不该被缺版本号的包挡住');
+  const r = await transfer.applyImport('v1dst', old, { onConflict: 'skip' });
+  assert.equal(r.entries.added, prev.entries.total);
+  const got = await entries.getEntry('部署教程', { section: 'v1dst' });
+  assert.equal(got.values.name, '部署教程');
+  assert.equal(got.body, undefined, 'v1 包没有块正文，导入后就是没有（不凭空补空数组）');
+});
+
+test('包版本分支：比当前更新的包明确拒绝（版本过新），一个字段都不落库', async () => {
+  // S5 验收矩阵「新包 → 旧库」的镜像方向。不拦的话，旧白名单归一会把
+  // body / views 静默丢掉——宁可让用户先升级。
+  const zip = await transfer.buildSectionZip(SRC, { withSecrets: true });
+  const man = manifestOf(zip.buffer);
+  man.formatVersion = FORMAT_VERSION + 1;
+  const newer = createZip([{ name: 'manifest.json', data: JSON.stringify(man) }]);
+
+  await assert.rejects(
+    () => transfer.previewImport('v99dst', newer, { fileName: 'x.zip' }),
+    (e) => e.code === 'INVALID_INPUT' && /版本过新/.test(e.message),
+  );
+  await assert.rejects(
+    () => transfer.applyImport('v99dst', newer, { onConflict: 'skip' }),
+    (e) => e.code === 'INVALID_INPUT' && /版本过新/.test(e.message),
+    'apply 与 preview 必须同一条版本守卫',
+  );
+  const secs = await sections.listSections();
+  assert.equal(secs.sections.some((s) => s.id === 'v99dst'), false, '被拒的导入不能留下半个栏目');
 });
