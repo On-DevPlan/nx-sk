@@ -72,24 +72,33 @@ export default function SectionView({ sectionId }) {
   }, [sectionId]);
   useEffect(() => { loadViews(); }, [loadViews]);
 
-  // —— 左右栏拖宽：条目列表 ↔ 内容 ——
-  // 宽度持久化在 ui.listW（patchUi 对新键照存）。拖动过程只改**本地** state，
+  // —— 左右栏拖宽：清单视图 = 条目列表宽度；表格视图 = 详情列宽度 ——
+  // 宽度持久化在 ui.listW / ui.detailW（patchUi 对新键照存）。拖动过程只改**本地** state，
   // 松手才落盘——否则每次 mousemove 都会经 context 重渲染整个表单树。
   const colsRef = useRef(null);
   const listWRef = useRef(Number(ui.listW) || 300);
   const [listW, setListW] = useState(listWRef.current);
-  const [draggingCol, setDraggingCol] = useState(false);
-  const startColDrag = (e) => { e.preventDefault(); setDraggingCol(true); };
+  const detailWRef = useRef(Number(ui.detailW) || 440);
+  const [detailW, setDetailW] = useState(detailWRef.current);
+  const [draggingCol, setDraggingCol] = useState(''); // '' | 'list' | 'detail'
+  const startColDrag = (which) => (e) => { e.preventDefault(); setDraggingCol(which); };
   useEffect(() => {
     if (!draggingCol) return undefined;
     const move = (ev) => {
       const rect = colsRef.current?.getBoundingClientRect();
       if (!rect) return;
-      const w = Math.round(Math.min(560, Math.max(240, ev.clientX - rect.left)));
-      listWRef.current = w;
-      setListW(w);
+      if (draggingCol === 'list') {
+        const w = Math.round(Math.min(560, Math.max(240, ev.clientX - rect.left)));
+        listWRef.current = w;
+        setListW(w);
+      } else {
+        // 表格视图的详情列在右边：宽度 = 面板右缘 − 光标
+        const w = Math.round(Math.min(680, Math.max(340, rect.right - ev.clientX)));
+        detailWRef.current = w;
+        setDetailW(w);
+      }
     };
-    const up = () => setDraggingCol(false);
+    const up = () => setDraggingCol('');
     window.addEventListener('mousemove', move);
     window.addEventListener('mouseup', up);
     document.body.classList.add('col-resizing');
@@ -97,15 +106,26 @@ export default function SectionView({ sectionId }) {
       window.removeEventListener('mousemove', move);
       window.removeEventListener('mouseup', up);
       document.body.classList.remove('col-resizing');
-      if (listWRef.current !== (Number(ui.listW) || 300)) patchUi({ listW: listWRef.current });
+      if (draggingCol === 'list' && listWRef.current !== (Number(ui.listW) || 300)) patchUi({ listW: listWRef.current });
+      if (draggingCol === 'detail' && detailWRef.current !== (Number(ui.detailW) || 440)) patchUi({ detailW: detailWRef.current });
     };
-    // ui.listW 只在拖动开始/结束之间有意义；patchUi 稳定，不会造成重复订阅
+    // ui.listW / ui.detailW 只在拖动开始/结束之间有意义；patchUi 稳定，不会造成重复订阅
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draggingCol]);
   const resetColDrag = () => {
     listWRef.current = 300;
     setListW(300);
     patchUi({ listW: 300 });
+  };
+  const resetDetailW = () => {
+    detailWRef.current = 440;
+    setDetailW(440);
+    patchUi({ detailW: 440 });
+  };
+  // 收起详情列 = 清掉选择：下次进来表格还是全宽。选中是显式动作，不偷偷恢复。
+  const collapseDetail = () => {
+    setDraft(null);
+    patchUi({ entry: '' });
   };
 
   const load = useCallback(async (keepId) => {
@@ -115,7 +135,9 @@ export default function SectionView({ sectionId }) {
       const d = await api(`/api/sections/${encodeURIComponent(sectionId)}/dump${mask ? '?mask=1' : ''}`);
       setData(d);
       const wanted = keepId || ui.entry;
-      const hit = d.entries.find((e) => e.id === wanted) || d.entries[0] || null;
+      // 不自动选中第一条：详情是「点开才看」的面——表格视图默认全宽给表格，
+      // 清单视图本来就是先选左边。深链 / 明确点过的 ui.entry 才会带出详情。
+      const hit = d.entries.find((e) => e.id === wanted) || null;
       setDraft(hit ? { id: hit.id, title: hit.title, values: { ...hit.values } } : null);
       if (hit && hit.id !== ui.entry) patchUi({ entry: hit.id });
     } catch (e) {
@@ -570,14 +592,22 @@ export default function SectionView({ sectionId }) {
           </div>
         </div>
 
-        <div
-          className={`col-splitter${draggingCol ? ' active' : ''}`}
-          title="拖动调整左右宽度（双击恢复默认）"
-          onMouseDown={startColDrag}
-          onDoubleClick={resetColDrag}
-        />
+        {/* 表格视图：没选中条目就不渲染详情列——表格占满全宽（默认态不再是半屏占位） */}
+        {(!tableMode || draft) ? (
+          <>
+            <div
+              className={`col-splitter${draggingCol ? ' active' : ''}`}
+              title="拖动调整左右宽度（双击恢复默认）"
+              onMouseDown={startColDrag(tableMode ? 'detail' : 'list')}
+              onDoubleClick={tableMode ? resetDetailW : resetColDrag}
+            />
 
-        <div className="col" style={tableMode ? { flex: '0 1 520px' } : boardMode ? { flex: '0 1 460px' } : undefined}>
+            <div
+              className="col"
+              style={tableMode
+                ? { flex: `0 1 ${detailW}px`, minWidth: 340 }
+                : boardMode ? { flex: '0 1 460px' } : undefined}
+            >
           {!draft ? (
             <div className="card"><Empty>左边选一条，或新建一条</Empty></div>
           ) : (
@@ -597,6 +627,9 @@ export default function SectionView({ sectionId }) {
                 </span>
                 <span className="muted mono">{draft.id}</span>
                 {current ? <Tag kind={current.missing.length ? '' : 'strong'}>完整度 {current.completeness.ratio}%</Tag> : null}
+                {tableMode ? (
+                  <button type="button" className="btn small ghost" onClick={collapseDetail} title="收起详情列，表格占满全宽">收起</button>
+                ) : null}
                 {dirty.count ? (
                   <>
                     <span className="hint nowrap">{dirty.count} 处改动未保存</span>
@@ -648,7 +681,9 @@ export default function SectionView({ sectionId }) {
               </div>
             </div>
           )}
-        </div>
+            </div>
+          </>
+        ) : null}
       </div>
 
       <CliHints module="entries" />

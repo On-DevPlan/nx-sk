@@ -1341,8 +1341,8 @@ body.col-resizing, body.col-resizing * { cursor: col-resize !important; user-sel
 .dbtable .missing { color: var(--mid); font-style: italic; }
 .dbtable th .hint { font-weight: 400; }
 
-/* 表格视图下不按拖拽宽度分栏：表格要空间，详情保底 520px（S3 换成 FlexLayout 后取消） */
-.cols.table-mode .col-splitter { display: none; }
+/* 看板视图不放开列宽拖拽：板列固定 240、详情列固定 460，拖了也不改变什么 */
+.cols.board-mode .col-splitter { display: none; }
 
 /* ============ 看板视图（S3） ============ */
 /* 列宽固定 240px、列多就横滚 —— 不压缩卡片，「标题 + 两列摘要」才读得出来 */
