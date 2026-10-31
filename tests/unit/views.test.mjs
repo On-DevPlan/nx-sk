@@ -8,8 +8,8 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import {
-  effectiveDefaultViewId, effectiveViews, inferViews, normalizeViewConfig, normalizeViews,
-  resolveViewColumns,
+  UNGROUPED, bucketByGroup, effectiveDefaultViewId, effectiveViews, inferViews,
+  normalizeViewConfig, normalizeViews, resolveViewColumns,
 } from '../../src/shared/views.js';
 import { useTempHome } from '../helpers.mjs';
 
@@ -130,4 +130,30 @@ test('store 白名单收 views / defaultView；悬空的 defaultView 读上来�
   await mutateStore((st) => { st.sections.find((x) => x.id === 'job').title = '求职2'; }, p);
   const after = JSON.parse(await fsp.readFile(p, 'utf8'));
   assert.equal(after.sections[0].views[0].id, 'table-default', '写一次不能把 views 丢掉');
+});
+
+// —— 看板分桶（S3）：拖卡的落点语义全靠这一层，错了就是「拖一下改了别人的字段」——
+
+test('看板分桶：列序 = 候选值顺序；空值和脏值都进「未分组」，不静默丢', () => {
+  const entries = [
+    { id: 'a', values: { jobStatus: '已结束' } },
+    { id: 'b', values: { jobStatus: '进行中' } },
+    { id: 'c', values: {} },
+    { id: 'd', values: { jobStatus: '' } },
+    { id: 'e', values: { jobStatus: '已放弃' } }, // 历史脏值：候选里没有
+    { id: 'f', values: { jobStatus: null } },
+  ];
+  const { buckets, ungrouped } = bucketByGroup(entries, 'jobStatus', ['进行中', '已结束']);
+  assert.deepEqual([...buckets.keys()], ['进行中', '已结束'], '列序听字段定义，不听数据出现顺序');
+  assert.deepEqual(buckets.get('进行中').map((e) => e.id), ['b']);
+  assert.deepEqual(buckets.get('已结束').map((e) => e.id), ['a']);
+  assert.deepEqual(ungrouped.map((e) => e.id), ['c', 'd', 'e', 'f'], '空值 + 候选外的值都留下');
+});
+
+test('看板分桶：没有候选值时不炸，全部落「未分组」；入参垃圾也不炸', () => {
+  const { buckets, ungrouped } = bucketByGroup([{ id: 'a', values: { x: '1' } }], 'x', null);
+  assert.equal(buckets.size, 0);
+  assert.equal(ungrouped.length, 1, '没候选值 → 没有可落的列，但数据不消失');
+  assert.deepEqual(bucketByGroup(undefined, 'x', undefined), { buckets: new Map(), ungrouped: [] });
+  assert.equal(UNGROUPED, '__ungrouped__', '占位列 id 是跨端约定，不能随手改');
 });

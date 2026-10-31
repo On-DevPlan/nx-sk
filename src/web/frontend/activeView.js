@@ -40,3 +40,59 @@ export function resolveActiveView(uiView, tabs, defaultSection, { booted = true 
   }
   return list[0] || null;
 }
+
+/**
+ * 深链解析（S3：地址栏 = 当前打开的面板）。
+ *
+ *   `#/job`            → 栏目面板
+ *   `#/job/e_abc`      → 栏目面板 + 该条目的详情面板
+ *   `#/` / `#/job?x=1` → 前者空、后者忽略查询串（旧书签里带过参数）
+ *
+ * 返回的是**意图**，不是结果：栏目 / 条目是否还存在由调用方（壳）判断并提示，
+ * 这里只把「地址里写了什么」变成结构。解析失败一律给空串，不抛。
+ */
+export function parseHash(hash) {
+  const raw = String(hash || '').replace(/^#\/?/, '').split('?')[0];
+  if (!raw) return { sectionId: '', entryId: '' };
+  const [a, b] = raw.split('/');
+  return {
+    sectionId: normalizeViewId(safeDecode(a)),
+    entryId: safeDecode(b),
+  };
+}
+
+function safeDecode(s) {
+  if (!s) return '';
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s; // 坏转义（%zz）不该让整个首屏挂掉
+  }
+}
+
+/** 反向：写地址栏。没有栏目时给空串（= 回到 #/，不硬凑一个不存在的栏目）。 */
+export function buildHash(sectionId, entryId) {
+  const a = String(sectionId || '').trim();
+  if (!a) return '';
+  const b = String(entryId || '').trim();
+  return `#/${encodeURIComponent(a)}${b ? `/${encodeURIComponent(b)}` : ''}`;
+}
+
+/**
+ * 深链 → 可执行的意图（含「指向的东西还在不在」）。
+ * @param {string} hash
+ * @param {Array<{id:string, entries?:Array<{id:string}>}>} sections 现存栏目（带条目时才能判条目）
+ * @returns {{sectionId:string, entryId:string, missing:null|'section'|'entry'}}
+ */
+export function resolveDeepLink(hash, sections) {
+  const { sectionId, entryId } = parseHash(hash);
+  if (!sectionId) return { sectionId: '', entryId: '', missing: null };
+  const sec = (sections || []).find((s) => s.id === sectionId);
+  if (!sec) return { sectionId, entryId, missing: 'section' };
+  if (!entryId) return { sectionId, entryId: '', missing: null };
+  // 栏目给了条目清单才判条目；没给（列表还没拉到）就当作有效——不误报「条目不存在」
+  if (Array.isArray(sec.entries) && !sec.entries.some((e) => e.id === entryId)) {
+    return { sectionId, entryId, missing: 'entry' };
+  }
+  return { sectionId, entryId, missing: null };
+}

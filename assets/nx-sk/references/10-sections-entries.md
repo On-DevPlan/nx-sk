@@ -105,7 +105,38 @@ nx-sk entry get 张三 --json
 - 身份证号、手机号、紧急联系人电话这类字段，写之前跟用户确认一次来源。
 - 每次批量写之前先 `--dry-run`。
 
-## 五、扩字段字典（不写代码）
+## 五、块正文与 AI 提议（entry.body / entry ai）
+
+条目除了结构化字段还有**块正文**（`entry.body`，可选键）：段落 / 标题 / 图文 / 表格 / 清单 /
+附件 / 密钥七种叶块，加内嵌栏目（`section`）与分栏（`column`)两种容器块。
+
+```bash
+# 建块 / 看块
+nx-sk entry block add <ref> --type paragraph --data '{"text":"第一段"}'
+nx-sk entry block list <ref>          # secret 块默认原文，--mask 打码
+nx-sk entry block update <ref> <块id> --data @块.json
+nx-sk entry block move <ref> <块id> --to 0
+
+# AI 提议：**AI 永不直接改数据**
+#   ① 你（agent / 外部模型）产出提议正文 = 该条目的最终块数组
+#   ② suggest 只落一条 pending（~/nx-sk/pending/，运行态，不进 store / 导出包）
+#   ③ 人或你在面板/CLI 上 apply（才写 store）或 reject（只删文件）
+nx-sk entry ai suggest <ref> --prompt "把自我介绍改短" --from @proposal.json
+nx-sk entry ai list <ref>
+nx-sk entry ai apply <pendingId>      # 块被改过 → CONFLICT，--force 才覆盖
+nx-sk entry ai reject <pendingId>
+```
+
+**纪律**：
+
+- proposal.json 是 `{"blocks":[…]}` 或直接块数组；给**最终正文**，不是补丁。
+- 建议先 `nx-sk entry block list <ref> --json` 拿现正文再改，块 id 保持不变
+  （同 id 不同内容 = 一次「修改」，出现新 id = 「新增」，缺了的 id = 「删除」）。
+- 密钥块在提议里是明文——pending 落在本机运行态目录（0600），这是有意设计；
+  但**不要**把 pending 文件内容贴进对话或日志。
+- 应用前想留底就先 `transfer export`（apply 写 store，与手改同一条边界）。
+
+## 六、扩字段字典（不写代码）
 
 **最省事的做法：直接写。** 字典里没有的键会自动登记（键名就是它本身），类型按值推断
 （`是/否` → bool，数组 → tags，其余 → text）。
@@ -235,7 +266,7 @@ nx-sk entry get 张三
 > ② 两者都**不要**出现在「还缺什么」的清单里；③ 用户说「这个不用填」时，
 > 用 `--fill <字段>=avoid` 记下来，而不是靠下一轮上下文记住。
 
-## 六、Web 面板
+## 七、Web 面板
 
 `nx-sk serve` → 每个栏目一个 tab，共用同一个条目视图：
 

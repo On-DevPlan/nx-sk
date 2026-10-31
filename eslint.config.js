@@ -35,7 +35,14 @@ const SIBLING_MODULES = [
 ];
 
 export default [
-  { ignores: ['src/web/public/**', 'node_modules/**', 'assets/**', 'tests/fixtures/**', 'plan/**/dist/**', '.claude/repo/**'] },
+  // tmp-* 是本机调试探针（CDP 脚本、临时 store、临时 Chrome profile）的约定前缀，
+  // 与 .gitignore 里的 `/tmp-*` 对齐：不扫它们，否则临时探针会把 `eslint .` 打红。
+  {
+    ignores: [
+      'src/web/public/**', 'node_modules/**', 'assets/**', 'tests/fixtures/**',
+      'plan/**/dist/**', '.claude/repo/**', 'tmp-*', 'tmp-*/**',
+    ],
+  },
   {
     files: ['**/*.{js,mjs,jsx}'],
     languageOptions: {

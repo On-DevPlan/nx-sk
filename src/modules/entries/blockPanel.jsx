@@ -17,6 +17,8 @@ import { useStore } from '../../web/frontend/store.jsx';
 import { blockEditor, blockLabel, keepsText, LEAF_BLOCK_TYPES } from '../../web/frontend/blocks/registry.jsx';
 import { CONTAINER_VIEWS } from '../../web/frontend/blocks/registry.jsx';
 import { findContainer, updateBlock } from '../../shared/blocks.js';
+import BlockDnd, { SortableBlk } from '../../web/frontend/components/blockDnd.jsx';
+import AiBar from '../../web/frontend/components/aiBar.jsx';
 
 /** 去抖窗口：足够把一次连续输入/拖拽合成一次写，又短到刷新后立刻能看到。 */
 const FLUSH_MS = 500;
@@ -109,6 +111,16 @@ export default function BlockPanel({ entryId, mask }) {
     await load();
   });
 
+  // 拖拽排序的落点（只支持顶层块，见 blockDnd.jsx 的说明）
+  const moveBlockTo = guard(async (from, to) => {
+    const block = bodyRef.current[from];
+    if (!block) return;
+    await api(`/api/entries/${encodeURIComponent(entryId)}/blocks/${encodeURIComponent(block.id)}/move`, {
+      method: 'POST', body: { to },
+    });
+    await load();
+  });
+
   const removeBlock = guard(async (block) => {
     const ok = await dialog({
       message: `删除这个「${blockLabel(block.type)}」块？块删除属条目内编辑，删除不可撤销——要留底就先在「导出导入」页导一份。`,
@@ -125,7 +137,7 @@ export default function BlockPanel({ entryId, mask }) {
     if (d) d.open = false;
   };
 
-  const renderBlock = (block) => {
+  const renderBlock = (block, dragHandle) => {
     const Editor = blockEditor(block.type);
     const label = blockLabel(block.type);
     const isColumn = block.type === 'column';
@@ -135,6 +147,7 @@ export default function BlockPanel({ entryId, mask }) {
     return (
       <div className="blk" key={block.id} data-block-id={block.id}>
         <div className="blk-head">
+          {dragHandle ? <span {...dragHandle}>⠿</span> : null}
           <span className="blk-type">{label}</span>
           <span className="blk-id mono" title={block.id}>{block.id}</span>
           <span className="grow" />
@@ -168,7 +181,7 @@ export default function BlockPanel({ entryId, mask }) {
           {ContainerView ? <ContainerView block={block} sections={sections} /> : null}
           {isColumn ? (
             (block.children || []).length ? (
-              <div className="blk-nested">{(block.children || []).map(renderBlock)}</div>
+              <div className="blk-nested">{(block.children || []).map((c) => renderBlock(c))}</div>
             ) : (
               <div className="hint">
                 空列。S1 的 `entry block add` 只能「追加到尾部 / 某块之后」，还进不了空容器——
@@ -202,12 +215,25 @@ export default function BlockPanel({ entryId, mask }) {
         </details>
       </div>
 
+      {/* 待审的 AI 提议（S4）：有才显示，应用后回读正文 */}
+      <AiBar entryId={entryId} onApplied={load} />
+
       {err ? <div className="pad hint bad">正文读不到：{err}</div> : null}
       {body === null && !err ? <div className="pad muted">加载正文…</div> : null}
       {body && !body.length ? (
         <div className="pad hint">还没有正文。点右上「＋ 加块」加一个；命令行等价于 `nx-sk entry block add {entryId} --type paragraph`。</div>
       ) : null}
-      {body && body.length ? <div className="blk-list">{body.map(renderBlock)}</div> : null}
+      {body && body.length ? (
+        <BlockDnd ids={body.map((b) => b.id)} onMove={moveBlockTo}>
+          <div className="blk-list">
+            {body.map((b) => (
+              <SortableBlk key={b.id} id={b.id}>
+                {(handle) => renderBlock(b, handle)}
+              </SortableBlk>
+            ))}
+          </div>
+        </BlockDnd>
+      ) : null}
     </div>
   );
 }
