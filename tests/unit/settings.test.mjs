@@ -175,3 +175,53 @@ test('renderSettings 仍然列出 defaultSection（带校验器但不是「结�
   const d = await settings.getSettings();
   assert.match(settings.renderSettings(d), /defaultSection/);
 });
+
+// —— 目录树（S3）：settings.navTree 是「可任意嵌套」的显式配置，老三套是推断来源 ——
+
+test('navTree：写入归一（id/标题混写、组 id 自动生成、section 不写空 children）', async () => {
+  const r = await settings.updateSettings({
+    set: {
+      navTree: [
+        { kind: 'section', id: '求职' }, // 写标题也认
+        { kind: 'group', title: '工作', children: [{ kind: 'section', id: 'projects', expanded: true }] },
+      ],
+    },
+  });
+  assert.equal(r.status, 'ok');
+  assert.deepEqual(r.set.navTree, [
+    { kind: 'section', id: 'job' },
+    { kind: 'group', id: 'group:工作', title: '工作', children: [{ kind: 'section', id: 'projects', expanded: true }] },
+  ], 'section 节点不落 children: []，组 id 按标题生成');
+});
+
+test('navTree 校验：坏 kind / 不存在栏目 / 同栏目挂两处 / 空分组 —— 都报错且不落盘', async () => {
+  const before = JSON.stringify((await loadStore()).settings.navTree);
+  const bads = [
+    [{ kind: 'nope', id: 'job' }],
+    [{ kind: 'section', id: 'ghost' }],
+    [{ kind: 'section', id: 'job' }, { kind: 'group', title: 'G', children: [{ kind: 'section', id: 'job' }] }],
+    [{ kind: 'group', title: '空组', children: [] }],
+    [{ kind: 'group', title: '  ', children: [{ kind: 'section', id: 'job' }] }],
+  ];
+  for (const bad of bads) {
+    await assert.rejects(() => settings.updateSettings({ set: { navTree: bad } }), /navTree|目录树|分组|栏目|kind/, JSON.stringify(bad));
+  }
+  assert.equal(JSON.stringify((await loadStore()).settings.navTree), before, '失败时一个字节都不落盘');
+});
+
+test('getSettings：显式树生效（source=explicit）；CLI 渲染里能看见树的来源', async () => {
+  const d = await settings.getSettings();
+  assert.equal(d.navTreeSource, 'explicit');
+  assert.deepEqual(d.navTree.map((n) => n.id), ['job', 'group:工作']);
+  const text = settings.renderSettings(d);
+  assert.match(text, /目录树（源：显式 settings\.navTree）/);
+  assert.match(text, /▸ 工作/);
+});
+
+test('getSettings：navTree 清空 → 回到老三套推断（source=inferred，不写回）', async () => {
+  await settings.updateSettings({ set: { navTree: [] } });
+  const d = await settings.getSettings();
+  assert.equal(d.navTreeSource, 'inferred');
+  assert.ok(d.navTree.length > 0, '推断出来的树不该是空的（栏目都在）');
+  assert.match(settings.renderSettings(d), /推断/);
+});

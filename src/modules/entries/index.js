@@ -220,6 +220,66 @@ export default {
       render: (d) => service.renderBlockChange(d),
     },
 
+    // —— 块级 AI（pending，S4）——
+    // 四条 action 的语义是「提议 → 审 → 应用/拒绝」。**AI 永不直接改数据**：
+    // suggest 只落一条 pending（不进 store.json / 导出包），apply 才写 store。
+    // 提议从哪来：由调用方（agent 或外部模型）产出后经 --from 交进来——nx-sk 不自带大模型，
+    // 这也是「agent 走 CLI」与「人在面板上审同一条 pending」能同语义的原因。
+    {
+      id: 'entry.ai.list',
+      cli: ['entry', 'ai', 'list'],
+      http: ['GET', '/api/entries/:ref/ai'],
+      summary: '看待审的 AI 提议（新的在前）。pending 是运行态：不进 store、不进导出包，删 ~/nx-sk/pending/ 即清空',
+      args: ['ref'],
+      flags: {
+        section: { type: 'string', hint: '限定栏目，解决同名歧义' },
+      },
+      run: (ctx) => service.aiList({ ref: ctx.ref, section: ctx.section }),
+      render: (d) => service.renderAiList(d),
+    },
+    {
+      id: 'entry.ai.suggest',
+      cli: ['entry', 'ai', 'suggest'],
+      http: ['POST', '/api/entries/:ref/ai'],
+      summary: '生成一条 AI 提议（只落 pending，不写 store）。--from 传提议正文；应用用 entry ai apply',
+      args: ['ref'],
+      flags: {
+        prompt: { type: 'string', required: true, hint: '指令（留痕，便于之后看这条提议是为什么改的）' },
+        from: { type: 'json', hint: '提议正文：{"blocks":[…]} 或块数组（@file.json 走 json flag）' },
+        block: { type: 'string', hint: '只允许改这一块（提议动了别的会被拒绝）' },
+        section: { type: 'string' },
+        'dry-run': { type: 'boolean' },
+      },
+      run: (ctx) => service.aiSuggest(ctx.ref, ctx),
+      render: (d) => service.renderAiSuggest(d),
+    },
+    {
+      id: 'entry.ai.apply',
+      cli: ['entry', 'ai', 'apply'],
+      http: ['POST', '/api/ai/:pendingId/apply'],
+      summary: '应用一条 AI 提议（唯一会写 store 的一步）。块在提议之后被改过 → CONFLICT，--force 才覆盖',
+      args: ['pendingId'],
+      flags: {
+        block: { type: 'string', hint: '只应用这一块的改动' },
+        force: { type: 'boolean', hint: '块已被改过也覆盖（仍要显式给）' },
+        'dry-run': { type: 'boolean' },
+      },
+      run: (ctx) => service.aiApply(ctx.pendingId, ctx),
+      render: (d) => service.renderAiApply(d),
+    },
+    {
+      id: 'entry.ai.reject',
+      cli: ['entry', 'ai', 'reject'],
+      http: ['POST', '/api/ai/:pendingId/reject'],
+      summary: '拒绝一条 AI 提议：删掉 pending 文件，store 一个字不动（pending 是运行态，不记历史）',
+      args: ['pendingId'],
+      flags: {
+        'dry-run': { type: 'boolean' },
+      },
+      run: (ctx) => service.aiReject(ctx.pendingId, ctx),
+      render: (d) => service.renderAiReject(d),
+    },
+
     // —— 密钥 KV 直通命令 ——
     // 作用在**标了 kv 的栏目**（密钥模板自带 kv: true）上，可以用 --section 指定别的。
     // 它们是同一套 service 函数的语法糖，不是第二份业务逻辑。

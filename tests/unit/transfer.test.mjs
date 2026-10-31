@@ -112,6 +112,29 @@ test('旧版打码包仍被正确跳过：不会把 ****** 当新密码', async 
   assert.equal(got.values.token, null, '打码占位不能被当成新密码存进去');
 });
 
+test('旧版打码包里的密钥块：值清空待重填（星号不能被加密存盘）', async () => {
+  // 与上一条同一类缺陷的块版本：预览要统计到块，导入要清空而不是把星号加密
+  const zip = await transfer.buildSectionZip(SRC);
+  const man = manifestOf(zip.buffer);
+  man.withSecrets = false;
+  man.entries[0].body = [{ id: 'b_mask1', type: 'secret', label: 'K', value: 'sk-m******xyzw' }];
+  const old = createZip([
+    { name: 'manifest.json', data: JSON.stringify(man) },
+    { name: 'README.txt', data: 'legacy' },
+  ]);
+
+  const prev = await transfer.previewImport('maskblk', old, { fileName: 'x.zip' });
+  assert.equal(prev.secrets.maskedBlocks, 1, '预览的掩码统计要扩到块');
+  assert.ok(prev.warnings.some((w) => w.includes('密钥块')), prev.warnings.join('; '));
+
+  const r = await transfer.applyImport('maskblk', old, { onConflict: 'skip' });
+  assert.equal(r.maskedBlocks, 1);
+  const got = await entries.getEntry('部署教程', { section: 'maskblk' });
+  const blk = (got.body || []).find((b) => b.type === 'secret');
+  assert.ok(blk, '块保留（静默丢块比留个空块更糟）');
+  assert.equal(blk.value, null, '值清空待重填');
+});
+
 test('预览不落盘：previewImport 前后条目数不变', async () => {
   const zip = await transfer.buildSectionZip(SRC);
   const before = (await entries.listEntries({ section: SRC })).total;

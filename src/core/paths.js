@@ -61,6 +61,17 @@ export function migrationDir() {
   return join(appHome(), 'migrate');
 }
 
+/**
+ * 块级 AI 的 pending 目录：`~/nx-sk/pending/`（一个 pending 一个文件）。
+ *
+ * **运行态，不是数据**：不进 store.json、不进导出包、不进迁移副本。
+ * 理由见设计 §14.4——pending 里可能有明文密钥（AI 提议的 secret 块），
+ * 落进 store 就等于把它写进了备份与导出面。删掉这个目录即清空全部待审提议。
+ */
+export function pendingDir() {
+  return join(appHome(), 'pending');
+}
+
 export function vaultKeyFile() {
   return join(appHome(), '.vaultkey');
 }

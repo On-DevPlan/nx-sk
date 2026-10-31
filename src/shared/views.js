@@ -181,3 +181,30 @@ export function resolveViewColumns(section, view) {
     };
   }).filter((c) => !c.hidden);
 }
+
+/**
+ * 看板里「值不在候选内 / 空值」的落点列 id。用它而不是 null：
+ * 列需要在 DOM 里有个稳定的 key，也需要能被区分于任何真候选值。
+ */
+export const UNGROUPED = '__ungrouped__';
+
+/**
+ * 看板分桶：一列 = 分组字段的一个候选值。
+ *
+ * 两条边界（与 boardView 的注释同源，逻辑只在这里实现一份）：
+ *   · 空值、以及不在候选里的值（字段改过 / 历史脏数据）→ `ungrouped`，**不静默丢**；
+ *   · 返回 Map 的键序 = options 的顺序 —— 列的左右顺序由字段定义决定，不由数据出现顺序决定。
+ *
+ * 「未分组」不是落点：把卡片拖过去等于把字段清空，语义要另定，这一版不做。
+ */
+export function bucketByGroup(entries, groupBy, options) {
+  const opts = Array.isArray(options) ? options : [];
+  const buckets = new Map(opts.map((o) => [String(o), []]));
+  const ungrouped = [];
+  for (const e of Array.isArray(entries) ? entries : []) {
+    const raw = e && e.values ? e.values[groupBy] : undefined;
+    const key = raw === null || raw === undefined || raw === '' ? UNGROUPED : String(raw);
+    if (buckets.has(key)) buckets.get(key).push(e); else ungrouped.push(e);
+  }
+  return { buckets, ungrouped };
+}
