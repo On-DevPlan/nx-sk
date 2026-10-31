@@ -15,7 +15,7 @@
 | S2 | 数据库视图（section.views + view action + 四视图面板） | ✅ 完成（2026-10-30） |
 | S3 | 全域拖拽 + Notion 式壳（FlexLayout + dnd-kit + 目录树 + 容器块 + 看板） | ✅ 完成（2026-10-30） |
 | S4 | 块级 AI（AI Bar + pending 落盘 + 冲突检测） | ✅ 完成（2026-10-30） |
-| S5 | 兼容与收尾（包版本字段 + 降级提示 + 文档） | ⬜ 未开始 |
+| S5 | 兼容与收尾（包版本字段 + 降级提示 + 文档） | ✅ 完成（2026-10-31） |
 
 ## S1 触点清单（10-implementation-plan.md §四）
 
@@ -203,3 +203,40 @@
 - pending 隔离双层自检（文本层 + 结构层字段名）进了单测；`~/nx-sk/pending/` 删目录即清空。
 - S5 顺带完成两项：导出预览掩码统计扩到块 + **导入对打码密钥块的防线**
   （此前会把 `******` 加密存盘——与 0.19 字段路径同类缺陷；现在值清空待重填并计数/警告）。
+
+## S5 触点清单（10-implementation-plan.md §八）
+
+| # | 触点 | 状态 |
+| --- | --- | --- |
+| 1 | `transfer/service.js`：`manifest.formatVersion`（缺失 = 1）；导入按版本分支 | ✅（S2 已落地，S5 补测试） |
+| 1-附 | 「新包导旧库警告已忽略」→ 实现为**显式拒绝**（S2 决策，比警告更强），CHANGELOG 有说明 | ✅ |
+| 2 | 导出预览的掩码统计扩到块 | ✅（S4 顺带完成） |
+| 3 | 降级守卫的用户提示：bootstrap / health 展示「store 由更新版本写入」 | ✅ |
+| 4 | references：块（10-§五）、视图（10-§六）、包版本（60-transfer） | ✅（**文档落点偏离计划**，见记录） |
+| 5 | README 命令总表 + CHANGELOG 破坏性变更 | ✅（README 随 S3/S4 提交已齐；CHANGELOG 0.21.0/0.23.0） |
+
+### S5 完成（2026-10-31）
+
+- **起点**：合并远程 0.22.0（source 资料袋 markdown 化）之后收尾。包版本分支与掩码统计
+  在 S2/S4 已实现，S5 的实际增量是**验证补齐 + 降级提示 + 文档**。
+- **降级提示**（store.js:225 注释预留的最后一个消费方）：新增 `downgradeNote()`
+  （与 `corruptNote()` / `migrationNote()` 同一模式）；`bootstrapInfo` / `healthInfo`
+  带上 `downgrade` 字段，CLI `bootstrap` 与 `health` 输出主动展示
+  「磁盘 v99 > 当前 v4，写入会被拒」——不等用户改一次被 BLOCKED 才知道。
+  health 的 store 检查 `ok` 保持 true（能读能看，只是改不了——health 的职责是「现在能不能用」）。
+- **包版本测试补齐**（验收矩阵里此前没测的两格）：
+  旧包（manifest 无 `formatVersion`）→ 视为 v1 照常导入、导入后无 body（不凭空补空数组）；
+  更新包（`formatVersion` 3）→ preview 与 apply 同一条守卫，明确报「版本过新」，
+  不留半个栏目。`FORMAT_VERSION` 从 service 导出供测试引用（单一事实来源）。
+- **文档落点偏离计划的说明**：计划写「15-special-fields（块）」，但块不是字段类型——
+  15-special-fields 的职责是「值不是标量的那几种**字段**」。块正文与 AI 提议落
+  10-sections-entries §五（S3/S4 已写），本次补 §六**数据库视图**（此前完全没写）
+  并把 §八 Web 面板从「每栏目一个 tab」的过期描述重写为工作区壳
+  （目录树 / FlexLayout / 两段深链 / navTree 固化时机）。60-transfer 的包版本段补
+  「manifest 缺键视为 1 号包」。
+- **验证**（全绿）：
+  - `pnpm test`：单测 386 项（新增：包版本分支 2 项；downgradeNote 是既有降级守卫测试里的新断言）+ lint + build
+    + smoke 175 项断言；
+  - CLI 实测（临时 v99 store）：`health` 出「!! 降级运行」行 + store 检查明细、
+    `bootstrap` 出「注意」行、写操作明确报 BLOCKED（磁盘版本 v99 > 当前 v4…请升级）。
+- **0.23.0**：版本号随本提交升级（远程已把 0.22.0 用于 source markdown 发布）。
