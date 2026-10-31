@@ -263,9 +263,11 @@ nx-sk entry table 周报 --field 任务表
 
 原始资料袋（`type: 'source'`）——**每个栏目都自带一个**的「乱入区」。值 = 一组资料条目
 （`{id, kind, name, text|fileId|url, addedAt, note, mapped}`；kind = text / file / url）。
-杂乱资料（邮件、截图、PDF 摘录、手抄的表）先**原样**丢进袋里，之后由 agent 或人
+杂乱资料（邮件、聊天记录、截图、PDF 摘录）先**原样**丢进袋里，之后由 agent 或人
 按栏目字段字典整理进上面的字段——「先乱入、后整理」因此成立：没有这个袋子，
 用户只有两个坏选择：把乱数据硬塞进结构化字段（把结构搞脏），或干脆不存（信息丢了）。
+**text 的底层是 markdown**：聊天记录图文混排，图片直接写进正文
+（`![说明](f_xxx)` / 外链 `![说明](https://…)`），图和文不分家——形状见 [[15-special-fields]]。
 
 ```bash
 nx-sk source list                       # 各栏目的袋概况

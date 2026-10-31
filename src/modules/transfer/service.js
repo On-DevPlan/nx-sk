@@ -172,7 +172,13 @@ function referencedFileIds(section, entries) {
       // 原始资料袋里的 file item 也是正式引用：袋是「字段值从哪来」的锚点，
       // 漏了它导出的包就丢原件——溯源链条在包里断掉
       else if (f.type === 'source' && Array.isArray(v)) {
-        for (const item of v) if (item && typeof item === 'object' && item.kind === 'file' && item.fileId) ids.add(item.fileId);
+        for (const item of v) {
+          if (!item || typeof item !== 'object') continue;
+          if (item.kind === 'file' && item.fileId) ids.add(item.fileId);
+          // text 的底层是 markdown：正文里内嵌的 `![x](f_xxx)` 同样是正式引用，
+          // 聊天记录图文混排，漏了正文里的图，包里的记录就成了没图的文字
+          else if (item.kind === 'text' && typeof item.text === 'string') for (const id of mdImageIds(item.text)) ids.add(id);
+        }
       }
     }
   }
@@ -595,13 +601,21 @@ function remapValues(section, values, idMap) {
         idMap.has(id) ? `![${alt}](${idMap.get(id)})` : m
       ));
     } else if (f.type === 'source' && Array.isArray(out[f.key])) {
-      // 袋里 file item 的 fileId 同样重映射：旧 id 在目标库里不存在，
-      // 不换的话袋里剩一串死引用（面板显示不出原件，溯源断在半路）
-      out[f.key] = out[f.key].map((item) => (
-        item && typeof item === 'object' && item.kind === 'file' && item.fileId && idMap.has(item.fileId)
-          ? { ...item, fileId: idMap.get(item.fileId) }
-          : item
-      ));
+      // 袋里两处引用都要重映射：file item 的 fileId、text（markdown）正文里内嵌的
+      // `![x](f_xxx)`。旧 id 在目标库里不存在，不换的话剩一串死引用
+      // （面板显示不出原件，溯源断在半路）。
+      out[f.key] = out[f.key].map((item) => {
+        if (!item || typeof item !== 'object') return item;
+        if (item.kind === 'file' && item.fileId && idMap.has(item.fileId)) {
+          return { ...item, fileId: idMap.get(item.fileId) };
+        }
+        if (item.kind === 'text' && typeof item.text === 'string') {
+          return { ...item, text: item.text.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (m, alt, id) => (
+            idMap.has(id) ? `![${alt}](${idMap.get(id)})` : m
+          )) };
+        }
+        return item;
+      });
     }
   }
   return out;
