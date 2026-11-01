@@ -554,6 +554,14 @@ a.file-name:hover { text-decoration: underline; }
 /* 阅读态（没展开输入框）：给正文更多高度——这时候看的就是它，不该只有 340px */
 .md-preview.reading { max-height: 560px; }
 
+/* ── 抽屉的实时预览：贴在输入框正下方，打字即所见 ── */
+.source-draft-preview { display: flex; flex-direction: column; gap: 3px; }
+.source-draft-md {
+  max-height: 220px;
+  background: var(--paper);
+  border: 1px solid var(--soft-2);
+}
+
 /* ── markdown 正文（react-markdown 渲染出来的元素）──
  * 面板的排版基调是「12px / 行高 1.6 / 只用 1px 浅线」，这里全部照抄：
  * 标题靠字重与字号分档，不靠颜色；代码块/表格用浅底与细线，不加投影。 */

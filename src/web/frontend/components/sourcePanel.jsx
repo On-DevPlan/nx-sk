@@ -14,6 +14,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api/client.js';
 import { fileToDataUrl, listAttachments } from '../api/files.js';
+import { toggleTaskAtLine } from '../mdSource.js';
 import { Copyable, copyText } from './ui.jsx';
 import { Lightbox } from './lightbox.jsx';
 import { MdView } from './mdView.jsx';
@@ -353,6 +354,26 @@ function SourceDrawer({ items, onChange, onClose, title, sectionTitle }) {
                 placeholder={'聊天记录直接贴（支持 markdown）：图片 Ctrl+V / 拖进来就内嵌；网图写 ![说明](https://…)。Ctrl+Enter 入袋'}
                 rows={5}
               />
+              {/* 实时预览：贴的是聊天记录，图文混排成什么样**打字的时候就要看得见**，
+                  等入袋再看等于盲写。图片用同一张附件表（刚上传的记录已就地并入），
+                  勾选待办直接改草稿本身——预览与入袋后是同一台渲染机器。 */}
+              {draft.trim() ? (
+                <div className="source-draft-preview">
+                  <div className="hint">实时预览（随输入更新；待办可直接勾）</div>
+                  <div className="md-preview reading source-draft-md">
+                    <MdView
+                      text={draft}
+                      byId={byId}
+                      onOpenImage={setZoom}
+                      onToggleTask={(line) => setDraft(toggleTaskAtLine(draft, line))}
+                      onCopy={async (value) => {
+                        const ok = await copyText(value);
+                        toast(ok ? `已复制 ${value}` : '复制失败：浏览器拒绝了剪贴板访问', ok ? 'ok' : 'bad');
+                      }}
+                    />
+                  </div>
+                </div>
+              ) : null}
               <div className="rowgap">
                 <button type="button" className="btn small" onClick={commitText} disabled={!draft.trim()}>
                   {editing ? '保存修改' : '加入（Ctrl+Enter）'}
