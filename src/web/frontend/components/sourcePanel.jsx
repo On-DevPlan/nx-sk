@@ -13,7 +13,7 @@
 //   3. **焦点不被遮住 / 关掉要还回来**：打开时聚焦清单，关掉时焦点回到折叠条。
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api/client.js';
-import { fileToDataUrl, listAttachments, mergeFiles } from '../api/files.js';
+import { fileToDataUrl, listAttachments } from '../api/files.js';
 import { Copyable, copyText } from './ui.jsx';
 import { Lightbox } from './lightbox.jsx';
 import { MdView } from './mdView.jsx';
@@ -128,19 +128,34 @@ function SourceDrawer({ items, onChange, onClose, title, sectionTitle }) {
     setUploading(picked.length);
     try {
       const parts = [];
+      const fresh = [];
       for (const file of picked) {
         try {
           const content = await fileToDataUrl(file);
           const r = await api('/api/files', { method: 'POST', body: { content, name: file.name } });
           const name = r.name || file.name;
-          parts.push(/^image\//i.test(file.type || '') || /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(name)
-            ? `![${name}](${r.id})`
-            : `[${name}](${r.id})`);
+          const isImg = /^image\//i.test(file.type || '') || /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(name);
+          parts.push(isImg ? `![${name}](${r.id})` : `[${name}](${r.id})`);
+          // 上传成功 ≠ 预览立刻认得它：本地 files 表不并进这条记录的话，
+          // 正文按 id 查表查不到，提交后整篇「图片缺失」（要等抽屉重开才恢复）。
+          // POST 的返回就是完整 describe（含 url / path / isImage），直接并进去。
+          fresh.push(r);
         } catch (e) {
           toast(`上传失败：${e.message || e}`, 'bad');
         }
       }
-      if (parts.length) insertToDraft(parts.join('\n'));
+      if (parts.length) {
+        insertToDraft(parts.join('\n'));
+        if (fresh.length) {
+          setFiles((prev) => {
+            const map = { ...prev };
+            for (const f of fresh) if (f?.id) map[f.id] = f;
+            return map;
+          });
+          // 再强制刷一次列表拿全量字段；上面那步保证这一帧渲染不缺图
+          loadFiles(true);
+        }
+      }
     } finally {
       setUploading(0);
     }
@@ -176,6 +191,7 @@ function SourceDrawer({ items, onChange, onClose, title, sectionTitle }) {
     const picked = [...(fileList || [])].filter(Boolean);
     if (!picked.length) return;
     const added = [];
+    const fresh = [];
     for (const file of picked) {
       try {
         const content = await fileToDataUrl(file);
@@ -187,13 +203,18 @@ function SourceDrawer({ items, onChange, onClose, title, sectionTitle }) {
           fileId: r.id,
           addedAt: new Date().toISOString(),
         });
+        fresh.push(r); // 完整 describe（含 url），别并残缺记录——按 id 查表渲染时要用
       } catch (e) {
         toast(`上传失败：${e.message || e}`, 'bad');
       }
     }
     if (added.length) {
       onChange([...items, ...added]);
-      setFiles((prev) => mergeFiles(Object.values(prev).map((f) => ({ ...f })), added.map((a) => ({ id: a.fileId, name: a.name, url: '', isImage: false }))));
+      setFiles((prev) => {
+        const map = { ...prev };
+        for (const f of fresh) if (f?.id) map[f.id] = f;
+        return map;
+      });
       loadFiles(true);
       toast(`已加入 ${added.length} 个文件`);
     }
