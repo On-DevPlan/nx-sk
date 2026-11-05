@@ -2,6 +2,14 @@
 
 本文件格式参考 [Keep a Changelog](https://keepachangelog.com/)，中文正文。
 
+## 0.23.1 (2026-11-05)
+
+### Added
+
+- **`skill install --all`：一次装齐 `assets/` 下全部 skill，且直接覆盖**。范围取目录
+  扫描（事实源 `assets/<x>/SKILL.md`），不依赖分组表；覆盖隐式生效，不用再补 `--force`。
+  与 `[name]` 互斥；`--mode symlink` / `--dry-run` 对整批同样适用。
+
 ## 0.23.0 (2026-10-31)
 
 **栏目结构在面板里可自己搭了：分组能增删改序，字段能改名 / 换组 / 换类型 / 换位置。**

@@ -51,7 +51,31 @@ async function resolveSkillSource(name) {
  * - `symlink`：把目标**软链**到项目里的源 —— 这就是「shim 到全局」。改代码立刻生效、
  *   永不漂移，适合本机开发（用户目录里那些 skill 本来就是这么挂的）。
  */
-export async function installSkill({ name, to, force, mode, 'dry-run': dryRun } = {}) {
+export async function installSkill({ name, all, to, force, mode, 'dry-run': dryRun } = {}) {
+  // --all：装齐 assets/ 下全部 skill，且**直接覆盖**（force 恒开，不用再补 --force）。
+  // 范围取目录扫描（事实源 assets/<x>/SKILL.md）——不依赖任何分组表，
+  // 新加 skill 就算没登记也装得上。要保留目标目录里的本地改动就别用 --all。
+  if (all) {
+    if (name && String(name).trim()) {
+      throw badInput('--all 与 [name] 互斥；--all 会安装全部 skill');
+    }
+    const { skills } = await listSkills();
+    const targets = skills.filter((s) => s.hasSkillMd).map((s) => s.name);
+    if (!targets.length) throw notFound('assets/ 下没有可分发的 skill（缺 SKILL.md？）');
+    const results = [];
+    for (const n of targets) {
+      const r = await installSkill({ name: n, to, force: true, mode, 'dry-run': dryRun });
+      results.push({ skill: n, ...r });
+    }
+    return {
+      status: 'ok',
+      all: true,
+      mode: mode === 'symlink' ? 'symlink' : 'copy',
+      dryRun: !!dryRun,
+      count: results.length,
+      skills: results,
+    };
+  }
   const { name: n, src } = await resolveSkillSource(name);
   const dst = join(resolve(to || DEFAULT_SKILLS_DIR), n);
   const wantsLink = mode === 'symlink';
@@ -177,6 +201,19 @@ export function renderSkillContext(d) {
 
 export function renderInstall(r) {
   if (!r) return '（未知）';
+  // --all：装齐全部（显式字段判别，先于单 skill 的三态分支）
+  if (r.all) {
+    const how = r.dryRun ? '试运行，未落盘' : r.mode === 'symlink' ? '软链，已覆盖' : '副本，已覆盖';
+    const lines = [`--all：${r.count} 个 skill（${how}）`];
+    for (const s of r.skills) {
+      const state = s.status === 'conflict' ? '冲突'
+        : s.skipped ? '已是最新'
+          : s.mode === 'symlink' ? '已软链'
+            : s.installed ? '已安装' : s.replaced ? '已替换' : '完成';
+      lines.push(`  ${String(s.skill).padEnd(14)} ${state} ${s.path || ''}`);
+    }
+    return lines.join('\n');
+  }
   if (r.status === 'skipped' && r.dryRun) return `试运行：将装到 ${r.wouldInstall.path}（${r.wouldInstall.files} 个文件，替换已有: ${r.wouldInstall.replaced ? '是' : '否'}）`;
   if (r.skipped) return `已是最新: ${r.path}${r.mode === 'symlink' ? `（已软链到 ${r.target}）` : '（与内置内容一致，无差异）'}`;
   if (r.status === 'conflict' && r.mode === 'symlink') {
