@@ -3,7 +3,8 @@ import { api } from '../../web/frontend/api/client.js';
 import { checkZipFile, fmtBytes, isNeedPassphraseError, postZip } from '../../web/frontend/api/zip.js';
 import { useStore } from '../../web/frontend/store.jsx';
 import { CliHints, Empty, Modal, Tag } from '../../web/frontend/components/ui.jsx';
-import { FieldGroup } from '../../web/frontend/components/fieldEditor.jsx';
+import BlockBoard from '../../web/frontend/components/blockBoard.jsx';
+import { reconcileLayout, sameLayout } from '../../shared/blockLayout.js';
 import KvTable from './kvTable.jsx';
 
 // 脏值比较用：对象/数组（tags、entrylist 的行）必须走 JSON 序列化——
@@ -139,6 +140,31 @@ export default function SectionView({ sectionId }) {
     if (!data) return [];
     return data.groups.map((g) => ({ ...g, fields: data.fields.filter((f) => f.group === g.id) })).filter((g) => g.fields.length);
   }, [data]);
+
+  // —— 正文版式（块布局）——
+  // 版式是**显示关系**，存在 section.layout 里（与字段字典分开），所以有两条保存链：
+  // 拖块 / 改宽高 / 换面板顺序只写版式（防抖自动存），填字段仍然走「N 处改动 → 保存」。
+  // 这样拖一下版式不会把没填完的值一起提交，反过来改字段也不会打乱版式。
+  const [board, setBoard] = useState(null);
+  const boardTouched = useRef(false);
+  const boardTimer = useRef(null);
+  useEffect(() => { boardTouched.current = false; setBoard(null); }, [sectionId]);
+  // 服务端读回来的版式已经按当前字段对齐过；只有当用户还没动过版式时才跟着刷新
+  // （否则「保存字段」触发的重读会把刚拖好的版式弹回去）
+  useEffect(() => { if (!boardTouched.current && data?.layout) setBoard(data.layout); }, [data]);
+  useEffect(() => () => { if (boardTimer.current) clearTimeout(boardTimer.current); }, []);
+  const boardView = useMemo(() => reconcileLayout(board || data?.layout, groups), [board, data, groups]);
+  const applyBoard = (next) => {
+    if (sameLayout(next, boardView)) return;
+    boardTouched.current = true;
+    setBoard(next);
+    if (boardTimer.current) clearTimeout(boardTimer.current);
+    boardTimer.current = setTimeout(guard(async () => {
+      boardTimer.current = null;
+      await api(`/api/sections/${encodeURIComponent(sectionId)}`, { method: 'PATCH', body: { layout: next } });
+      toast('版式已保存');
+    }), 700);
+  };
 
   const patchField = (key, value) => setDraft((d) => (d ? { ...d, values: { ...d.values, [key]: value } } : d));
 
@@ -479,31 +505,43 @@ export default function SectionView({ sectionId }) {
                 ) : null}
               </div>
 
-              <div className="field wide pad" style={{ borderBottom: '1px solid var(--soft-2)' }}>
-                <div className="flabel">
-                  <span>{data.section.titleLabel || '名称'}</span>
-                  <span className="bad">改动后必须保存</span>
-                </div>
-                <div className="fctrl">
-                  <input value={draft.title} onChange={(e) => setDraft((d) => ({ ...d, title: e.target.value }))} />
-                </div>
-              </div>
-
-              <div className="rowgap" style={{ padding: '6px 14px', borderBottom: '1px solid var(--soft-2)' }}>
+              {/* 条目名是「这一页的标题」，不是第一个字段：给它一点标题的语气，
+                  但仍然是可编辑的输入，不让用户以为要另开弹窗改名 */}
+              <div className="entry-title pad">
+                <div className="entry-title-label">{data.section.titleLabel || '名称'}</div>
                 <input
-                  className="grow"
-                  style={{ minWidth: 220 }}
-                  placeholder="直接加字段：字段=值　（回车写入；没见过的键会自动登记）"
-                  value={quick}
-                  onChange={(e) => setQuick(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') quickAdd(); }}
+                  className="entry-title-input"
+                  value={draft.title}
+                  onChange={(e) => setDraft((d) => ({ ...d, title: e.target.value }))}
+                  aria-label={data.section.titleLabel || '名称'}
                 />
-                <button className="btn small" onClick={quickAdd} disabled={!quick.includes('=')}>写入</button>
               </div>
 
-              {groups.map((g) => (
-                <FieldGroup key={g.id} title={g.title} fields={g.fields} draft={draft.values} onPatch={patchField} sectionTitle={data.section.title} entryTitle={current?.title || draft.title} />
-              ))}
+              {/* 「直接加字段」是给熟手的旁路，平时收起来——正文优先，别让一行表单常驻在顶部 */}
+              <details className="quick-add">
+                <summary>＋ 直接加字段</summary>
+                <div className="rowgap">
+                  <input
+                    className="grow"
+                    style={{ minWidth: 220 }}
+                    placeholder="字段=值　（回车写入；没见过的键会自动登记）"
+                    value={quick}
+                    onChange={(e) => setQuick(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') quickAdd(); }}
+                  />
+                  <button className="btn small" onClick={quickAdd} disabled={!quick.includes('=')}>写入</button>
+                </div>
+              </details>
+
+              <BlockBoard
+                groups={groups}
+                board={boardView}
+                onBoard={applyBoard}
+                draft={draft.values}
+                onPatch={patchField}
+                sectionTitle={data.section.title}
+                entryTitle={current?.title || draft.title}
+              />
 
               <div className="rowgap pad">
                 <button className="btn" onClick={save} disabled={!dirty.count}>保存{dirty.count ? `（${dirty.count} 处改动）` : ''}</button>

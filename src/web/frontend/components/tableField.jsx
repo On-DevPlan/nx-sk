@@ -1,36 +1,41 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { TABLE_CELL_TYPES, computeTable, columnToDef, formatCellValue } from '../../../shared/table.js';
 import { useStore } from '../store.jsx';
 import { reorderAt, useListDrag } from './listDrag.jsx';
 
 /**
- * 表格字段（`type: 'table'`）的编辑界面。
+ * 表格字段（`type: 'table'`）的编辑界面 —— 目标手感是「Notion 的数据库」。
  *
  * **这张表是自描述的**：列、行、公式、统计配置全部存在条目数据里（不在栏目字典里）。
- * 所以这里除了填格子，还能直接**加列 / 改列类型 / 改公式** —— 改完就是这条数据的一部分，
+ * 所以这里除了填格子，还能直接**加列 / 改列类型 / 改公式**——改完就是这条数据的一部分，
  * 不会影响同栏目下的其它条目。字段定义里的 columns 只是「新建时的初始列」。
  *
- * 四个刻意的取舍：
- *   1. **计算列不落盘、也不可编辑**。它由公式从同行的值算出来；把结果存下来，
+ * 六条刻意的取舍：
+ *   1. **行与列都有抓手**：行抓手在**左侧沟槽**（⠿ 拖动 + ⋮ 菜单），列抓手就是表头本身。
+ *      排序是这类表最常见的编辑动作，一排 ↑↓ 按钮既占地方又说不清「会插到哪」。
+ *   2. **列管理挂在列头上**（⋮ 打开）：改名 / 换类型 / 单位 / 汇总 / 默认值 / 密文 / 选项 / 公式
+ *      + 左移右移、左右插入、复制属性、删除属性。以前那一大块「列设置」表单铺在表格下面，
+ *      一列一行、七八个输入框，读起来像后台配置页——现在收进列头的弹层，表格回到「只有数据」。
+ *   3. **计算列不落盘、也不可编辑**：它由公式从同行的值算出来；把结果存下来，
  *      下次改了一个数字而忘记重算，就会出现「存下来的合计和现在的数据对不上」。
- *   2. **合计就摆在表尾**，不是另一个面板。看数的人不该先点一个按钮才知道总数。
- *   3. **回车往下走**（最后一格回车就新起一行），Alt+↑/↓ 改上下行的同一个格子 ——
+ *   4. **合计就摆在表尾**，不是另一个面板。看数的人不该先点一个按钮才知道总数。
+ *   5. **回车往下走**（最后一格回车就新起一行），Alt+↑/↓ 改上下行的同一个格子 ——
  *      录一张表时手不用离开键盘，这是「像表格」和「像一堆输入框」的分界。
- *   4. 每行都是**独立 grid**（与 entrylist 同一手法）：列宽只由列定义决定，
- *      内容再长也不会把某一行撑歪。
- *   5. **行与列都能拖**：行把手在行尾的操作区，列直接拖表头（列设置里也有把手）。
- *      排序是最常见的编辑动作之一，一排 ↑↓ 按钮既占地方又说不清「会插到哪」，
- *      拖拽 + 一条插入线是唯一能表达「插在这里」的交互（↑↓ 保留，hover 才出现）。
+ *   6. 每行都是**独立 grid**：列宽只由列定义决定，内容再长也不会把某一行撑歪。
  */
-
-// 行尾操作区：把手 14 + 三个 16 的小键 + 间距。它是「操作列」，不是内容列，
-// 所以宽度写死 —— 列多了是内容区横向滚动，不该把这一列压扁。
-const GUTTER = 78;
+const GUTTER = 30; // 左侧沟槽：行号 / 抓手 / 行菜单。写死宽度——它是操作区，不是内容列
+const TRAIL = 34;  // 表头末尾的「＋」列：加列的入口就长在列该长的位置（Notion 的做法）
 
 const alignOf = (col) => col.align || (col.type === 'number' ? 'right' : (col.type === 'bool' ? 'center' : 'left'));
 
+/** 列头的类型记号：只用单色字符（emoji 在面板里是禁的，见 consistency 测试）。 */
+const TYPE_GLYPH = {
+  text: 'Aa', textarea: '¶', number: '#', bool: '□', select: '▾', date: '▦', month: '▦', tags: '≡',
+};
+
 const TOTAL_OPTIONS = [
-  ['', '按类型（数字求和 / 勾选计是）'],
+  ['', '按类型自动'],
   ['none', '不统计'],
   ['sum', '求和'],
   ['avg', '平均'],
@@ -42,6 +47,11 @@ const TOTAL_OPTIONS = [
   ['distinct', '去重计数'],
   ['median', '中位数'],
 ];
+
+const TYPE_LABEL = {
+  text: '文本', textarea: '长文本', number: '数字', bool: '勾选',
+  select: '单选', date: '日期', month: '月份', tags: '多选',
+};
 
 function cellText(col, v) {
   if (v === null || v === undefined) return '';
@@ -62,7 +72,7 @@ function CellInput({ col, value, mask, cellRef, onPatch, onEnter, onArrow }) {
     const checked = value === true || value === 'true' || value === '是' || value === 1 || value === '1';
     return (
       <label className="tf-bool" title={checked ? '是（点击改成否）' : '否（点击改成是）'}>
-        <input {...common} type="checkbox" checked={checked} onChange={(e) => onPatch(e.target.checked)} />
+        <input {...common} className="tf-check" type="checkbox" checked={checked} onChange={(e) => onPatch(e.target.checked)} />
       </label>
     );
   }
@@ -82,14 +92,7 @@ function CellInput({ col, value, mask, cellRef, onPatch, onEnter, onArrow }) {
 
   if (col.type === 'number') {
     return (
-      <input
-        {...common}
-        type="number"
-        step="any"
-        className="tf-input num"
-        value={cellText(col, value)}
-        onChange={(e) => onPatch(e.target.value)}
-      />
+      <input {...common} type="number" step="any" className="tf-input num" value={cellText(col, value)} onChange={(e) => onPatch(e.target.value)} />
     );
   }
 
@@ -110,35 +113,91 @@ function CellInput({ col, value, mask, cellRef, onPatch, onEnter, onArrow }) {
   );
 }
 
+/** 浮层：锚在某个元素上，点外面 / Esc 关闭。挂到 body，免得被表格的滚动容器裁掉。 */
+function Popover({ anchor, onClose, children, width = 300 }) {
+  const ref = useRef(null);
+  // 先按估算高度摆一次，挂载后量到真实高度再校正 —— 只按「下面是 300px 够不够」猜，
+  // 行菜单这种 130px 的小弹层会被无谓地翻到上面去（真实体验：菜单跑到屏幕上方）。
+  const place = (h) => {
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const left = Math.max(8, Math.min(anchor.left - 12, vw - width - 8));
+    const below = vh - anchor.bottom - 8;
+    const above = anchor.top - 8;
+    const openUp = below < h && above > below;
+    return openUp
+      ? { left, bottom: vh - anchor.top + 6, maxHeight: Math.max(160, Math.min(above, 520)) }
+      : { left, top: anchor.bottom + 6, maxHeight: Math.max(160, Math.min(below, 520)) };
+  };
+  const [pos, setPos] = useState(() => place(220));
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const next = place(el.offsetHeight);
+    setPos((cur) => (cur.top === next.top && cur.bottom === next.bottom && cur.left === next.left && cur.maxHeight === next.maxHeight ? cur : next));
+    // place 只依赖 anchor 与 width，跟着这两个走
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [anchor, width]);
+
+  useEffect(() => {
+    const onDown = (e) => { if (ref.current && !ref.current.contains(e.target)) onClose(); };
+    const onKey = (e) => { if (e.key === 'Escape') { e.stopPropagation(); onClose(); } };
+    document.addEventListener('pointerdown', onDown, true);
+    document.addEventListener('keydown', onKey, true);
+    return () => {
+      document.removeEventListener('pointerdown', onDown, true);
+      document.removeEventListener('keydown', onKey, true);
+    };
+  }, [onClose]);
+
+  return createPortal(
+    <div className="tf-pop" ref={ref} style={{ ...pos, width }} role="dialog">
+      {children}
+    </div>,
+    document.body,
+  );
+}
+
+/** 弹层里的一行操作（图标用字符，不用 emoji）。 */
+function MenuItem({ glyph, onClick, danger, disabled, children }) {
+  return (
+    <button type="button" className={`tf-pop-item${danger ? ' danger' : ''}`} onClick={onClick} disabled={disabled}>
+      <span className="tf-pop-glyph">{glyph}</span>
+      <span className="grow nowrap">{children}</span>
+    </button>
+  );
+}
+
 export function TableFieldControl({ def, value, onChange }) {
   const { ui } = useStore();
   const mask = !!ui.mask;
-  const [colsOpen, setColsOpen] = useState(false);
   const rootRef = useRef(null);
-  // 回车新起一行时焦点要先送进新行，而新行在这一帧还没挂载 —— 记下目标，渲染完再对焦。
   const [pending, setPending] = useState('');
+  const [colMenu, setColMenu] = useState(null); // { idx, rect }
+  const [rowMenu, setRowMenu] = useState(null); // { idx, rect }
 
   const table = useMemo(() => computeTable(def, value), [def, value]);
   const cols = table.columns;
   const rows = useMemo(() => table.rows.map((r) => r.raw), [table]);
 
   /** 一次改动 = 一份**完整的**表格文档（列、行都在里面），而不是只回写行。 */
-  const commit = (patch = {}) => {
+  const commit = useCallback((patch = {}) => {
     const base = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
     onChange({
       ...base,
       v: 1,
       columns: patch.columns || table.columns.map((c) => columnToDef(c)),
-      rows: patch.rows || rows,
+      rows: patch.rows || table.rows.map((r) => r.raw),
     });
-  };
+  }, [onChange, table, value]);
+
   /** 表尾统计的总开关。开 = 去掉这个键（回到「按类型自动」），关 = 显式写 false。 */
   const setSummary = (on) => {
     const base = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
     const next = { ...base, v: 1, columns: cols.map((c) => columnToDef(c)), rows };
     if (on) {
       delete next.summary;
-      // 显式的空 totals 也是「不要表尾」，一起清掉，否则勾了也不会出现
       if (Array.isArray(next.totals) && !next.totals.length) delete next.totals;
     } else next.summary = false;
     onChange(next);
@@ -154,12 +213,12 @@ export function TableFieldControl({ def, value, onChange }) {
     setPending('');
   }, [pending, rows.length]);
 
-  const grid = `${cols.map((c) => (c.width ? `${c.width}px` : 'minmax(84px, 1fr)')).join(' ')} ${GUTTER}px`;
+  const grid = `${GUTTER}px ${cols.map((c) => (c.width ? `${c.width}px` : 'minmax(96px, 1fr)')).join(' ')} ${TRAIL}px`;
   // 行宽的下限：列多了就把容器撑开、横向滚动，而不是把每列压到看不见。
-  // 所有行都挂在这一个宽度上，列的左右边界才对得齐（每行是独立 grid）。
-  const minWidth = cols.reduce((sum, c) => sum + (c.width || 84), 0) + GUTTER;
+  const minWidth = cols.reduce((sum, c) => sum + (c.width || 96), 0) + GUTTER + TRAIL;
 
   const setCell = (i, key, v) => commit({ rows: rows.map((r, idx) => (idx === i ? { ...r, [key]: v } : r)) });
+
   /** 新增行时按列的 `default` 预填：没有默认值的列留空（不写 null，空着就是空着）。 */
   const seedRow = () => {
     const seed = {};
@@ -169,17 +228,17 @@ export function TableFieldControl({ def, value, onChange }) {
     }
     return seed;
   };
-  const addRow = () => { commit({ rows: [...rows, seedRow()] }); return rows.length; };
-  const moveRow = (i, dir) => {
-    const j = i + dir;
-    if (j < 0 || j >= rows.length) return;
-    const next = [...rows];
-    [next[i], next[j]] = [next[j], next[i]];
+  const addRow = (at) => {
+    const pos = at === undefined ? rows.length : at;
+    const next = [...rows.slice(0, pos), seedRow(), ...rows.slice(pos)];
     commit({ rows: next });
+    return pos;
   };
+  const duplicateRow = (i) => commit({ rows: [...rows.slice(0, i + 1), { ...rows[i] }, ...rows.slice(i + 1)] });
   const removeRow = (i) => commit({ rows: rows.filter((_, idx) => idx !== i) });
-  // 拖拽排序：落点给的是**插入位**，行 / 列各自一份（互不干扰：一边在拖时另一边不接管 dragover）
-  // 拖回原位时 reorderAt 返回**同一个数组**——这时不 commit，否则条目会被标成「有改动」而其实没动。
+
+  // 拖拽排序：落点给的是**插入位**。拖回原位时 reorderAt 返回同一个数组 —— 这时不 commit，
+  // 否则条目会被标成「有改动」而其实没动。
   const rowDrag = useListDrag((from, insertAt) => {
     const next = reorderAt(rows, from, insertAt);
     if (next !== rows) commit({ rows: next });
@@ -211,29 +270,50 @@ export function TableFieldControl({ def, value, onChange }) {
     }
     commit({ columns: next, rows: nextRows });
   };
+
+  const uniqueKey = (base) => {
+    let key = base;
+    let n = 2;
+    while (cols.some((c) => c.key === key)) { key = `${base}${n}`; n += 1; }
+    return key;
+  };
+  const newColumn = (label) => ({ key: uniqueKey(`col${cols.length + 1}`), label, type: 'text' });
+  const insertColumn = (i) => {
+    const at = Math.max(0, Math.min(cols.length, i));
+    const next = cols.map(columnToDef);
+    next.splice(at, 0, newColumn(`列${cols.length + 1}`));
+    commit({ columns: next });
+    setColMenu(null);
+  };
+  const duplicateColumn = (i) => {
+    const src = cols[i];
+    const key = uniqueKey(`${src.key}Copy`);
+    const next = cols.map(columnToDef);
+    next.splice(i + 1, 0, { ...columnToDef(src), key, label: `${src.label} 副本` });
+    // 连值一起复制：只复制定义会得到一列全是空的「副本」
+    const nextRows = rows.map((r) => ({ ...r, [key]: r[src.key] }));
+    commit({ columns: next, rows: nextRows });
+    setColMenu(null);
+  };
   const moveColumn = (i, dir) => {
     const j = i + dir;
     if (j < 0 || j >= cols.length) return;
-    const next = cols.map((c) => columnToDef(c));
+    const next = cols.map(columnToDef);
     [next[i], next[j]] = [next[j], next[i]];
     commit({ columns: next });
+    setColMenu((m) => (m ? { ...m, idx: j } : m));
   };
   /** 删列要连值一起删：只删定义会让那些格子变成「没有列的数据」，写入时被挡下来。 */
   const removeColumn = (i) => {
     const gone = cols[i];
-    const next = cols.filter((_, idx) => idx !== i).map((c) => columnToDef(c));
+    const next = cols.filter((_, idx) => idx !== i).map(columnToDef);
     const nextRows = rows.map((r) => {
       const copy = { ...r };
       delete copy[gone.key];
       return copy;
     });
     commit({ columns: next, rows: nextRows });
-  };
-  const addColumn = () => {
-    let n = cols.length + 1;
-    while (cols.some((c) => c.key === `col${n}`)) n += 1;
-    commit({ columns: [...cols.map((c) => columnToDef(c)), { key: `col${n}`, label: `列${n}`, type: 'text' }] });
-    setColsOpen(true);
+    setColMenu(null);
   };
 
   const focusCell = (i, key) => {
@@ -257,6 +337,8 @@ export function TableFieldControl({ def, value, onChange }) {
   };
 
   const summaryOn = table.summary !== false;
+  const menuCol = colMenu ? cols[colMenu.idx] : null;
+  const menuRow = rowMenu ? rowMenu.idx : null;
 
   return (
     <div className="tablefield" ref={rootRef}>
@@ -265,24 +347,44 @@ export function TableFieldControl({ def, value, onChange }) {
           <div className="tf-body" style={{ minWidth }}>
             {/* 表头：整格可拖（里面没有输入框，不会跟文本选择打架）—— 拖表头就是搬这一列 */}
             <div className="tf-row tf-head" style={{ gridTemplateColumns: grid }}>
+              <div className="tf-gutter tf-gutter-head" />
               {cols.map((c, idx) => (
                 <div
                   key={c.key}
                   className={`tf-th ${alignOf(c)}${colDrag.dropClass(idx)}`}
-                  title={(c.hint || (c.computed ? `计算列：${c.formula}` : '拖动表头可调整列顺序')) || undefined}
                   {...colDrag.dragStartProps(idx)}
                   {...colDrag.itemProps(idx)}
                 >
-                  <span className="tf-th-label">{c.label}</span>
-                  {c.computed ? <span className="tf-badge" title={`计算列：${c.formula}`}>算</span> : null}
-                  {c.sensitive ? <span className="tf-badge bad">密</span> : null}
+                  <span className={`tf-glyph${c.computed ? ' calc' : ''}`} aria-hidden>
+                    {c.computed ? 'ƒ' : (TYPE_GLYPH[c.type] || 'Aa')}
+                  </span>
+                  <span className="tf-th-label" title={c.hint || (c.computed ? `计算列：${c.formula}` : c.label)}>{c.label}</span>
                   {c.unit ? <span className="tf-unit">{c.unit}</span> : null}
+                  {c.sensitive ? <span className="tf-badge bad" title="这一列的值密文落盘">密</span> : null}
+                  <button
+                    type="button"
+                    className="tf-th-more"
+                    title="这一列的设置"
+                    aria-label={`「${c.label}」列设置`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      setColMenu({ idx, rect });
+                    }}
+                  >⋮</button>
                 </div>
               ))}
-              <div className="tf-th tf-th-acts" />
+              <div className="tf-th-add">
+                <button type="button" className="tf-th-add-btn" title="在最右边添加一列" onClick={() => {
+                  const next = cols.map(columnToDef);
+                  next.push(newColumn(`列${cols.length + 1}`));
+                  commit({ columns: next });
+                  setColMenu({ idx: next.length - 1, rect: rootRef.current.getBoundingClientRect() });
+                }}>＋</button>
+              </div>
             </div>
 
-            {/* 数据行 */}
+            {/* 数据行：左侧沟槽 = 行号 / 抓手 / 行菜单 */}
             {table.rows.map((row, i) => (
               <div
                 key={i}
@@ -290,6 +392,20 @@ export function TableFieldControl({ def, value, onChange }) {
                 style={{ gridTemplateColumns: grid }}
                 {...rowDrag.itemProps(i)}
               >
+                <div className="tf-gutter">
+                  <span className="tf-rownum">{i + 1}</span>
+                  <button
+                    type="button"
+                    className="tf-row-more"
+                    title="这一行的操作"
+                    aria-label={`第 ${i + 1} 行操作`}
+                    onClick={(e) => {
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      setRowMenu({ idx: i, rect });
+                    }}
+                  >⋮</button>
+                  <span className="tf-grip" {...rowDrag.handleProps(i)} title="拖动调整这一行的顺序">⠿</span>
+                </div>
                 {cols.map((c) => {
                   const err = row.errors[c.key];
                   if (c.computed) {
@@ -314,18 +430,14 @@ export function TableFieldControl({ def, value, onChange }) {
                     </div>
                   );
                 })}
-                <div className="tf-td tf-acts">
-                  <span {...rowDrag.handleProps(i)}>⠿</span>
-                  <button type="button" className="tf-mini" title="上移这一行" disabled={i === 0} onClick={() => moveRow(i, -1)}>↑</button>
-                  <button type="button" className="tf-mini" title="下移这一行" disabled={i === rows.length - 1} onClick={() => moveRow(i, 1)}>↓</button>
-                  <button type="button" className="tf-mini" title="删除这一行" onClick={() => removeRow(i)}>×</button>
-                </div>
+                <div className="tf-td tf-td-add" />
               </div>
             ))}
 
             {/* 统计行：合计就摆在表尾，不用点开任何东西 */}
             {table.totals.map((t, ti) => (
               <div key={`t${ti}`} className="tf-row tf-total" style={{ gridTemplateColumns: grid }}>
+                <div className="tf-gutter" />
                 {cols.map((c, idx) => {
                   const err = t.errors[c.key];
                   const txt = err ? '#错误' : (t.texts[c.key] ?? '');
@@ -344,9 +456,19 @@ export function TableFieldControl({ def, value, onChange }) {
                     </div>
                   );
                 })}
-                <div className="tf-td tf-acts" />
+                <div className="tf-td tf-td-add" />
               </div>
             ))}
+
+            {/* 新建行：像 Notion 那样就是表尾一整行，不用去工具栏找按钮 */}
+            <button type="button" className="tf-addrow" style={{ gridTemplateColumns: grid }} onClick={() => {
+              const at = addRow();
+              const first = cols.find((c) => !c.computed);
+              if (first) setPending(`${at}:${first.key}`);
+            }}>
+              <span className="tf-gutter"><span className="tf-plus">＋</span></span>
+              <span className="tf-addrow-label" style={{ gridColumn: '2 / -1' }}>新建一行</span>
+            </button>
           </div>
         </div>
       ) : (
@@ -354,11 +476,14 @@ export function TableFieldControl({ def, value, onChange }) {
       )}
 
       <div className="tf-bar">
-        <button type="button" className="btn small" onClick={addRow} disabled={!cols.length}>＋ 添加行</button>
-        <button type="button" className="btn small ghost" onClick={addColumn}>＋ 添加列</button>
-        <button type="button" className={`btn small ghost${colsOpen ? ' on' : ''}`} onClick={() => setColsOpen((v) => !v)}>
-          {colsOpen ? '收起列设置' : '列设置'}
-        </button>
+        {cols.length ? null : (
+          <button type="button" className="btn small" onClick={() => {
+            const next = cols.map(columnToDef);
+            next.push(newColumn('列1'));
+            commit({ columns: next });
+            setColMenu({ idx: 0, rect: rootRef.current.getBoundingClientRect() });
+          }}>＋ 添加列</button>
+        )}
         <label className="inline hint" title="表尾显示一行统计（数字求和、勾选计是，也可逐列指定）">
           <input type="checkbox" checked={summaryOn} onChange={(e) => setSummary(e.target.checked)} />
           统计行
@@ -370,96 +495,6 @@ export function TableFieldControl({ def, value, onChange }) {
         </span>
       </div>
 
-      {colsOpen ? (
-        <div className="tf-cols">
-          <div className="hint">
-            列定义跟着**这条数据**走（不写进栏目字典），所以这里加列只影响这一条。
-            计算列写 JS 表达式：可用同行的列 key 或中文列名，也可用 rows / col("列名") / sum / countTrue。
-            排序用拖：**拖表头**搬列，拖行尾的 ⠿ 搬行（松手前会有一条插入线告诉你落在哪）。
-          </div>
-          {cols.map((c, i) => (
-            <div key={c.key} className={`tf-colrow${colDrag.dropClass(i)}`} {...colDrag.itemProps(i)}>
-              <div className="tf-colrow-main">
-                <span {...colDrag.handleProps(i)}>⠿</span>
-                <input
-                  style={{ width: 108 }}
-                  value={c.key}
-                  title="列 key：公式里就这么引用"
-                  onChange={(e) => patchColumn(i, { key: e.target.value })}
-                />
-                <input
-                  style={{ width: 120 }}
-                  value={c.label}
-                  placeholder="列名"
-                  onChange={(e) => patchColumn(i, { label: e.target.value })}
-                />
-                <select
-                  style={{ width: 118 }}
-                  value={c.computed ? 'formula' : c.type}
-                  onChange={(e) => {
-                    const t = e.target.value;
-                    if (t === 'formula') patchColumn(i, { type: 'number', formula: c.formula || '' });
-                    else patchColumn(i, { type: t, formula: '', options: t === 'select' ? (c.options.length ? c.options : ['选项1', '选项2']) : [] });
-                  }}
-                >
-                  {TABLE_CELL_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-                  <option value="formula">计算（JS 表达式）</option>
-                </select>
-                <select
-                  style={{ width: 132 }}
-                  value={c.total || ''}
-                  title="表尾这一列怎么统计"
-                  onChange={(e) => patchColumn(i, { total: e.target.value })}
-                >
-                  {TOTAL_OPTIONS.map(([v, t]) => <option key={v} value={v}>{t}</option>)}
-                </select>
-                <input
-                  style={{ width: 66 }}
-                  value={c.unit || ''}
-                  placeholder="单位"
-                  onChange={(e) => patchColumn(i, { unit: e.target.value })}
-                />
-                <input
-                  style={{ width: 66 }}
-                  value={c.default === undefined || c.default === null ? '' : String(c.default)}
-                  placeholder="默认值"
-                  title="新增行时的初值（不会写进已有行）"
-                  onChange={(e) => patchColumn(i, { default: e.target.value })}
-                />
-                {!c.computed ? (
-                  <label className="inline hint" title="这一列的值以 AES-256-GCM 密文落盘">
-                    <input type="checkbox" checked={c.sensitive} onChange={(e) => patchColumn(i, { sensitive: e.target.checked })} /> 密文
-                  </label>
-                ) : null}
-                <span className="grow" />
-                <button type="button" className="tf-mini" title="左移" disabled={i === 0} onClick={() => moveColumn(i, -1)}>←</button>
-                <button type="button" className="tf-mini" title="右移" disabled={i === cols.length - 1} onClick={() => moveColumn(i, 1)}>→</button>
-                <button type="button" className="tf-mini" title="删除这一列（连值一起删）" onClick={() => removeColumn(i)}>×</button>
-              </div>
-              {c.type === 'select' && !c.computed ? (
-                <input
-                  placeholder="下拉选项，逗号分隔，例如：未开始，进行中，已完成"
-                  value={(c.options || []).join('，')}
-                  onChange={(e) => patchColumn(i, { options: e.target.value.split(/[,，、]/).map((x) => x.trim()).filter(Boolean) })}
-                />
-              ) : null}
-              {c.computed ? (
-                <input
-                  className="mono"
-                  placeholder="公式，例如 qty * price"
-                  value={c.formula}
-                  onChange={(e) => patchColumn(i, { formula: e.target.value })}
-                />
-              ) : null}
-            </div>
-          ))}
-          <div className="rowgap">
-            <button type="button" className="btn small ghost" onClick={addColumn}>＋ 添加列</button>
-            <span className="hint">改完立即生效（保存条目后落盘）。列 key 建议英文，公式里最好写。</span>
-          </div>
-        </div>
-      ) : null}
-
       {table.errors.length ? (
         <div className="tf-errors">
           {table.errors.slice(0, 3).map((e, k) => (
@@ -470,6 +505,129 @@ export function TableFieldControl({ def, value, onChange }) {
       ) : null}
 
       {def.hint ? <span className="hint">{def.hint}</span> : null}
+
+      {menuCol ? (
+        <Popover anchor={colMenu.rect} onClose={() => setColMenu(null)} width={344}>
+          <div className="tf-pop-head">
+            <span className="tf-glyph large" aria-hidden>{menuCol.computed ? 'ƒ' : (TYPE_GLYPH[menuCol.type] || 'Aa')}</span>
+            <input
+              className="tf-pop-title"
+              value={menuCol.label}
+              placeholder="列名"
+              aria-label="列名"
+              onChange={(e) => patchColumn(colMenu.idx, { label: e.target.value })}
+            />
+            <select
+              className="tf-pop-type"
+              value={menuCol.computed ? 'formula' : menuCol.type}
+              aria-label="列类型"
+              onChange={(e) => {
+                const t = e.target.value;
+                if (t === 'formula') patchColumn(colMenu.idx, { type: 'number', formula: menuCol.formula || '' });
+                else patchColumn(colMenu.idx, { type: t, formula: '', options: t === 'select' ? (menuCol.options?.length ? menuCol.options : ['选项1', '选项2']) : [] });
+              }}
+            >
+              {TABLE_CELL_TYPES.map((t) => <option key={t} value={t}>{TYPE_LABEL[t] || t}</option>)}
+              <option value="formula">计算列（JS）</option>
+            </select>
+          </div>
+
+          <div className="tf-pop-field">
+            <span className="tf-pop-key">key</span>
+            <input
+              className="mono"
+              value={menuCol.key}
+              placeholder="列 key（公式里引用它）"
+              aria-label="列 key"
+              onChange={(e) => patchColumn(colMenu.idx, { key: e.target.value })}
+            />
+          </div>
+
+          {menuCol.computed ? (
+            <div className="tf-pop-field">
+              <span className="tf-pop-key">公式</span>
+              <input
+                className="mono"
+                value={menuCol.formula || ''}
+                placeholder="例如 qty * price"
+                aria-label="公式"
+                onChange={(e) => patchColumn(colMenu.idx, { formula: e.target.value })}
+              />
+            </div>
+          ) : (
+            <>
+              <div className="tf-pop-row">
+                <label className="tf-pop-field tight">
+                  <span className="tf-pop-key">单位</span>
+                  <input value={menuCol.unit || ''} placeholder="元 / 小时" onChange={(e) => patchColumn(colMenu.idx, { unit: e.target.value })} />
+                </label>
+                <label className="tf-pop-field tight">
+                  <span className="tf-pop-key">默认值</span>
+                  <input
+                    value={menuCol.default === undefined || menuCol.default === null ? '' : String(menuCol.default)}
+                    placeholder="新增行时的初值"
+                    onChange={(e) => patchColumn(colMenu.idx, { default: e.target.value })}
+                  />
+                </label>
+              </div>
+              {menuCol.type === 'select' ? (
+                <div className="tf-pop-field">
+                  <span className="tf-pop-key">选项</span>
+                  <input
+                    value={(menuCol.options || []).join('，')}
+                    placeholder="未开始，进行中，已完成"
+                    aria-label="下拉选项"
+                    onChange={(e) => {
+                      const options = e.target.value.split(/[,，、]/).map((x) => x.trim()).filter(Boolean);
+                      patchColumn(colMenu.idx, { options });
+                      setOptsTick((n) => n + 1);
+                    }}
+                  />
+                </div>
+              ) : null}
+            </>
+          )}
+
+          <div className="tf-pop-field">
+            <span className="tf-pop-key">统计</span>
+            <select
+              value={menuCol.total || ''}
+              aria-label="表尾统计方式"
+              onChange={(e) => patchColumn(colMenu.idx, { total: e.target.value })}
+            >
+              {TOTAL_OPTIONS.map(([v, t]) => <option key={v} value={v}>{t}</option>)}
+            </select>
+            {!menuCol.computed ? (
+              <label className="tf-pop-check" title="这一列的值以 AES-256-GCM 密文落盘">
+                <input type="checkbox" checked={!!menuCol.sensitive} onChange={(e) => patchColumn(colMenu.idx, { sensitive: e.target.checked })} />
+                密文
+              </label>
+            ) : null}
+          </div>
+
+          <div className="tf-pop-sep" />
+          <div className="tf-pop-grid">
+            <MenuItem glyph="←" disabled={colMenu.idx === 0} onClick={() => moveColumn(colMenu.idx, -1)}>左移</MenuItem>
+            <MenuItem glyph="→" disabled={colMenu.idx === cols.length - 1} onClick={() => moveColumn(colMenu.idx, 1)}>右移</MenuItem>
+            <MenuItem glyph="⇤" onClick={() => insertColumn(colMenu.idx)}>向左插入列</MenuItem>
+            <MenuItem glyph="⇥" onClick={() => insertColumn(colMenu.idx + 1)}>向右插入列</MenuItem>
+            <MenuItem glyph="⧉" onClick={() => duplicateColumn(colMenu.idx)}>复制属性</MenuItem>
+            <MenuItem glyph="×" danger onClick={() => removeColumn(colMenu.idx)}>删除属性</MenuItem>
+          </div>
+          <div className="tf-pop-foot">改动立即生效（保存条目后落盘）。key 建议英文，公式里最好写。</div>
+        </Popover>
+      ) : null}
+
+      {menuRow !== null ? (
+        <Popover anchor={rowMenu.rect} onClose={() => setRowMenu(null)} width={184}>
+          <div className="tf-pop-grid one">
+            <MenuItem glyph="⇧" onClick={() => { addRow(menuRow); setRowMenu(null); }}>在上方插入一行</MenuItem>
+            <MenuItem glyph="⇩" onClick={() => { addRow(menuRow + 1); setRowMenu(null); }}>在下方插入一行</MenuItem>
+            <MenuItem glyph="⧉" onClick={() => { duplicateRow(menuRow); setRowMenu(null); }}>复制这一行</MenuItem>
+            <MenuItem glyph="×" danger onClick={() => { removeRow(menuRow); setRowMenu(null); }}>删除这一行</MenuItem>
+          </div>
+        </Popover>
+      ) : null}
     </div>
   );
 }

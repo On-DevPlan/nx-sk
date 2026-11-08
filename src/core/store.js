@@ -6,6 +6,7 @@ import { displayPath, migrationDir, storeFile } from './paths.js';
 import { ensureDir, pathExists, writeAtomic } from './fsx.js';
 import { ensureSourceBuiltin, instantiateTemplate, seedEntries, seedSections, syncSectionGroups } from './fields.js';
 import { normalizeFileRecord } from './attachments.js';
+import { sanitizeLayout } from '../shared/blockLayout.js';
 import { nowIso, stamp } from './ids.js';
 
 /** v2：密钥栏目从 8 字段模板改成单字段 KV（名称 → 值）。
@@ -50,6 +51,9 @@ function normalizeSection(raw) {
     titleLabel: String(raw.titleLabel || '名称'),
     groups: Array.isArray(raw.groups) ? raw.groups.map((g) => ({ id: String(g.id), title: String(g.title || g.id) })) : [],
     fields: Array.isArray(raw.fields) ? raw.fields.map((x) => ({ ...x, key: String(x.key), label: String(x.label || x.key) })) : [],
+    // 版式（块布局）是**显示关系**，与字段字典分开存：结构归栏目，版式归这一份 JSON。
+    // 读的时候一律过 sanitizeLayout——手搓的脏 JSON 不许进 store，也不许让面板白屏。
+    layout: sanitizeLayout(raw.layout),
     createdAt: raw.createdAt || null,
     updatedAt: raw.updatedAt || null,
   };

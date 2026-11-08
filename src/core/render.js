@@ -8,6 +8,9 @@ import { isCipherBlob, maskValue } from './crypto.js';
 import { FILL_LABELS, fillPolicy, isExcludedField, isSensitiveField } from './fields.js';
 // 表格的「字段定义 + 数据」怎么合成一份自描述文档，只有一份实现（见 shared/table.js）。
 import { columnToDef, normalizeSpec } from '../shared/table.js';
+// 版式（块布局）的对齐规则也只有一份：读出去之前先按当前字段自愈一遍，
+// 面板与 CLI 才看到同一份「现在实际怎么摆」。
+import { groupsForLayout, reconcileLayout } from '../shared/blockLayout.js';
 
 export function isBlank(v) {
   if (v === null || v === undefined) return true;
@@ -207,6 +210,9 @@ export function dumpSection(section, entries, { mask = false, decrypt } = {}) {
       fields: section.fields.length,
     },
     groups: section.groups,
+    // 正文版式：分组面板的顺序、每块的位置/宽度/高度（按断点）。字段增删后在这里
+    // 对齐一次，所以读到的永远能直接渲染——不会出现「引用了已删字段的空块」。
+    layout: reconcileLayout(section.layout, groupsForLayout(section)),
     fields: section.fields.map((x) => ({
       key: x.key,
       label: x.label,
