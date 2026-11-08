@@ -5,6 +5,7 @@ import { assertFieldKey, assertSafeId } from '../../core/paths.js';
 import { badInput, blocked, conflict, notFound } from '../../core/errors.js';
 import { FILL_POLICIES, FIELD_TYPES, SOURCE_GROUP, ensureSourceBuiltin, findSection, getTemplate, groupFields, instantiateTemplate, mergeTemplate, sectionNames, syncSectionGroups, templateSummaries } from '../../core/fields.js';
 import { computeTable, sanitizeColumns, sanitizeTotals } from '../../shared/table.js';
+import { groupsForLayout, reconcileLayout, sanitizeLayout, sameLayout } from '../../shared/blockLayout.js';
 import { completeness, dumpSection, formatValue } from '../../core/render.js';
 import { sensitiveViewer } from '../../core/vault.js';
 import { nowIso } from '../../core/ids.js';
@@ -184,6 +185,8 @@ export async function getSection(ref) {
     updatedAt: s.updatedAt,
     groupList: s.groups,
     fieldList: s.fields,
+    // 版式（块布局）：agent 要照着改/复制版式时读这个字段，形状见 shared/blockLayout.js
+    layout: reconcileLayout(s.layout, groupsForLayout(s)),
   };
 }
 
@@ -240,6 +243,19 @@ export async function updateSection(ref, patch = {}) {
   // 标记/取消「本栏目是一张 KV 表」。取消要显式写 `--kv=false`（boolean flag 的 `=` 形式）
   if (patch.kv !== undefined) changes.kv = patch.kv === true;
   if (patch.titleField !== undefined) changes.titleField = patch.titleField ? assertFieldKey(patch.titleField) : null;
+  // —— 版式（块布局）——
+  // 「字段怎么摆」与「有哪些字段」是两件事：前者是一份独立的 JSON，可以整体读写，
+  // 也可以只让面板在拖拽后回写。--clear-layout 不是「删掉这份配置」而是「回到默认编排」——
+  // 删成 null 与没有配置在渲染上等价，不如直接落一份默认版式，读出来立刻可用。
+  const clearLayout = patch['clear-layout'] === true;
+  if (clearLayout) changes.layout = null;
+  else if (patch.layout !== undefined) {
+    const l = sanitizeLayout(patch.layout);
+    if (!l) {
+      throw badInput('--layout 需要版式 JSON 对象：{"mode":"grid|flow","panels":["分组id"],"groups":{"分组id":{"collapsed":false,"layouts":{"lg":[{"i":"字段key","x":0,"y":0,"w":6,"h":2}]}}}}');
+    }
+    changes.layout = l;
+  }
   if (patch.groups !== undefined) changes.groups = Array.isArray(patch.groups) ? patch.groups.map(validateGroupDef) : [];
   if (patch.fields !== undefined) {
     if (!Array.isArray(patch.fields)) throw badInput('--fields 需要是字段定义数组的 JSON');
@@ -461,8 +477,21 @@ export async function updateSection(ref, patch = {}) {
     if (synced.length !== base.length) changes.groups = synced;
   }
 
+  // 版式对齐：结构动过（增删字段 / 分组）或显式给了版式时，把版式按**最终结构**收拾一遍——
+  // 删掉的字段不再留空块，新字段接到组尾，删掉的分组整块移除。幂等：没动结构也没给版式时不落键，
+  // 免得「改个标题」也顺手写一份版式进 store。
+  const layoutGiven = changes.layout !== undefined;
+  const layoutBase = layoutGiven ? changes.layout : target.layout;
+  if (layoutGiven || (layoutBase && (changes.fields || changes.groups))) {
+    const next = reconcileLayout(layoutBase, groupsForLayout({
+      groups: changes.groups || target.groups,
+      fields: changes.fields || target.fields,
+    }));
+    if (layoutGiven || !sameLayout(next, layoutBase)) changes.layout = next;
+  }
+
   if (!Object.keys(changes).length) {
-    throw badInput('没有要修改的内容（可改 title / description / order / fields / groups / add-field / set-field / move-field / remove-field / add-group / rename-group / move-group / remove-group / fill）');
+    throw badInput('没有要修改的内容（可改 title / description / order / fields / groups / add-field / set-field / move-field / remove-field / add-group / rename-group / move-group / remove-group / fill / layout / clear-layout）');
   }
 
   if (dryRun) return { status: 'skipped', dryRun: true, wouldChange: changes, added, removed, fillChanged, ops };

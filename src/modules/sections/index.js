@@ -77,7 +77,7 @@ export default {
       id: 'section.update',
       cli: ['section', 'update'],
       http: ['PATCH', '/api/sections/:ref'],
-      summary: '改栏目（PATCH 语义：只改传入项）。**整个结构都能改**：分组用 add-group / rename-group / move-group / remove-group，字段用 add-field / set-field / move-field / remove-field / fields / fill；--kv 标成 KV 表',
+      summary: '改栏目（PATCH 语义：只改传入项）。**整个结构都能改**：分组用 add-group / rename-group / move-group / remove-group，字段用 add-field / set-field / move-field / remove-field / fields / fill；--kv 标成 KV 表；--layout 整体写版式（块布局），--clear-layout 回到默认编排',
       args: ['ref'],
       flags: {
         title: { type: 'string' },
@@ -97,6 +97,8 @@ export default {
         'move-group': { type: 'json', hint: '{"id":"contact","dir":"up|down"}，可重复' },
         'remove-group': { type: 'array', hint: '分组 id，可重复。**非空不给删**，内置「原始资料」不可删' },
         fill: { type: 'kv', hint: '字段=normal|optional|avoid，可重复。optional 不必填、avoid 填了可能减分，两者都不计入完整度；改回照常填传 normal' },
+        layout: { type: 'json', hint: '整体写版式（块布局）：{"mode":"grid|flow","panels":["分组id"],"groups":{"分组id":{"collapsed":false,"layouts":{"lg":[{"i":"字段key","x":0,"y":0,"w":6,"h":2}]}}}}。字段增删后旧版式会自动对齐（删掉的块移除、新字段接组尾）' },
+        'clear-layout': { type: 'boolean', hint: '版式回到默认编排（按字段顺序铺一遍）' },
         'dry-run': { type: 'boolean' },
       },
       run: (ctx) => service.updateSection(ctx.ref, ctx),

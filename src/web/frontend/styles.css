@@ -15,17 +15,24 @@
   --soft-2: #ebedf0;
   --mid: #8b9096;
   --danger: #b3261e;
-  --border: 1px solid var(--soft-2);
+  /* 分隔线：比 --soft-2 更淡的一层。全站「无边框」靠它——不是不要线，是不要把容器框起来 */
+  --line: rgba(20, 22, 26, .085);
+  --line-strong: rgba(20, 22, 26, .14);
+  --border: 1px solid var(--line);
 
   --row-h: 28px;
   --btn-h: 32px;
   --fs-core: 12px;
 
   --radius-btn: 8px;
+  --radius-box: 10px;
+  /* 块的 hover 底色：极淡，只为「这一块可以拖」给一点反馈，不做卡片 */
+  --hover: rgba(20, 22, 26, .028);
 
   --shadow-relief: -1px -1px 2px rgba(255, 255, 255, .85), 2px 2px 6px rgba(20, 22, 26, .07);
   --shadow-relief-press: inset 1px 1px 2px rgba(20, 22, 26, .10), inset -1px -1px 2px rgba(255, 255, 255, .7);
   --shadow-relief-inset: inset 1px 1px 2px rgba(20, 22, 26, .06), inset -1px -1px 2px rgba(255, 255, 255, .9);
+  --shadow-float: 0 6px 24px rgba(20, 22, 26, .12), 0 1px 2px rgba(20, 22, 26, .06);
 }
 
 * { box-sizing: border-box; }
@@ -111,7 +118,7 @@ nav.tabs {
 .tab-group .caret { transition: transform .12s ease; }
 .tab-group .tab[aria-expanded="true"] .caret { border-top-color: var(--ink); transform: rotate(180deg); }
 @media (prefers-reduced-motion: reduce) { .tab-group .caret { transition: none; } }
-/* 上下列表：与面板同一套立体语言（单层 relief，别叠成岛屿） */
+/* 上下列表：浮层用一层柔和投影 + 极淡描边（不再是浮雕） */
 .tab-menu {
   position: absolute; top: calc(100% + 4px); left: 0; z-index: 40;
   min-width: 172px; padding: 4px;
@@ -119,7 +126,7 @@ nav.tabs {
   background: var(--paper);
   border: var(--border);
   border-radius: var(--radius-btn);
-  box-shadow: var(--shadow-relief);
+  box-shadow: var(--shadow-float);
 }
 /* 桥：盖住 pill 与菜单之间那几像素的「死区」——鼠标下滑穿过它时不能被判成离开，
    否则菜单刚探出头就消失（hover 菜单的经典坑） */
@@ -139,7 +146,7 @@ nav.tabs {
 
 main.body { flex: 1; min-height: 0; overflow: auto; }
 
-/* ── tab：单层立体阴影，别叠 --shadow，叠两层就变岛屿 ── */
+/* ── tab：扁平药丸，选中只加深底色（无边框、无投影） ── */
 .tab {
   font: inherit;
   font-size: var(--fs-core);
@@ -147,18 +154,20 @@ main.body { flex: 1; min-height: 0; overflow: auto; }
   padding: 0 12px;
   border: 0;
   border-radius: var(--radius-btn);
-  background: var(--soft);
-  color: var(--ink);
+  background: transparent;
+  color: var(--mid);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   gap: 7px;
+  transition: background .12s, color .12s;
 }
+.tab:hover { background: var(--soft); color: var(--ink); }
 /* 计数是「元数据」不是名字的一部分：更小 + 等宽数字，让它退到标签之后 */
 .tab .count { color: var(--mid); font-size: 10px; font-variant-numeric: tabular-nums; }
-.tab.active { background: var(--paper); box-shadow: var(--shadow-relief); font-weight: 600; }
+.tab.active { background: var(--soft); color: var(--ink); font-weight: 600; }
 
-/* ── 按钮：凸起 → 按下内嵌 + 下沉 1px ── */
+/* ── 按钮：平色块 + hover 加深，按下沉 1px（不再用浮雕投影） ── */
 .btn {
   font: inherit;
   font-size: var(--fs-core);
@@ -169,31 +178,39 @@ main.body { flex: 1; min-height: 0; overflow: auto; }
   border-radius: var(--radius-btn);
   background: var(--ink);
   color: var(--paper);
-  box-shadow: var(--shadow-relief);
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  transition: box-shadow .12s, transform .08s;
+  transition: background .12s, transform .08s, opacity .12s;
 }
-.btn:hover:not(:disabled) { box-shadow: var(--shadow-relief), 0 0 0 3px rgba(20, 22, 26, .05); }
-.btn:active:not(:disabled) { box-shadow: var(--shadow-relief-press); transform: translateY(1px); }
-.btn:disabled { background: var(--soft); color: var(--mid); box-shadow: var(--shadow-relief-inset); cursor: not-allowed; }
-.btn.ghost { background: var(--soft); color: var(--ink); }
+.btn:hover:not(:disabled) { background: #2b2f36; }
+.btn:active:not(:disabled) { transform: translateY(1px); }
+.btn:disabled { background: var(--soft); color: var(--mid); cursor: not-allowed; }
+.btn.ghost { background: transparent; color: var(--ink); }
+.btn.ghost:hover:not(:disabled) { background: var(--soft); }
 .btn.danger { background: var(--danger); color: #fff; }
 .btn.small { height: 22px; padding: 0 8px; font-size: 11px; border-radius: 6px; }
 
+/* ── 输入：无边框浅底，focus 才显形（现代控件的基本约定） ── */
 input, select, textarea {
   font: inherit;
   font-size: var(--fs-core);
   color: var(--ink);
-  background: var(--paper);
-  border: var(--border);
-  border-radius: 6px;
+  background: var(--soft);
+  border: 1px solid transparent;
+  border-radius: 8px;
   padding: 0 8px;
+  transition: background .12s, border-color .12s;
 }
 input, select { height: var(--row-h); }
 textarea { padding: 5px 8px; resize: vertical; min-height: 56px; line-height: 1.5; }
-input:focus, select:focus, textarea:focus { outline: none; border-color: var(--soft-2); box-shadow: var(--shadow-relief-inset); }
+input:hover, select:hover, textarea:hover { background: var(--soft-2); }
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  background: var(--paper);
+  border-color: var(--line-strong);
+  box-shadow: none;
+}
 label.inline { display: inline-flex; align-items: center; gap: 6px; }
 
 /* ── 卡片：不投影、不 margin、不用大 padding；靠 1px 底线分隔 ── */
@@ -270,6 +287,177 @@ label.inline { display: inline-flex; align-items: center; gap: 6px; }
   letter-spacing: .5px;
 }
 
+/* ── 正文块布局（面板块）：分组 = 面板，字段 = 块 ──
+   版式由 react-grid-layout 算（拖 ⠿ 搬块、拖左右边缘改宽、窄屏自动折列），
+   这里只管「看起来是一份能读的文档」，**不参与定位计算**：
+     · 无边框、无底色——容器一律不框起来，靠留白与字号层级分节；
+     · 块的把手 / 字段 key / 面板操作平时不出现，hover 或聚焦才浮出；
+     · 高度由内容撑开（见 blockBoard.jsx 的测量），所以这里不写任何固定高度。 */
+.board { padding-bottom: 6px; }
+.board-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px 8px;
+  font-size: 11px;
+  color: var(--mid);
+}
+.board-tip { min-width: 0; }
+/* 工具默认退到背景里：正文优先，鼠标进来才「想起」有这些开关 */
+.board-bar .right { opacity: .35; transition: opacity .12s; }
+.board:hover .board-bar .right { opacity: 1; }
+
+.panel { margin-bottom: 6px; }
+/* 面板标题行也是抓手：整条可拖（与块头同一套手感），hover 给浅底 + 亮出 ⠿ */
+.panel-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 28px;
+  padding: 0 8px;
+  border-radius: 8px;
+  font-size: 11px;
+  color: var(--mid);
+  cursor: grab;
+  user-select: none;
+  transition: background .12s;
+}
+.panel-head:hover { background: var(--soft); }
+.panel-head:active { cursor: grabbing; }
+.panel-grip { color: var(--mid); opacity: .45; transition: opacity .12s; }
+.panel-head:hover .panel-grip { opacity: 1; }
+.panel-head .panel-title { color: var(--ink); font-weight: 600; font-size: 12px; letter-spacing: .2px; }
+.panel-count { color: var(--mid); font-size: 10px; font-variant-numeric: tabular-nums; }
+.panel-acts { opacity: 0; transition: opacity .12s; }
+.panel:hover .panel-acts,
+.panel:focus-within .panel-acts { opacity: 1; }
+.panel-toggle {
+  border: 0;
+  background: none;
+  padding: 0 2px;
+  color: var(--soft-2);
+  font-size: 11px;
+  cursor: pointer;
+}
+.panel:hover .panel-toggle { color: var(--mid); }
+.panel-toggle:hover { color: var(--ink); }
+.panel.dragging { opacity: .5; }
+/* 落点：一条 2px 的实线，比「整块高亮」更清楚会插到哪儿（与表格搬行同一套语义） */
+.panel.drop-before { box-shadow: inset 0 2px 0 var(--ink); }
+.panel.drop-after { box-shadow: inset 0 -2px 0 var(--ink); }
+.panel-body { padding: 0 6px; }
+.blk-grid { min-height: 4px; }
+
+/* 块：默认「看不见」——没边框也没底色；hover 才浮出极浅底色与把手。
+   阅读优先的意思是：一屏里最显眼的东西应该是**内容**，不是容器的边。 */
+/* 网格项（引擎注入定位的那层）是普通 div；块自己填满它，高度由内容量出来 */
+.blk-cell { height: 100%; }
+/* 插入式拖拽的反馈：拖动中整块变淡，落点是块的上/下缘一条 2px 实线
+   （和表头搬列、条目搬行同一套语义——「会插到这儿」，而不是「格子会亮」） */
+.blk-cell.dragging { opacity: .45; }
+.blk-cell.drop-before { box-shadow: inset 0 2px 0 var(--ink); }
+.blk-cell.drop-after { box-shadow: inset 0 -2px 0 var(--ink); }
+.blk {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  height: 100%;
+  padding: 0 4px;
+  border-radius: var(--radius-box);
+  overflow: hidden;
+}
+/* 块头 = 拖拽把手：整条都能按下去（只给 10px 的 ⠿ 点点太难瞄），
+   hover 时给一层浅底并亮出 ⠿，光标是 grab —— 三件事一起告诉用户「这行能拖」 */
+.blk-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 26px;
+  padding: 0 4px;
+  border-radius: 8px;
+  font-size: 11px;
+  color: var(--mid);
+  cursor: grab;
+  user-select: none;
+  transition: background .12s;
+}
+.blk-head:hover { background: var(--soft); }
+.blk-head:active { cursor: grabbing; }
+.blk-label { color: var(--mid); }
+.blk-head:hover .blk-label { color: var(--ink); }
+.blk-key { margin-left: auto; font-size: 10px; color: var(--soft-2); opacity: 0; transition: opacity .12s; }
+.blk-head:hover .blk-key { opacity: 1; }
+/* ⠿ 平时也看得见（淡）：完全隐藏的把手等于没有把手 */
+.blk-grip {
+  color: var(--mid);
+  opacity: .45;
+  transition: opacity .12s;
+}
+.blk-head:hover .blk-grip { opacity: 1; }
+/* 高度跟着内容长：块体不滚动、不裁字，块体高度就是内容的自然高度 */
+/* 块里的字比工具条大一号：正文是拿来读的，12px 只够「看参数」 */
+.blk-body { flex: 1; min-height: 0; font-size: 13px; }
+.blk-body input, .blk-body select, .blk-body textarea { width: 100%; font-size: 13px; }
+/* 拖动 / 改宽时这一块确实「浮」起来了——全站唯一允许投影的时刻 */
+.react-grid-item.react-draggable-dragging .blk,
+.react-grid-item.resizing .blk {
+  background: var(--paper);
+  box-shadow: var(--shadow-float);
+}
+/* 引擎的落点虚影：默认红色半透明 → 浅灰（全站唯一允许的彩色是语义红） */
+.react-grid-item.react-grid-placeholder {
+  background: var(--soft-2);
+  border-radius: var(--radius-box);
+  opacity: .5;
+}
+/* 只留左右手柄：竖一条，别用右下角那个箭头（高度不由人拖） */
+.react-grid-item > .react-resizable-handle::after {
+  right: 2px;
+  bottom: 50%;
+  width: 2px;
+  height: 14px;
+  margin-bottom: -7px;
+  border: 0;
+  border-radius: 2px;
+  background: var(--line-strong);
+}
+.react-grid-item > .react-resizable-handle.react-resizable-handle-w::after { left: 2px; right: auto; }
+
+/* 条目名：这一页的标题，不是「第一个字段」——字号抬到标题级，但仍是就地可改的输入 */
+.entry-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding-bottom: 6px;
+}
+.entry-title-label { color: var(--mid); font-size: 11px; flex-shrink: 0; }
+.entry-title-input {
+  flex: 1;
+  min-width: 0;
+  height: 32px;
+  padding: 0 6px;
+  font-size: 16px;
+  font-weight: 600;
+  background: transparent;
+  border-color: transparent;
+  border-radius: 8px;
+}
+.entry-title-input:hover { background: var(--soft); }
+.entry-title-input:focus { background: var(--paper); border-color: var(--line-strong); }
+
+/* 快捷加字段：熟手的旁路，默认收起——正文优先，别让一行表单常驻顶部 */
+.quick-add { padding: 0 14px 8px; font-size: 11px; color: var(--mid); }
+.quick-add > summary {
+  list-style: none;
+  width: fit-content;
+  padding: 2px 4px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.quick-add > summary::-webkit-details-marker { display: none; }
+.quick-add > summary:hover { color: var(--ink); background: var(--soft); }
+.quick-add[open] > summary { margin-bottom: 6px; }
+
 /* ── CLI 提示：文案通顺，命令之间用间隔点分开 ── */
 .cli-hint {
   display: flex;
@@ -286,14 +474,14 @@ label.inline { display: inline-flex; align-items: center; gap: 6px; }
 .cli-cmd { color: var(--ink); }
 
 /* ── toast ── */
-.toasts { position: fixed; right: 14px; bottom: 14px; display: flex; flex-direction: column; gap: 6px; z-index: 40; }
+.toasts { position: fixed; right: 14px; bottom: 14px; display: flex; flex-direction: column; gap: 6px; z-index: 70; }
 .toast {
   background: var(--ink);
   color: var(--paper);
   padding: 7px 12px;
   border-radius: 8px;
   font-size: var(--fs-core);
-  box-shadow: var(--shadow-relief);
+  box-shadow: var(--shadow-float);
   max-width: 420px;
 }
 .toast.bad { background: var(--danger); }
@@ -546,13 +734,22 @@ a.file-name:hover { text-decoration: underline; }
   padding: 10px 12px;
   background: var(--soft);
   border-radius: var(--radius-btn);
-  max-height: 340px;
+  /* 阅读优先：正文有多长就多高，**不再给 max-height + 内部滚动**——
+     长文被塞进一个 340px 的滚动框里，等于让读者在一个小窗口里读文档。
+     块的高度本来就跟内容走（见 blockBoard.jsx），这里不需要第二道限制。 */
   overflow: auto;
   font-size: 12.5px;
   line-height: 1.6;
 }
-/* 阅读态（没展开输入框）：给正文更多高度——这时候看的就是它，不该只有 340px */
-.md-preview.reading { max-height: 560px; }
+/* 阅读态：正文就是内容，工具行（编辑正文 / 字数 / 图片数）退到 hover——
+   一屏里不该有「364 字 · 图片 0 张」这种参数挡在正文前面 */
+.md-field.reading .md-tools { opacity: 0; transition: opacity .12s; }
+.md-field.reading:hover .md-tools,
+.md-field.reading:focus-within .md-tools { opacity: 1; }
+
+/* 阅读态（没展开输入框）：这时候看的就是正文本身——不封顶、也不再套一层灰底，
+   正文直接落在页面上（灰底只在编辑态用于圈出「可以贴图的那块」） */
+.md-preview.reading { max-height: none; background: transparent; padding: 0; }
 
 /* ── 抽屉的实时预览：贴在输入框正下方，打字即所见 ── */
 .source-draft-preview { display: flex; flex-direction: column; gap: 3px; }
@@ -1025,56 +1222,126 @@ a.file-name:hover { text-decoration: underline; }
 /* ============ 表格字段（table）：带类型的迷你表 + 统计行 ============ */
 /* 每行是一个独立 grid，列宽只由列定义决定 —— 内容再长也不会把某一行的列撑歪。
  * 行宽下限由 JS 算好写在 .tf-body 的 min-width 上：列多了横向滚动，而不是把列压没。 */
-.tablefield { display: flex; flex-direction: column; gap: 5px; }
-.tf-scroll { overflow-x: auto; border: var(--border); border-radius: var(--radius-btn); background: var(--paper); }
-.tf-body { display: flex; flex-direction: column; width: 100%; }
-.tf-row { display: grid; align-items: stretch; border-bottom: var(--border); }
-.tf-row:last-child { border-bottom: 0; }
-.tf-row:not(.tf-head):not(.tf-total):hover { background: var(--soft); }
+/* ══ 表格字段（type: table）：一张 Notion 式的数据库 ══
+ * 三条与「质感」直接相关的取舍：
+ *   1. **格子不是输入框**：单元格无边框、无底色，只有 1px 网格线；hover 整行浮起、
+ *      focus 才在格子里显一圈极淡的边界。一格格描边会让 8 列的表看起来像 8 个表单拼的。
+ *   2. **操作都收在 hover 里**：行号 → 变 ⋮ + ⠿，列头的 ⋮ 也是 hover 才出现。
+ *      静止时这页只有数据，没有一堆按钮。
+ *   3. **列管理是弹层不是表单**：以前表格下面铺着一整块「列设置」（一列一行、七八个输入框），
+ *      读起来像后台配置页；现在挂在列头上，一次只改一列。 */
+.tablefield { display: flex; flex-direction: column; gap: 6px; }
+.tf-scroll { overflow-x: auto; border: var(--border); border-radius: var(--radius-box); background: var(--paper); }
+.tf-body { display: flex; flex-direction: column; width: 100%; font-size: 13px; }
 
-.tf-head { background: var(--soft); border-bottom: 1px solid var(--soft-2); }
-.tf-th { display: flex; align-items: center; gap: 4px; min-width: 0; padding: 4px 7px; font-size: 11px; }
-.tf-th + .tf-th, .tf-th + .tf-th-acts { border-left: var(--border); }
-.tf-th-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; color: var(--ink); }
-.tf-th.right { justify-content: flex-end; }
+/* 行：网格；最后一行不留底边（外面已有容器边框） */
+.tf-row { display: grid; align-items: stretch; border-bottom: var(--border); position: relative; }
+.tf-row:last-of-type { border-bottom: 0; }
+.tf-row:not(.tf-head):not(.tf-total):hover { background: var(--soft); }
+.tf-row.dragging { opacity: .45; }
+
+/* 网格线：沟槽画右边，单元格画左边，紧邻沟槽的第一格不再重复画 */
+.tf-gutter { position: relative; display: flex; align-items: center; justify-content: center; gap: 1px; border-right: var(--border); color: var(--mid); font-size: 10px; }
+.tf-th, .tf-td { border-left: var(--border); }
+.tf-gutter + .tf-th, .tf-gutter + .tf-td { border-left: 0; }
+
+/* 左上角 + 行号：静止只显示行号，hover 换成「⋮ + ⠿」——操作不占静止状态的注意力 */
+.tf-gutter-head { background: var(--paper); }
+/* 行号与「⋮ / ⠿」共用同一格：行号绝对定位居中，按钮常驻布局但透明——
+   用 display:none 切换会让按钮在 hover 之前量到 0×0，键盘/脚本点开弹层就落在屏幕左上角。 */
+.tf-rownum { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--mid); font-variant-numeric: tabular-nums; }
+.tf-gutter .tf-row-more, .tf-gutter .tf-grip { opacity: 0; }
+.tf-row:hover .tf-rownum { opacity: 0; }
+.tf-row:hover .tf-row-more, .tf-row:hover .tf-grip, .tf-row-more:focus-visible, .tf-grip:focus-visible { opacity: 1; }
+.tf-rownum, .tf-row-more, .tf-grip { font-size: 10px; line-height: 1; }
+
+/* 表头：小字、纸色底；hover 出 ⋮，整格可拖（里面没有输入框，不会跟选词打架） */
+.tf-head { background: var(--paper); border-bottom: 1px solid var(--line-strong); }
+.tf-th {
+  display: flex; align-items: center; gap: 5px; min-width: 0; height: 32px; padding: 0 4px 0 8px;
+  color: var(--mid); font-size: 12px; cursor: grab;
+}
+.tf-th:active { cursor: grabbing; }
+.tf-th:hover { background: var(--soft); }
+.tf-glyph { flex-shrink: 0; width: 14px; color: var(--soft-2); font-size: 10px; text-align: center; }
+.tf-glyph.calc { color: var(--mid); }
+.tf-glyph.large { width: 20px; font-size: 13px; color: var(--mid); }
+.tf-th-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tf-th.right .tf-th-label { flex: 1; text-align: right; }
+.tf-th:hover .tf-th-label { color: var(--ink); }
 .tf-th.center { justify-content: center; }
+.tf-unit { flex-shrink: 0; color: var(--soft-2); font-size: 10px; }
 .tf-badge { flex-shrink: 0; padding: 0 4px; border-radius: 999px; background: var(--soft-2); color: var(--mid); font-size: 10px; line-height: 1.6; }
 .tf-badge.bad { color: var(--danger); }
-.tf-unit { flex-shrink: 0; color: var(--mid); font-size: 10px; }
+/* 表头末尾的「＋」：加列的入口就长在列尾（Notion 的做法），静止淡、hover 亮 */
+.tf-th-add { display: flex; align-items: center; justify-content: center; border-left: var(--border); }
+.tf-th-add-btn {
+  width: 100%; height: 100%; padding: 0; border: 0; background: transparent;
+  color: var(--soft-2); font-size: 12px; cursor: pointer;
+}
+.tf-th-add-btn:hover { background: var(--soft); color: var(--ink); }
+.tf-td-add { border-left: var(--border); }
 
-.tf-td { display: flex; align-items: center; min-width: 0; padding: 1px 3px; }
-.tf-td + .tf-td { border-left: var(--border); }
+.tf-th-more, .tf-row-more {
+  flex-shrink: 0; width: 16px; height: 18px; padding: 0; line-height: 1;
+  font-size: 11px; color: var(--mid); background: transparent; border: 0; border-radius: 4px; cursor: pointer;
+  opacity: 0; transition: opacity .12s;
+}
+.tf-th:hover .tf-th-more, .tf-th-more:focus-visible { opacity: 1; }
+.tf-th-more:hover { background: var(--soft-2); color: var(--ink); }
+
+/* 单元格：无边框无底色，只有网格线 */
+.tf-td { display: flex; align-items: center; min-width: 0; padding: 0; }
 .tf-td.right { justify-content: flex-end; }
 .tf-td.center { justify-content: center; }
-
-/* 输入框平时**无边框**（表格靠列线分隔就够了），悬停/聚焦才浮起来——
- * 一格格都描边的话，一张 8 列的表看起来像 8 个表单拼起来的。 */
 .tf-input {
-  width: 100%; min-width: 0; padding: 3px 5px;
-  font: inherit; font-size: var(--fs-core); color: inherit;
-  background: transparent; border: 1px solid transparent; border-radius: 5px;
+  width: 100%; min-width: 0; min-height: 32px; height: 100%; padding: 4px 8px;
+  font: inherit; font-size: 13px; color: inherit;
+  background: transparent; border: 0; border-radius: 0;
 }
-.tf-input:hover { border-color: var(--soft-2); }
-.tf-input:focus { outline: none; background: var(--paper); border-color: var(--mid); box-shadow: var(--shadow-relief-inset); }
+.tf-input:hover { background: transparent; }
+.tf-input:focus {
+  outline: none; background: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
 .tf-input.num, .tf-td.right .tf-input { text-align: right; font-variant-numeric: tabular-nums; }
 .tf-input::-webkit-outer-spin-button, .tf-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 .tf-input[type=number] { -moz-appearance: textfield; appearance: textfield; }
 .tf-select { padding-right: 2px; }
-.tf-bool { display: flex; align-items: center; justify-content: center; width: 100%; min-height: 24px; cursor: pointer; }
+.tf-bool { display: flex; align-items: center; justify-content: center; width: 100%; min-height: 32px; cursor: pointer; }
 .tf-bool input { margin: 0; cursor: pointer; accent-color: var(--ink); }
+/* 勾选格：14px 的小方框，别让全局 input 的宽高把它撑成一整格黑块 */
+.tf-check { width: 15px; height: 15px; min-height: 0; margin: 0; padding: 0; accent-color: var(--ink); cursor: pointer; }
+.tf-bar input[type=checkbox], .tf-pop-check input[type=checkbox] { width: 14px; height: 14px; margin: 0; accent-color: var(--ink); }
 
 /* 计算列：底色与「已锁定」同义（不落盘、只能改公式），数字等宽对齐 */
-.tf-calc { background: var(--soft); padding: 4px 7px; color: var(--ink); font-variant-numeric: tabular-nums; }
+.tf-calc { padding: 4px 8px; background: var(--soft); color: var(--ink); font-variant-numeric: tabular-nums; }
 .tf-td.has-err { background: #fdf3f2; }
 .tf-err { color: var(--danger); font-variant-numeric: normal; }
 
 /* 统计行：一条实线把它和正文分开，数字加粗 —— 它是「结论」，不是又一行数据 */
-.tf-total { border-top: 1px solid var(--mid); background: var(--paper); font-weight: 600; }
-.tf-total .tf-td { padding: 4px 7px; font-variant-numeric: tabular-nums; }
+.tf-total { border-top: 1px solid var(--line-strong); background: var(--paper); font-weight: 600; }
+.tf-total .tf-td { padding: 5px 8px; font-variant-numeric: tabular-nums; }
 .tf-sum-label { color: var(--mid); font-weight: 600; margin-right: 6px; }
 .tf-sum-label + .tf-sum-val { color: var(--ink); }
 
-.tf-acts { display: flex; align-items: center; justify-content: flex-end; gap: 1px; padding: 0 4px; }
+/* 新建行：就是表尾一整行（Notion 的做法），不用去工具栏找按钮 */
+.tf-addrow {
+  display: grid; align-items: center; width: 100%;
+  height: 32px; padding: 0; border: 0; border-top: var(--border);
+  background: transparent; color: var(--mid); font: inherit; font-size: 12px; text-align: left; cursor: pointer;
+}
+.tf-addrow:hover { background: var(--soft); color: var(--ink); }
+.tf-addrow .tf-gutter { height: 100%; }
+.tf-plus { color: var(--mid); font-size: 12px; }
+.tf-addrow-label { padding: 0 8px; }
+
+.tf-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tf-errors { display: flex; flex-direction: column; gap: 1px; }
+.tf-empty { padding: 10px 12px; border: 1px dashed var(--soft-2); border-radius: var(--radius-btn); }
+.btn.ghost.on { background: var(--soft-2); color: var(--ink); }
+
+/* 小图标键（表格 / 清单共用）：行内按钮 hover 才出现——密集表里的操作不该抢内容的注意力 */
 .tf-mini {
   width: 19px; height: 19px; padding: 0; line-height: 1;
   font-size: 11px; color: var(--mid); background: transparent;
@@ -1082,10 +1349,12 @@ a.file-name:hover { text-decoration: underline; }
 }
 .tf-mini:hover:not(:disabled) { background: var(--soft-2); color: var(--ink); }
 .tf-mini:disabled { opacity: .28; cursor: default; }
+.tablefield .tf-mini, .entrylist .tf-mini { width: 16px; height: 16px; font-size: 10px; }
+.tf-acts .tf-mini, .entrylist-acts .tf-mini { opacity: 0; transition: opacity .12s; }
+.tf-row:hover .tf-acts .tf-mini, .entrylist-row:hover .entrylist-acts .tf-mini,
+.tf-acts .tf-mini:focus-visible, .entrylist-acts .tf-mini:focus-visible { opacity: 1; }
 
-/* ── 拖拽排序：把手 + 插入线（表格 / 清单共用）──
- * 把手常驻但很淡，行内按钮 **hover 才出现** —— 密集表里的操作不该抢内容的注意力，
- * 这是「像 Notion 那种数据库」和「像一堆按钮」的分界。 */
+/* 把手：常驻但很淡（完全隐藏的把手等于没有把手） */
 .tf-grip {
   flex-shrink: 0;
   display: inline-flex; align-items: center; justify-content: center;
@@ -1095,12 +1364,9 @@ a.file-name:hover { text-decoration: underline; }
 }
 .tf-grip:hover { color: var(--ink); background: var(--soft-2); }
 .tf-grip:active { cursor: grabbing; }
-.tablefield .tf-mini, .entrylist .tf-mini { width: 16px; height: 16px; font-size: 10px; }
-.tf-acts .tf-mini, .entrylist-acts .tf-mini { opacity: 0; transition: opacity .12s; }
-.tf-row:hover .tf-acts .tf-mini, .entrylist-row:hover .entrylist-acts .tf-mini,
-.tf-acts .tf-mini:focus-visible, .entrylist-acts .tf-mini:focus-visible { opacity: 1; }
+
 /* 插入线：说清「会插到这里」。高亮整行/整列做不到这件事 */
-.tf-row, .tf-th, .tf-colrow, .entrylist-row { position: relative; }
+.tf-row, .tf-th, .entrylist-row { position: relative; }
 .tf-row.drop-before::before, .tf-row.drop-after::after,
 .entrylist-row.drop-before::before, .entrylist-row.drop-after::after {
   content: ''; position: absolute; left: 0; right: 0; height: 2px;
@@ -1108,35 +1374,54 @@ a.file-name:hover { text-decoration: underline; }
 }
 .tf-row.drop-before::before, .entrylist-row.drop-before::before { top: -1px; }
 .tf-row.drop-after::after, .entrylist-row.drop-after::after { bottom: -1px; }
-.tf-th.drop-before::before, .tf-th.drop-after::after,
-.tf-colrow.drop-before::before, .tf-colrow.drop-after::after {
+.tf-th.drop-before::before, .tf-th.drop-after::after {
   content: ''; position: absolute; top: 0; bottom: 0; width: 2px;
   background: var(--ink); z-index: 4; pointer-events: none;
 }
 .tf-th.drop-before::before { left: -1px; }
 .tf-th.drop-after::after { right: -1px; }
-.tf-colrow.drop-before::before { left: -4px; }
-.tf-colrow.drop-after::after { right: -4px; }
-.tf-row.dragging, .entrylist-row.dragging { opacity: .45; }
-.tf-head .tf-th { cursor: grab; }
-.tf-head .tf-th:active { cursor: grabbing; }
 
-.tf-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.tf-errors { display: flex; flex-direction: column; gap: 1px; }
-.tf-empty { padding: 10px 12px; border: 1px dashed var(--soft-2); border-radius: var(--radius-btn); }
-
-/* 列设置：改动的是**这条数据自己的列**，所以用虚线框和上方的表格分开——
- * 它不是字段字典（改字段字典会动到同栏目的所有条目）。 */
-.tf-cols {
+/* ── 列头 / 行 的弹层 ── */
+.tf-pop {
+  position: fixed; z-index: 80; overflow: auto;
   display: flex; flex-direction: column; gap: 6px;
-  padding: 8px 10px; border: 1px dashed var(--soft-2); border-radius: var(--radius-btn);
-  background: var(--soft);
+  padding: 8px;
+  background: var(--paper);
+  border: var(--border);
+  border-radius: var(--radius-box);
+  box-shadow: var(--shadow-float);
+  font-size: 12px;
 }
-.tf-colrow { display: flex; flex-direction: column; gap: 3px; padding-bottom: 5px; border-bottom: 1px dashed var(--soft-2); }
-.tf-colrow:last-of-type { border-bottom: 0; }
-.tf-colrow-main { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.tf-colrow input, .tf-colrow select { font-size: 11px; padding: 2px 5px; }
-.btn.ghost.on { background: var(--soft-2); color: var(--ink); }
+.tf-pop-head { display: flex; align-items: center; gap: 6px; }
+.tf-pop-title {
+  flex: 1; min-width: 0; height: 26px; padding: 0 4px;
+  font-size: 13px; font-weight: 600;
+  background: transparent; border-color: transparent;
+}
+.tf-pop-title:hover, .tf-pop-title:focus { background: var(--soft); }
+.tf-pop-type { width: 132px; flex-shrink: 0; font-size: 11px; }
+.tf-pop-field { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.tf-pop-field.tight { flex: 1; min-width: 0; }
+.tf-pop-field input, .tf-pop-field select { flex: 1; min-width: 0; height: 26px; font-size: 11px; }
+.tf-pop-key { width: 44px; flex-shrink: 0; color: var(--mid); font-size: 10px; }
+.tf-pop-row { display: flex; gap: 8px; align-items: flex-end; }
+.tf-pop-row .tf-pop-field.tight:first-child { flex: 0 0 96px; }
+.tf-pop-check { display: inline-flex; align-items: center; gap: 4px; color: var(--mid); font-size: 11px; white-space: nowrap; }
+.tf-pop-check input { accent-color: var(--ink); }
+.tf-pop-sep { height: 1px; margin: 2px -8px; background: var(--line); }
+.tf-pop-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; }
+.tf-pop-grid.one { grid-template-columns: 1fr; }
+.tf-pop-item {
+  display: flex; align-items: center; gap: 6px;
+  padding: 5px 6px; border: 0; border-radius: 6px;
+  background: transparent; color: var(--ink); font: inherit; font-size: 12px; text-align: left; cursor: pointer;
+}
+.tf-pop-item:hover:not(:disabled) { background: var(--soft); }
+.tf-pop-item:disabled { opacity: .35; cursor: default; }
+.tf-pop-item.danger { color: var(--danger); }
+.tf-pop-glyph { flex-shrink: 0; width: 14px; text-align: center; color: var(--mid); font-size: 11px; }
+.tf-pop-item.danger .tf-pop-glyph { color: var(--danger); }
+.tf-pop-foot { color: var(--mid); font-size: 10px; line-height: 1.5; }
 
 /* ============ 左右栏拖宽（条目列表 ↔ 内容） ============ */
 /* margin: 0 -14px 让把手恰好骑在 .cols 的 14px 间隙上——间距节奏不变，命中区变成整条间隙 */
@@ -1162,7 +1447,28 @@ body.col-resizing, body.col-resizing * { cursor: col-resize !important; user-sel
 .source-strip-preview { color: var(--mid); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 42%; }
 .source-caret { color: var(--mid); }
 
-.source-mask { justify-content: flex-end; padding: 0; }
+/* 侧边栏（原始资料）：常驻窗口右侧，**不遮不挡**——左边条目还能读、还能滚。
+   早先是「全屏遮罩 + 模态 dialog」，既挡视线又会被块的 overflow 裁掉。 */
+.source-drawer.side {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 45;
+  width: min(720px, 46vw);
+  box-shadow: var(--shadow-float);
+  animation: side-in .16s ease-out;
+}
+@keyframes side-in {
+  from { transform: translateX(18px); opacity: .5; }
+  to { transform: none; opacity: 1; }
+}
+@media (max-width: 900px) {
+  .source-drawer.side { width: 94vw; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .source-drawer.side { animation: none; }
+}
 .source-drawer {
   background: var(--paper); border-left: var(--border);
   width: min(760px, 94vw); height: 100%;

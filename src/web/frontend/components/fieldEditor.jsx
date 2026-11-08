@@ -456,7 +456,7 @@ export function MdImageFieldControl({ def, value, onChange }) {
 
   return (
     <div
-      className={`md-field ${dragOver ? 'drag' : ''}`}
+      className={`md-field ${editing ? 'editing' : 'reading'} ${dragOver ? 'drag' : ''}`}
       onDragEnter={(e) => { e.preventDefault(); dragDepth.current += 1; setDragOver(true); }}
       onDragOver={(e) => e.preventDefault()}
       onDragLeave={() => { dragDepth.current -= 1; if (dragDepth.current <= 0) { dragDepth.current = 0; setDragOver(false); } }}

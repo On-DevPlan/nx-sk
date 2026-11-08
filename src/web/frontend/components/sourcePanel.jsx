@@ -1,17 +1,21 @@
 // 原始资料袋（`type: 'source'`）的面板控件。
 //
-// 形态：**折叠条 → 右侧抽屉**。
+// 形态：**折叠条 → 右侧侧边栏（不是模态弹窗）**。
 //   - 折叠态只占一行（条目表单底部），标着「原始资料 · N 条」——它是个暂存区，
 //     不该在日常填表时占地方；但也不能藏到找不着的地方（「整理」之前得看得见）。
-//   - 抽屉里左边是清单（拖进来的一堆东西），右边是选中那条的正文 ——
+//   - 侧边栏里左边是清单（拖进来的一堆东西），右边是选中那条的正文 ——
 //     master-detail 是这类「一堆待处理素材」唯一说得清的布局。
+//   - **不遮不挡**：它是常驻窗口右侧的侧栏（portal 到 body，fixed 定位），
+//     左边条目仍然能读、能滚——整理素材和读原文是同一件事的两步，不该互相盖住。
+//     （早先是「全屏遮罩 + 模态 dialog」：既挡视线，又会被块的 overflow 裁掉。）
 //
 // 三条可访问性硬要求（来自 WCAG 2.2 AA，不是装饰）：
 //   1. **拖拽不能是唯一入口**（Dragging Movements）：必须同时给「选择文件」按钮与
 //      「粘贴文字」输入框，且全程键盘可达。
-//   2. **焦点看得见**：抽屉里每个可点的东西都有 focus 环（模态内的焦点指示器是 High 级要求）。
+//   2. **焦点看得见**：侧边栏里每个可点的东西都有 focus 环（焦点指示器是 High 级要求）。
 //   3. **焦点不被遮住 / 关掉要还回来**：打开时聚焦清单，关掉时焦点回到折叠条。
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { api } from '../api/client.js';
 import { fileToDataUrl, listAttachments } from '../api/files.js';
 import { toggleTaskAtLine } from '../mdSource.js';
@@ -271,24 +275,20 @@ function SourceDrawer({ items, onChange, onClose, title, sectionTitle }) {
   const fileRec = selected?.kind === 'file' ? files[selected.fileId] : null;
   const editing = editId !== null;
 
-  return (
-    <div
-      className="mask source-mask"
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+  return createPortal((
+    <>
+    <aside
+      className="source-drawer side"
+      role="complementary"
+      aria-label="原始资料（侧边栏）"
+      ref={triggerRef}
     >
-      <aside
-        className="source-drawer"
-        role="dialog"
-        aria-modal="true"
-        aria-label="原始资料"
-        ref={triggerRef}
-      >
         <div className="source-drawer-head">
           <strong className="nowrap">原始资料</strong>
           <span className="muted nowrap">{sectionTitle ? `${sectionTitle} · ` : ''}{title || ''}</span>
           <span className="grow" />
           <span className="tag">{items.length} 条</span>
-          <button type="button" className="btn small ghost" onClick={onClose}>关闭</button>
+          <button type="button" className="btn small ghost" onClick={onClose} title="关闭（Esc）">关闭</button>
         </div>
 
         <div className="source-drawer-body">
@@ -493,8 +493,8 @@ function SourceDrawer({ items, onChange, onClose, title, sectionTitle }) {
       </aside>
 
       {zoom ? <Lightbox item={zoom} onClose={() => setZoom(null)} /> : null}
-    </div>
-  );
+    </>
+  ), document.body);
 }
 
 /**

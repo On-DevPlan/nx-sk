@@ -510,6 +510,26 @@ step('改字段标签（key 不动，已填的值不丢）', apiSetField.status 
 const apiFieldBack = await j('/api/sections/job');
 step('改的是 label，key 仍是 phone', apiFieldBack.body.data.fieldList.some((f) => f.key === 'phone' && f.label === '手机号(改)'));
 
+// ── 正文版式（块布局）：面板拖完块回写的就是这条 PATCH ──
+// 版式与字段字典**分开存**（section.layout），字段增删后要能自愈。这条链路最容易
+// 「后端存进去了、面板读不回来」，所以 HTTP 与 CLI 两头都钉一下。
+const layoutPatch = await j('/api/sections/job', {
+  method: 'PATCH',
+  body: { layout: { mode: 'grid', panels: ['basic'], groups: { basic: { layouts: { lg: [{ i: 'name', x: 0, y: 0, w: 8, h: 2 }] } } } } },
+});
+step('PATCH 写版式（面板拖块后回写的就是它）', layoutPatch.status === 200 && layoutPatch.body.data.changed.includes('layout'));
+const layoutDump = await j('/api/sections/job/dump');
+const lgItems = layoutDump.body.data.layout.groups.basic.layouts.lg;
+step('dump 带出版式，并按当前字段补齐了块', lgItems.length > 1 && lgItems[0].i === 'name' && lgItems[0].w === 8);
+const layoutCli = await cliJson(['section', 'get', 'job']);
+step('CLI 读到的版式与面板同源', layoutCli.layout.mode === 'grid' && layoutCli.layout.groups.basic.layouts.lg[0].w === 8);
+const apiRmLayoutField = await j('/api/sections/job', { method: 'PATCH', body: { 'remove-field': 'qq' } });
+const layoutAfterRm = (await j('/api/sections/job/dump')).body.data.layout.groups.contact.layouts.lg;
+step('删字段后版式自愈（不留孤儿块）', apiRmLayoutField.status === 200 && !layoutAfterRm.some((x) => x.i === 'qq'));
+const cliClearLayout = await cliJson(['section', 'update', 'job', '--clear-layout']);
+const layoutCleared = (await cliJson(['section', 'get', 'job'])).layout.groups.basic.layouts.lg;
+step('CLI --clear-layout 回到默认编排', cliClearLayout.changed.includes('layout') && layoutCleared[0].w === 6 && layoutCleared[0].y === 0);
+
 const apiNotFound = await j('/api/entries/不存在的东西');
 step('不存在的条目报 404 NOT_FOUND', apiNotFound.status === 404 && apiNotFound.body.code === 'NOT_FOUND');
 
