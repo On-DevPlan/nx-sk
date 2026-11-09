@@ -375,3 +375,48 @@ test('预览冲突明细：区分同 id / 同标题，并给出另存后的新�
   assert.equal(p3.entries.conflicts.length, 0);
   assert.equal(p3.entries.fresh, p3.entries.total);
 });
+
+test('表格的敏感列在导出包里是明文（与顶层密文字段同一口径）', async () => {
+  const { isCipherBlob } = await import('../../src/core/crypto.js');
+  const { loadStore } = await import('../../src/core/store.js');
+  const id = 'tblsec';
+  await sections.addSection({
+    id,
+    title: '表格密文',
+    groups: GROUPS,
+    fields: [
+      { key: 'name', label: '名称', type: 'text', group: 'main' },
+      {
+        key: 'rows',
+        label: '账号表',
+        type: 'table',
+        group: 'main',
+        columns: [
+          { key: 'site', label: '站点', type: 'text' },
+          { key: 'pass', label: '密码', type: 'text', sensitive: true },
+        ],
+      },
+    ],
+  });
+  await entries.addEntry({
+    section: id,
+    title: '账号',
+    set: {
+      name: '账号',
+      rows: [{ site: 'a.test', pass: 'P@ss1' }, { site: 'b.test', pass: 'P@ss2' }],
+    },
+  });
+
+  // 前提校验：落盘确实是密文，否则「包里是明文」这条断言会假通过
+  const db = await loadStore();
+  const rec = db.entries.find((e) => e.section === id && e.title === '账号');
+  assert.ok(isCipherBlob(rec.values.rows.rows[0].pass), '表格敏感列落盘应为密文');
+
+  const zip = await transfer.buildSectionZip(id, { withSecrets: true });
+  const man = manifestOf(zip.buffer);
+  assert.deepEqual(
+    man.entries[0].values.rows.rows,
+    [{ site: 'a.test', pass: 'P@ss1' }, { site: 'b.test', pass: 'P@ss2' }],
+    '导出包里的表格敏感列应是明文，跨机器导入才能用',
+  );
+});

@@ -83,6 +83,29 @@ async function plainValues(section, values) {
     }
     out[f.key] = plain;
   }
+  // 表格（table）的敏感列同理。**列以值自带的 columns 为准**（表格的列存在数据里，
+  // 字段定义里只有「初始列」）—— 用 f.columns 会漏掉编辑时新加的敏感列。
+  for (const f of section.fields || []) {
+    if (f.type !== 'table') continue;
+    const doc = out[f.key];
+    if (!doc || typeof doc !== 'object' || !Array.isArray(doc.rows)) continue;
+    const sensitiveKeys = (Array.isArray(doc.columns) ? doc.columns : [])
+      .filter((c) => c && c.sensitive).map((c) => c.key);
+    if (!sensitiveKeys.length) continue;
+    let vaultKey = null;
+    const rows = [];
+    for (const row of doc.rows) {
+      if (!row || typeof row !== 'object' || Array.isArray(row)) { rows.push(row); continue; }
+      const next = { ...row };
+      for (const k of sensitiveKeys) {
+        if (!isCipherBlob(next[k])) continue;
+        if (!vaultKey) ({ key: vaultKey } = await resolveVaultKey());
+        next[k] = decryptValue(vaultKey, next[k]);
+      }
+      rows.push(next);
+    }
+    out[f.key] = { ...doc, rows };
+  }
   return out;
 }
 
