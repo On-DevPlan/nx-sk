@@ -30,22 +30,43 @@ test('模块目录 ↔ 后端注册表对账（双向）', async () => {
   assert.deepEqual(dirs, registered, `src/modules 下的目录与 registry.js 的 MODULES 必须一一对应`);
 });
 
-test('带 view 的模块都在前端注册表登记，且注册表里没有孤儿', async () => {
-  const needView = MODULES.filter((m) => m.view).map((m) => m.id).sort();
-  const registered = VIEWS.map((v) => v.id).sort();
-  assert.deepEqual(registered, needView, 'VIEWS 与「声明了 view 的模块」必须一一对应（tab:false 的也要在）');
+const VIEW_DIR = 'src/web/frontend/modules';
 
-  // 声明了 view 就必须有文件——否则 vite build 会报错，但报错信息离根因很远
-  for (const m of MODULES.filter((x) => x.view)) {
-    const content = await readIfExists(join(ROOT, 'src/modules', m.id, 'view.jsx'));
-    assert.ok(content, `模块 ${m.id} 声明了 view 却没有 view.jsx`);
+test('视图目录 ↔ 前端 VIEWS 一一对应，后端模块不声明视图', async () => {
+  // 后端只描述 action。一旦某个模块重新长出 view / tab 这类视图字段，
+  // 面板就又变成「两份声明」，本条断言负责在提交前拦住。
+  for (const m of MODULES) {
+    assert.equal(m.view, undefined, `模块 ${m.id} 不得声明 view——视图只在 src/web/frontend/registry.js 登记`);
+    assert.equal(m.tab, undefined, `模块 ${m.id} 不得声明 tab——那是面板导航的属性，不是对外接口`);
   }
-  // 反过来：有 view.jsx 却忘了声明 view
+
+  // 单向：前端目录里有什么，VIEWS 就必须登记什么；反过来 VIEWS 也不能引用不存在的目录。
+  const dirs = await listDirs(VIEW_DIR);
+  const registered = VIEWS.map((v) => v.id).sort();
+  assert.deepEqual(registered, dirs, `${VIEW_DIR} 下的目录与 VIEWS 必须一一对应`);
+
+  // 登记必须用字面量 import()，否则 Vite 静态分析不了、失去代码分割
+  const regSrc = await readFile(join(ROOT, 'src/web/frontend/registry.js'), 'utf8');
+  for (const v of VIEWS) {
+    const p = join(ROOT, VIEW_DIR, v.id, 'view.jsx');
+    assert.ok(await readIfExists(p), `VIEWS 登记了 ${v.id} 却没有 ${VIEW_DIR}/${v.id}/view.jsx`);
+    assert.ok(
+      regSrc.includes(`import('./modules/${v.id}/view.jsx')`),
+      `VIEWS 里 ${v.id} 的 component 必须写成字面量 import('./modules/${v.id}/view.jsx')`,
+    );
+  }
+});
+
+test('后端源码里不出现 .jsx 引用（视图不属于后端模块）', async () => {
+  const problems = [];
   for (const id of await listDirs('src/modules')) {
-    const content = await readIfExists(join(ROOT, 'src/modules', id, 'view.jsx'));
-    const mod = MODULES.find((m) => m.id === id);
-    assert.equal(!!content, !!mod.view, `模块 ${id} 的 view.jsx 存在性与 index.js 的 view 声明不一致`);
+    for (const name of await readdir(join(ROOT, 'src/modules', id))) {
+      if (!name.endsWith('.js')) continue;
+      const src = await readFile(join(ROOT, 'src/modules', id, name), 'utf8');
+      if (src.includes('.jsx')) problems.push(`src/modules/${id}/${name}`);
+    }
   }
+  assert.deepEqual(problems, [], `后端文件里出现了 .jsx 引用:\n${problems.join('\n')}`);
 });
 
 const CRUD_VERB = { list: 'list', get: 'get', create: 'add', update: 'update', remove: 'remove' };
@@ -112,7 +133,7 @@ test('skill 命令必须一直在 CLI 里（撤掉面板 ≠ 撤掉功能）', (
     assert.ok(cliPathsOf(a).length, `${id} 缺 CLI 命令`);
   }
   const skill = MODULES.find((m) => m.id === 'skill');
-  assert.equal(skill.view, null, 'skill 按用户要求不呈现在 Web 面板');
+  assert.ok(skill, 'skill 模块不见了');
   assert.equal(VIEWS.some((v) => v.id === 'skill'), false, 'VIEWS 里不该再有 skill');
 });
 
@@ -206,12 +227,8 @@ test('视图里调用的每个 /api/... 都有对应路由（规则本身先反�
   assert.ok(!ROUTES.some((r) => covered(wrong[0], r.path) && r.path === '/api/sections/:ref/dump'), '拼错路径必须被判为未覆盖');
 
   const files = [];
-  for (const id of await listDirs('src/modules')) {
-    const p = join(ROOT, 'src/modules', id, 'view.jsx');
-    if (await readIfExists(p)) files.push({ id, path: p });
-  }
-  for (const id of await listDirs('src/web/frontend')) {
-    const p = join(ROOT, 'src/web/frontend', id, 'view.jsx');
+  for (const id of await listDirs(VIEW_DIR)) {
+    const p = join(ROOT, VIEW_DIR, id, 'view.jsx');
     if (await readIfExists(p)) files.push({ id, path: p });
   }
   const frontendFiles = await readdir(join(ROOT, 'src/web/frontend'), { withFileTypes: true });
@@ -242,9 +259,10 @@ test('eslint 的模块互依禁列覆盖所有兄弟模块（settings 是唯一�
   assert.deepEqual([...listed].sort(), expect,
     '新增模块必须往 SIBLING_MODULES 里补一行——漏补是**静默**的，没有任何断言会替你发现');
 
-  // 前端禁列的 files 必须覆盖模块下的视图文件，否则真正写视图的那个文件反而不受约束
-  const frontFiles = /files: \['src\/web\/frontend\/\*\*\/\*\.\{js,jsx\}',\s*'src\/modules\/\*\*\/\*\.jsx'\]/.exec(cfg);
-  assert.ok(frontFiles, '前端禁列的 files 必须用通配把 modules 下的 .jsx 也框进来（用 **/view.jsx 会被"改个文件名"绕过）');
+  // 前端禁列的 files 必须覆盖整个前端目录（视图现在就在里面），
+  // 否则真正写视图的那个文件反而不受约束
+  const frontFiles = /files: \['src\/web\/frontend\/\*\*\/\*\.\{js,jsx\}'\]/.exec(cfg);
+  assert.ok(frontFiles, '前端禁列的 files 必须用通配覆盖 src/web/frontend 下的所有 js/jsx（写死单个文件会被"改个名字"绕过）');
 });
 
 test('面板无 emoji、不使用浏览器原生弹窗', async () => {
@@ -260,7 +278,7 @@ test('面板无 emoji、不使用浏览器原生弹窗', async () => {
     }
   };
   for (const id of await listDirs('src/modules')) {
-    for (const name of ['view.jsx', 'service.js', 'index.js']) {
+    for (const name of ['service.js', 'index.js']) {
       const p = join(ROOT, 'src/modules', id, name);
       if (await readIfExists(p)) files.push(p);
     }
@@ -514,8 +532,8 @@ test('视图写请求的 body 键必须声明过（applySpec 会静默丢掉未�
   assert.deepEqual(good.problems, [], '包在 set 里的写法要判绿');
 
   const files = [];
-  for (const id of await listDirs('src/modules')) {
-    const p = join(ROOT, 'src/modules', id, 'view.jsx');
+  for (const id of await listDirs(VIEW_DIR)) {
+    const p = join(ROOT, VIEW_DIR, id, 'view.jsx');
     if (await readIfExists(p)) files.push({ id, path: p });
   }
   const problems = [];

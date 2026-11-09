@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { api } from '../../web/frontend/api/client.js';
-import { useStore } from '../../web/frontend/store.jsx';
-import { CliHints, Empty, Modal, Tag } from '../../web/frontend/components/ui.jsx';
-import { checkZipFile, fmtBytes, postZip } from '../../web/frontend/api/zip.js';
+import { api } from '../../api/client.js';
+import { useStore } from '../../store.jsx';
+import { CliHints, Empty, Modal, Tag } from '../../components/ui.jsx';
+import { checkZipFile, fmtBytes, postZip } from '../../api/zip.js';
 
 // 选中项用带前缀的 key：栏目与条目在同一个集合里，前缀就是它们的「类型」。
 // 好处是「全选 / 反选 / 计数」只处理一个 Set，不必维护两份状态再想办法对齐。

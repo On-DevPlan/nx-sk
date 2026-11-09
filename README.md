@@ -516,9 +516,9 @@ pnpm test        # = lint + build + 冒烟 + 单测
 | --- | --- |
 | `bin/nx-sk.mjs` | 唯一入口，只转发 argv + 兜异常 |
 | `src/core/` | 零业务语义：paths / errors / store / fsx / crypto / vault / fields / attachments / render / ids / open |
-| `src/modules/<域>/` | `index.js`(action 声明) + `service.js`(业务) + `view.jsx`(面板) |
+| `src/modules/<域>/` | `index.js`(action 声明) + `service.js`(业务)。**不声明视图** |
 | `src/runtime/` | registry / spec / cli / api / server —— 装配层，不写业务 |
-| `src/web/frontend/` | React 壳 + 组件 + 视图注册表 |
+| `src/web/frontend/` | React 壳 + 组件 + `modules/<域>/view.jsx` + 视图注册表（视图只住这里） |
 | `assets/nx-sk/` | 随包分发的 skill（SKILL.md + references/） |
 | `tests/unit/` · `tests/smoke.mjs` | 一致性断言 + 端到端冒烟 |
 
@@ -553,7 +553,7 @@ agent 手册** —— 它写在创建本项目的脚手架 skill `server-cli-web
 | 把打码值当成新值写回去 | 密钥字段被写成 `sk-1****cdef` 这串掩码，**原凭据永久丢失** | 写入前比对掩码：相等就当成「未改动」保留原密文；含 `******` 的值直接拒绝 |
 | 删条目/栏目没有留退路 | 误删即不可逆；这是用户的**唯一一份**个人信息 | 破坏性写操作一律先 `transfer export` 导出，导出的包就是唯一回退手段 —— 不另设本地备份模块 |
 | store.json 解析失败就当空库继续 | 下一次写入把用户数据永久覆盖 | 先把损坏文件改名为 `store.json.corrupt-<时间>.json`，再降级返回空结构 |
-| 前端 import 了 `node:*` 或 `core/` | Vite 把 Node 侧代码打进浏览器包，dev 模式白屏 | lint 的 `files` 同时覆盖 `view.jsx`，禁掉 `node:*` / `core` / `runtime` / `service.js` |
+| 前端 import 了 `node:*` 或 `core/` | Vite 把 Node 侧代码打进浏览器包，dev 模式白屏 | lint 的 `files` 覆盖整个 `src/web/frontend/**`（视图都在这里），禁掉 `node:*` / `core` / `runtime` / `service.js` |
 | 新增模块忘了往 eslint 互依禁列里补一行 | **静默**：新模块变成「谁都可以依赖」，且规则随模块数增加持续衰减 | 在禁列旁留注释说明它是**逐模块枚举**的、漏补是静默的；加模块前先读 `eslint.config.js` |
 | 代理前缀 `/api` 与前端源码目录 `api/` 撞车 | 只在 dev 模式整页白屏，报错却是 404 / ECONNREFUSED，离根因很远 | vite 代理加 `bypass`，按「是不是前端资源」分流；并用测试钉住 `shouldServeLocally` |
 | 把「上传 / 选择」放到附件中心，再让条目去引用 | 条目里看不到上传入口，用户不知道该在哪儿加文件；附件中心还被迫预定义分类与槽位，跟栏目脱节 | **上传 / 选择发生在栏目条目里**（`file` 字段的值 = 附件 id）；附件中心由栏目驱动、只做统一展示与库存管理，**不预定义分类、不做指派** |

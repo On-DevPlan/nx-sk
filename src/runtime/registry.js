@@ -6,14 +6,14 @@ import { cliPathsOf, usageOf } from './spec.js';
 import sections from '../modules/sections/index.js';
 import entries from '../modules/entries/index.js';
 import files from '../modules/files/index.js';
-import exportModule from '../modules/export/index.js';
 import transfer from '../modules/transfer/index.js';
 import skill from '../modules/skill/index.js';
 import settings from '../modules/settings/index.js';
 import system from '../modules/system/index.js';
 
-// 顺序 = 面板 tab 顺序与 help 分组顺序（system 放最后，它是聚合模块）
-export const MODULES = [sections, entries, files, exportModule, transfer, skill, settings, system]
+// 顺序 = help 分组顺序（system 放最后，它是聚合模块）。
+// 模块只声明「对外接口」（action），不声明视图——面板的 tab 由前端 registry 自己登记。
+export const MODULES = [sections, entries, files, transfer, skill, settings, system]
   .slice()
   .sort((a, b) => (a.order || 50) - (b.order || 50));
 

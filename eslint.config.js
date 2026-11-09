@@ -29,7 +29,6 @@ const SIBLING_MODULES = [
   '../sections/*',
   '../entries/*',
   '../files/*',
-  '../export/*',
   '../transfer/*',
   '../skill/*',
 ];
@@ -80,23 +79,23 @@ export default [
     rules: { 'react/jsx-uses-vars': 'error', 'react/jsx-uses-react': 'off' },
   },
 
-  // hooks 规则只对视图与前端壳生效
+  // hooks 规则只对视图与前端壳生效（视图现在就在前端目录里，一套 files 就够了）
   {
-    files: ['src/web/frontend/**/*.jsx', 'src/modules/**/view.jsx'],
+    files: ['src/web/frontend/**/*.jsx'],
     plugins: { 'react-hooks': reactHooks },
     rules: { 'react-hooks/rules-of-hooks': 'error', 'react-hooks/exhaustive-deps': 'warn' },
   },
 
-  // 前后端边界——价值最高的一条。files 必须**同时覆盖 modules 下的 .jsx**，
-  // 否则真正写视图的那个文件反而不受约束；用 `**/*.jsx` 而不是 `**/view.jsx`，
-  // 这样「改个文件名就绕过规则」这条路也堵上了。
+  // 前后端边界——价值最高的一条。视图全部住在 src/web/frontend 下，
+  // 所以 files 用一条 `**/*.{js,jsx}` 就覆盖了所有前端代码；
+  // 不需要再单独给 modules 下的 .jsx 开口子（那里已经没有前端文件了）。
   {
-    files: ['src/web/frontend/**/*.{js,jsx}', 'src/modules/**/*.jsx'],
+    files: ['src/web/frontend/**/*.{js,jsx}'],
     rules: {
       'no-restricted-imports': ['error', { patterns: [
         { group: ['node:*'], message: '前端不能引用 Node 内置模块。' },
         { group: ['**/modules/*/index.js', '**/modules/*/service.js', '**/runtime/**', '**/core/**'],
-          message: '前端只能 import 模块的 view.jsx，以及 web/frontend 下的组件与 api 客户端。' },
+          message: '前端只能 import web/frontend 下的组件与 api 客户端，以及 src/shared 的纯函数；后端模块属于另一个运行时。' },
       ] }],
     },
   },

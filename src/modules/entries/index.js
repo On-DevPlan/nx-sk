@@ -4,9 +4,6 @@ export default {
   id: 'entries',
   title: '条目',
   order: 600,
-  // 有视图，但**不是独立 tab**——它由「栏目」动态挂载（每个栏目一个 tab，共用这个视图）
-  view: () => import('./view.jsx'),
-  tab: false,
   // 一组同级实体，每条有标识，用户会想改其中一条或删其中一条 → 集合资源
   resource: 'entry',
   actions: [

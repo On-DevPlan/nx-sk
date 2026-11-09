@@ -4,7 +4,6 @@ export default {
   id: 'sections',
   title: '栏目',
   order: 500,
-  view: () => import('./view.jsx'),
   // 一组同级实体，每条有标识，用户会想改其中一条或删其中一条 → 集合资源，CRUD 五操作齐备
   resource: 'section',
   actions: [
