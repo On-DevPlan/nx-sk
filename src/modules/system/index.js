@@ -5,7 +5,6 @@ export default {
   title: '系统',
   order: 100,
   // 聚合模块：只读聚合，没有面板（面板里没有「系统」这个 tab）
-  view: null,
   actions: [
     {
       id: 'system.bootstrap',

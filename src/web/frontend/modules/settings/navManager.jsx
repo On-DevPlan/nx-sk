@@ -16,7 +16,7 @@
 // （inset 阴影压在行边上）表示。列表在拖动期间是静止的 → 指针与行的对应关系恒定，
 // 落点只随指针单调变化，怎么晃都不会跳。松手一次性提交，结果就是指示线指的位置。
 import { useState } from 'react';
-import * as nav from '../../web/frontend/components/navModel.js';
+import * as nav from '../../components/navModel.js';
 
 export default function NavManager({ sections, value, onChange }) {
   const [drag, setDrag] = useState(null); // { kind:'section', sid } | { kind:'group', gi }

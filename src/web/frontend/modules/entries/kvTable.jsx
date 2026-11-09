@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api } from '../../web/frontend/api/client.js';
-import { useStore } from '../../web/frontend/store.jsx';
-import { CliHints, Copyable, Empty } from '../../web/frontend/components/ui.jsx';
+import { api } from '../../api/client.js';
+import { useStore } from '../../store.jsx';
+import { CliHints, Copyable, Empty } from '../../components/ui.jsx';
 
 /**
  * KV 表格：`kv: true` 栏目的**唯一**编辑界面。

@@ -4,7 +4,6 @@ export default {
   id: 'settings',
   title: '设置',
   order: 900,
-  view: () => import('./view.jsx'),
   // 单例配置：全局只有一份，读出来改回去 → 退化为 get / set，不硬凑 CRUD 五操作
   actions: [
     {

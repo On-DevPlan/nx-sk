@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { api } from '../../web/frontend/api/client.js';
-import { useStore } from '../../web/frontend/store.jsx';
-import { CliHints, Copyable, Tag } from '../../web/frontend/components/ui.jsx';
-import * as nav from '../../web/frontend/components/navModel.js';
+import { api } from '../../api/client.js';
+import { useStore } from '../../store.jsx';
+import { CliHints, Copyable, Tag } from '../../components/ui.jsx';
+import * as nav from '../../components/navModel.js';
 import NavManager from './navManager.jsx';
 
 export default function SettingsView() {

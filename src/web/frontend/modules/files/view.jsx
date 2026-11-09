@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { api } from '../../web/frontend/api/client.js';
-import { fileToDataUrl, refreshAttachments } from '../../web/frontend/api/files.js';
-import { useStore } from '../../web/frontend/store.jsx';
-import { CliHints, Copyable, Empty, Modal, Tag } from '../../web/frontend/components/ui.jsx';
+import { api } from '../../api/client.js';
+import { fileToDataUrl, refreshAttachments } from '../../api/files.js';
+import { useStore } from '../../store.jsx';
+import { CliHints, Copyable, Empty, Modal, Tag } from '../../components/ui.jsx';
 
 function fmtBytes(n) {
   if (n < 1024) return `${n} B`;

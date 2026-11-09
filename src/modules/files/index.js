@@ -4,7 +4,6 @@ export default {
   id: 'files',
   title: '附件',
   order: 650,
-  view: () => import('./view.jsx'),
   // 一组同级实体，每个附件有标识，用户会想替换/还原/删除其中一个 → 集合资源
   resource: 'file',
   actions: [

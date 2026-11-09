@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { api } from '../../web/frontend/api/client.js';
-import { checkZipFile, fmtBytes, isNeedPassphraseError, postZip } from '../../web/frontend/api/zip.js';
-import { useStore } from '../../web/frontend/store.jsx';
-import { CliHints, Empty, Modal, Tag } from '../../web/frontend/components/ui.jsx';
-import BlockBoard from '../../web/frontend/components/blockBoard.jsx';
-import { reconcileLayout, sameLayout } from '../../shared/blockLayout.js';
+import { api } from '../../api/client.js';
+import { checkZipFile, fmtBytes, isNeedPassphraseError, postZip } from '../../api/zip.js';
+import { useStore } from '../../store.jsx';
+import { CliHints, Empty, Modal, Tag } from '../../components/ui.jsx';
+import BlockBoard from '../../components/blockBoard.jsx';
+import { reconcileLayout, sameLayout } from '../../../../shared/blockLayout.js';
 import KvTable from './kvTable.jsx';
 
 // 脏值比较用：对象/数组（tags、entrylist 的行）必须走 JSON 序列化——
