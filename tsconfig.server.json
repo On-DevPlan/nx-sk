@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023"],
+    "types": ["node"],
+    "composite": true,
+    "tsBuildInfoFile": "node_modules/.tmp/tsconfig.server.tsbuildinfo"
+  },
+  "include": [
+    "src/**/*.ts",
+    "tests/**/*.mjs",
+    "tests/**/*.ts",
+    "scripts/**/*.ts"
+  ],
+  "exclude": ["src/web/frontend/**"]
+}

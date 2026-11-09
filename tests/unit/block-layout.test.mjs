@@ -12,9 +12,9 @@ import { useTempHome } from '../helpers.mjs';
 
 await useTempHome();
 
-const L = await import('../../src/shared/blockLayout.js');
-const sections = await import('../../src/modules/sections/service.js');
-const { loadStore } = await import('../../src/core/store.js');
+const L = await import('../../src/shared/blockLayout.ts');
+const sections = await import('../../src/modules/sections/service.ts');
+const { loadStore } = await import('../../src/core/store.ts');
 
 const F = (key, type = 'text', group = 'main') => ({ key, label: key.toUpperCase(), type, group });
 // 高度是**行数**（一档 8px + 10px 间距）：默认值由「期望像素」推出，测试跟着同一套换算
@@ -220,10 +220,11 @@ test('服务端：--clear-layout 回到默认编排（不是把配置删成 null
 test('store：脏版式在归一化时被夹干净，不会让面板白屏', async () => {
   const store = await loadStore();
   const sec = store.sections.find((s) => s.id === 'blocks');
-  const { normalize } = await import('../../src/core/store.js');
+  const { normalize } = await import('../../src/core/store.ts');
   const out = normalize({ ...store, sections: [{ ...sec, layout: { groups: { main: { layouts: { lg: 'x' } } } } }] });
   // 「lg 是个字符串」这种脏值既不能留着（面板会崩），也不该让整份版式丢掉——
   // 结果是一个结构合法、但这个断点没有块的版式，面板会按默认编排铺一遍。
   assert.equal(out.sections[0].layout.mode, 'grid');
   assert.deepEqual(out.sections[0].layout.groups.main.layouts, {});
 });
+

@@ -12,11 +12,11 @@ import { useTempHome } from '../helpers.mjs';
 
 await useTempHome();
 
-const sections = await import('../../src/modules/sections/service.js');
-const entries = await import('../../src/modules/entries/service.js');
-const { loadStore } = await import('../../src/core/store.js');
-const { isCipherBlob, maskValue } = await import('../../src/core/crypto.js');
-const T = await import('../../src/shared/table.js');
+const sections = await import('../../src/modules/sections/service.ts');
+const entries = await import('../../src/modules/entries/service.ts');
+const { loadStore } = await import('../../src/core/store.ts');
+const { isCipherBlob, maskValue } = await import('../../src/core/crypto.ts');
+const T = await import('../../src/shared/table.ts');
 
 const COLS = [
   { key: 'task', label: '任务', type: 'text' },
@@ -538,7 +538,8 @@ test('entry keys：表格里的密码列也进台账（行被展开，值默认�
 });
 
 test('空表算「未填」：完整度不该被一张没有行的表撑满', async () => {
-  const { isBlank } = await import('../../src/core/render.js');
+  const { isBlank } = await import('../../src/core/render.ts');
   assert.equal(isBlank({ v: 1, columns: [{ key: 'a' }], rows: [] }), true);
   assert.equal(isBlank({ v: 1, columns: [{ key: 'a' }], rows: [{ a: 1 }] }), false);
 });
+

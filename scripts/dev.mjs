@@ -1,8 +1,9 @@
 // dev 启动器：一条命令起 vite + serve，一个 ctrl-c 关两个。
 //
 // 为什么是两个进程而不是一条命令：本骨架的核心不变量是「prod 入口纯净」——
-// 发布产物里没有构建工具。serve 只服务 src/web/public/，不知道也不关心 JSX。
+// 发布产物里没有构建工具。serve 只服务 dist/web/public/，不知道也不关心 JSX。
 // 把 vite 内嵌进 serve 会让 prod 也拖着一份编译器。
+// serve 跑的是 bin → dist：`pnpm dev` 会先构建，这里的 serve 才有东西可跑。
 import { spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';

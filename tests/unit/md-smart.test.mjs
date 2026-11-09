@@ -8,7 +8,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-const { splitSmart, smartStats } = await import('../../src/web/frontend/mdSmart.js');
+const { splitSmart, smartStats } = await import('../../src/web/frontend/mdSmart.ts');
 
 const kinds = (text) => (splitSmart(text) || []).map((p) => p.type);
 const only = (text) => (splitSmart(text) || []).filter((p) => p.type !== 'text');

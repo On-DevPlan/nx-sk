@@ -10,11 +10,11 @@ import { useTempHome } from '../helpers.mjs';
 
 await useTempHome();
 
-const { mdImageIds, parseMdImages, rewriteMdImages } = await import('../../src/core/mdimages.js');
-const { FIELD_TYPES, FIELD_TYPE_LABELS, getTemplate } = await import('../../src/core/fields.js');
-const sections = await import('../../src/modules/sections/service.js');
-const entries = await import('../../src/modules/entries/service.js');
-const files = await import('../../src/modules/files/service.js');
+const { mdImageIds, parseMdImages, rewriteMdImages } = await import('../../src/core/mdimages.ts');
+const { FIELD_TYPES, FIELD_TYPE_LABELS, getTemplate } = await import('../../src/core/fields.ts');
+const sections = await import('../../src/modules/sections/service.ts');
+const entries = await import('../../src/modules/entries/service.ts');
+const files = await import('../../src/modules/files/service.ts');
 
 test('parseMdImages：只认 ![](…) 图片语法，普通链接不动', () => {
   const text = '看这里 ![第一步](f_abc123) 还有 [普通链接](https://example.com/a.png)';
@@ -100,3 +100,4 @@ test('外链图片：不进附件台账、不误报缺失，CLI 给的是可点�
   assert.ok(out.includes(url), out);
   assert.ok(!out.includes('图片缺失'));
 });
+

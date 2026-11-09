@@ -4,8 +4,8 @@ import { useTempHome } from '../helpers.mjs';
 
 await useTempHome();
 
-const service = await import('../../src/modules/sections/service.js');
-const { mergeTemplate } = await import('../../src/core/fields.js');
+const service = await import('../../src/modules/sections/service.ts');
+const { mergeTemplate } = await import('../../src/core/fields.ts');
 const { renderSectionChange } = await service;
 
 // 回归：`removed` 在两条路径上**形状不同**——removeSection 给的是对象
@@ -193,8 +193,8 @@ test('renderSectionChange：没有漂移就不打印提示（老形状也不炸�
 });
 
 test('bootstrap 下发 fieldTypes：面板的类型下拉框据此渲染，不再各抄一份', async () => {
-  const { bootstrapInfo } = await import('../../src/modules/system/service.js');
-  const { FIELD_TYPES } = await import('../../src/core/fields.js');
+  const { bootstrapInfo } = await import('../../src/modules/system/service.ts');
+  const { FIELD_TYPES } = await import('../../src/core/fields.ts');
   const boot = await bootstrapInfo();
   assert.deepEqual(boot.fieldTypes, FIELD_TYPES);
   assert.ok(boot.fieldTypes.includes('file'), 'file 类型必须在列表里');
@@ -205,7 +205,7 @@ test('bootstrap 下发 fieldTypes：面板的类型下拉框据此渲染，不�
 // 「什么场景用」—— 缺了后三项，正文只是一段没有上下文的 YAML，下次没法照着用。
 
 test('deploy 模板：正文是 textarea，kind 是带候选的 select', async () => {
-  const { getTemplate } = await import('../../src/core/fields.js');
+  const { getTemplate } = await import('../../src/core/fields.ts');
   const t = getTemplate('deploy');
   assert.ok(t, 'deploy 模板应存在');
   const byKey = new Map(t.fields.map((x) => [x.key, x]));
@@ -219,7 +219,7 @@ test('deploy 模板：正文是 textarea，kind 是带候选的 select', async (
 });
 
 test('deploy 栏目：YAML 正文写入后原样读回（换行与缩进不能被改写）', async () => {
-  const entries = await import('../../src/modules/entries/service.js');
+  const entries = await import('../../src/modules/entries/service.ts');
   await service.addSection({ id: 'deploytest', title: '部署配置', template: 'deploy' });
   const yaml = 'apiVersion: apps/v1\nkind: Deployment\nspec:/n  replicas: 1';
   await entries.addEntry({
@@ -331,14 +331,14 @@ test('renderSectionChange：结构改动按条打印，而不是只说「fields,
 });
 
 test('bootstrap 下发 builtin：面板据此把「原始资料」标成不可删', async () => {
-  const { bootstrapInfo } = await import('../../src/modules/system/service.js');
+  const { bootstrapInfo } = await import('../../src/modules/system/service.ts');
   const boot = await bootstrapInfo();
   assert.equal(boot.builtin.group, 'source');
   assert.equal(boot.builtin.field, 'source');
 });
 
 test('entry get 把多行正文按行拆开（否则整段从第 0 列掉出去）', async () => {
-  const entries = await import('../../src/modules/entries/service.js');
+  const entries = await import('../../src/modules/entries/service.ts');
   const out = entries.renderEntryGet({
     id: 'e1',
     title: 'node-web 部署',
@@ -355,3 +355,4 @@ test('entry get 把多行正文按行拆开（否则整段从第 0 列掉出去�
   assert.ok(lines[i + 1].trim() === 'line2', out);
   assert.ok(lines[i + 1].startsWith(' '), `续行要缩进到内容列，实际: ${JSON.stringify(lines[i + 1])}`);
 });
+

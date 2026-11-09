@@ -10,8 +10,15 @@
 //   eslint-plugin-react-hooks 提供 rules-of-hooks / exhaustive-deps —— 没有它，
 //     源码里写 `// eslint-disable-next-line react-hooks/exhaustive-deps` 会直接报
 //     「Definition for rule was not found」（eslint 9 对未知规则 id 是 error）。
+//
+// TS 重构（见 docs/design-intent.md）后，**所有 files 通配必须同时覆盖 js/ts**：
+// 只写 .js 会让新落地的 .tsx 悄悄掉出前后端边界规则，且没有任何断言会红。
 import react from 'eslint-plugin-react';
 import reactHooks from 'eslint-plugin-react-hooks';
+import tseslint from 'typescript-eslint';
+import { readdirSync } from 'node:fs';
+
+const SOURCE_FILES = ['**/*.{js,mjs,cjs,jsx,ts,tsx}'];
 
 const BASE = {
   'no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
@@ -21,22 +28,30 @@ const BASE = {
   'no-var': 'error',
 };
 
-// 模块互依禁列：**逐模块枚举**，不是通配。
-// 漏补一个新模块 → 它悄悄变成「谁都可以依赖」，且没有任何断言会红（见 ref 07 第三节）。
+// 模块互依禁列：**从 src/modules 目录派生**，不再手写。
+// 手写清单是第二个声明点——漏补一行是静默的，只能靠测试事后发现；目录派生没有这个口子。
 // 唯一例外是 ../settings/*（基础模块，允许被单向只读依赖），"例外"的实现方式就是**不列进来**。
-const SIBLING_MODULES = [
-  '../system/*',
-  '../sections/*',
-  '../entries/*',
-  '../files/*',
-  '../transfer/*',
-  '../skill/*',
-];
+// system / transfer 是聚合模块，在下面整体放宽。
+const SIBLING_MODULES = readdirSync(new URL('./src/modules/', import.meta.url), { withFileTypes: true })
+  .filter((d) => d.isDirectory() && d.name !== 'settings')
+  .map((d) => `../${d.name}/*`);
 
+/** @type {import('eslint').Linter.Config[]} */
 export default [
-  { ignores: ['src/web/public/**', 'node_modules/**', 'assets/**', 'tests/fixtures/**'] },
   {
-    files: ['**/*.{js,mjs,jsx}'],
+    ignores: [
+      'dist/**',
+      'node_modules/**',
+      'assets/**',
+      'tests/fixtures/**',
+      // 只读的 JS 基线快照与本地草稿目录：不是本仓库源码，禁扫（见 docs/refactor-plan.md P0）。
+      '.claude/**',
+      '.tmp/**',
+      '.tool/**',
+    ],
+  },
+  {
+    files: SOURCE_FILES,
     languageOptions: {
       ecmaVersion: 'latest',
       sourceType: 'module',
@@ -46,9 +61,23 @@ export default [
     rules: BASE,
   },
 
+  // TS 文件换 parser，并把 no-unused-vars 交给 TS 版（基规则不理解类型位置）
+  {
+    files: ['**/*.{ts,tsx}'],
+    languageOptions: {
+      parser: tseslint.parser,
+      parserOptions: { ecmaFeatures: { jsx: true } },
+    },
+    plugins: { '@typescript-eslint': tseslint.plugin },
+    rules: {
+      'no-unused-vars': 'off',
+      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
+    },
+  },
+
   // core 是最底层
   {
-    files: ['src/core/**/*.js'],
+    files: ['src/core/**/*.{js,ts}'],
     rules: {
       'no-restricted-imports': ['error', { patterns: [
         { group: ['../modules/**', '../runtime/**', '../web/**'],
@@ -59,7 +88,7 @@ export default [
 
   // 模块之间不得互相依赖。唯一例外：../settings/service.js（基础模块）。
   {
-    files: ['src/modules/**/*.js'],
+    files: ['src/modules/**/*.{js,ts}'],
     rules: {
       'no-restricted-imports': ['error', { patterns: [
         { group: SIBLING_MODULES,
@@ -70,32 +99,41 @@ export default [
 
   // 聚合模块是刻意的例外（system 读各模块状态；transfer 负责栏目导出导入的跨模块编排，
   // 依赖方向单向 transfer → entries/sections，不构成环）
-  { files: ['src/modules/system/**/*.js', 'src/modules/transfer/**/*.js'], rules: { 'no-restricted-imports': 'off' } },
+  {
+    files: ['src/modules/system/**/*.{js,ts}', 'src/modules/transfer/**/*.{js,ts}'],
+    rules: { 'no-restricted-imports': 'off' },
+  },
 
   // JSX 里的组件引用要算「使用」，否则每个组件都报 no-unused-vars
   {
-    files: ['**/*.jsx'],
+    files: ['**/*.{jsx,tsx}'],
     plugins: { react },
     rules: { 'react/jsx-uses-vars': 'error', 'react/jsx-uses-react': 'off' },
   },
 
   // hooks 规则只对视图与前端壳生效（视图现在就在前端目录里，一套 files 就够了）
   {
-    files: ['src/web/frontend/**/*.jsx'],
+    files: ['src/web/frontend/**/*.{jsx,tsx}'],
     plugins: { 'react-hooks': reactHooks },
     rules: { 'react-hooks/rules-of-hooks': 'error', 'react-hooks/exhaustive-deps': 'warn' },
   },
 
-  // 前后端边界——价值最高的一条。视图全部住在 src/web/frontend 下，
-  // 所以 files 用一条 `**/*.{js,jsx}` 就覆盖了所有前端代码；
-  // 不需要再单独给 modules 下的 .jsx 开口子（那里已经没有前端文件了）。
+  // 前后端边界——价值最高的一条。视图全部住在 src/web/frontend 下（P6 起全是 ts/tsx），
+  // 所以下面这条 files 覆盖所有前端代码；后端的 .ts 入口也要一起拦住。
   {
-    files: ['src/web/frontend/**/*.{js,jsx}'],
+    files: ['src/web/frontend/**/*.{js,jsx,ts,tsx}'],
     rules: {
       'no-restricted-imports': ['error', { patterns: [
         { group: ['node:*'], message: '前端不能引用 Node 内置模块。' },
-        { group: ['**/modules/*/index.js', '**/modules/*/service.js', '**/runtime/**', '**/core/**'],
-          message: '前端只能 import web/frontend 下的组件与 api 客户端，以及 src/shared 的纯函数；后端模块属于另一个运行时。' },
+        {
+          group: [
+            '**/modules/*/index.{js,ts}',
+            '**/modules/*/service.{js,ts}',
+            '**/runtime/**',
+            '**/core/**',
+          ],
+          message: '前端只能 import web/frontend 下的组件与 api 客户端，以及 src/shared 的纯函数；后端模块属于另一个运行时。',
+        },
       ] }],
     },
   },

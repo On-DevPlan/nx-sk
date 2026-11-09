@@ -8,12 +8,12 @@ import { useTempHome } from '../helpers.mjs';
 
 await useTempHome();
 
-const { readZip, createZip } = await import('../../src/core/zip.js');
-const { needsPassphrase } = await import('../../src/modules/transfer/service.js');
-const sections = await import('../../src/modules/sections/service.js');
-const entries = await import('../../src/modules/entries/service.js');
-const files = await import('../../src/modules/files/service.js');
-const transfer = await import('../../src/modules/transfer/service.js');
+const { readZip, createZip } = await import('../../src/core/zip.ts');
+const { needsPassphrase } = await import('../../src/modules/transfer/service.ts');
+const sections = await import('../../src/modules/sections/service.ts');
+const entries = await import('../../src/modules/entries/service.ts');
+const files = await import('../../src/modules/files/service.ts');
+const transfer = await import('../../src/modules/transfer/service.ts');
 
 const SRC = 'srcsec';
 const FIELDS = [
@@ -377,8 +377,8 @@ test('预览冲突明细：区分同 id / 同标题，并给出另存后的新�
 });
 
 test('表格的敏感列在导出包里是明文（与顶层密文字段同一口径）', async () => {
-  const { isCipherBlob } = await import('../../src/core/crypto.js');
-  const { loadStore } = await import('../../src/core/store.js');
+  const { isCipherBlob } = await import('../../src/core/crypto.ts');
+  const { loadStore } = await import('../../src/core/store.ts');
   const id = 'tblsec';
   await sections.addSection({
     id,
@@ -420,3 +420,4 @@ test('表格的敏感列在导出包里是明文（与顶层密文字段同一�
     '导出包里的表格敏感列应是明文，跨机器导入才能用',
   );
 });
+

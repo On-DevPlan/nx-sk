@@ -8,10 +8,10 @@ import http from 'node:http';
 import net from 'node:net';
 import {
   NO_OPEN_ENV, autoOpenEnabled, probePanel, findFreePort, resolvePortConflict,
-} from '../../src/core/serve-port.js';
+} from '../../src/core/serve-port.ts';
 // 必须用本项目真实的 APP_NAME：复用判定就是比 app.name，
 // 拿一个别的名字去测，reuse 分支永远测不到（这正是要防的坑）。
-import { APP_NAME } from '../../src/core/paths.js';
+import { APP_NAME } from '../../src/core/paths.ts';
 
 // —— 1. autoOpenEnabled：命令行 flag 与环境变量是「或」关系 ——
 

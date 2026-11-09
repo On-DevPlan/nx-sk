@@ -4,10 +4,10 @@ import { useTempHome } from '../helpers.mjs';
 
 await useTempHome();
 
-const { applySpec, argSpecsOf, cliPathsOf, compileRoute, compareRoutes, flagSpecsOf, usageOf } = await import('../../src/runtime/spec.js');
-const { loadStore, migrationNote, normalize } = await import('../../src/core/store.js');
-const { FIELD_TYPES, seedEntries, seedSections } = await import('../../src/core/fields.js');
-const { computeTable } = await import('../../src/shared/table.js');
+const { applySpec, argSpecsOf, cliPathsOf, compileRoute, compareRoutes, flagSpecsOf, usageOf } = await import('../../src/runtime/spec.ts');
+const { loadStore, migrationNote, normalize } = await import('../../src/core/store.ts');
+const { FIELD_TYPES, seedEntries, seedSections } = await import('../../src/core/fields.ts');
+const { computeTable } = await import('../../src/shared/table.ts');
 
 const FAKE = {
   id: 'x.y',

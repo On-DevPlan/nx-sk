@@ -1,0 +1,20 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": [],
+    "jsx": "react-jsx",
+    // P6 起前端全部是 TS/TSX，不再需要 allowJs；这里是**只读**类型检查，产物由 Vite/tsc 构建
+    // react-grid-layout 的 d.ts 锁 @types/react 19，与本项目的 18 冲突；用本地最小声明顶上
+    "paths": {
+      "react-grid-layout": ["./src/web/frontend/types/react-grid-layout.d.ts"]
+    },
+    "composite": true,
+    "tsBuildInfoFile": "node_modules/.tmp/tsconfig.web.tsbuildinfo"
+  },
+  "include": [
+    "src/web/frontend/**/*.ts",
+    "src/web/frontend/**/*.tsx",
+    "src/shared/**/*.ts"
+  ]
+}

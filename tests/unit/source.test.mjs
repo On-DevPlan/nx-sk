@@ -7,11 +7,11 @@ import { useTempHome } from '../helpers.mjs';
 
 await useTempHome();
 
-const sections = await import('../../src/modules/sections/service.js');
-const entries = await import('../../src/modules/entries/service.js');
-const { normalizeSourceItems, sourceImageIds, sourceItemSummary } = await import('../../src/core/source.js');
-const { getTemplate, instantiateTemplate } = await import('../../src/core/fields.js');
-const { applySpec } = await import('../../src/runtime/spec.js');
+const sections = await import('../../src/modules/sections/service.ts');
+const entries = await import('../../src/modules/entries/service.ts');
+const { normalizeSourceItems, sourceImageIds, sourceItemSummary } = await import('../../src/core/source.ts');
+const { getTemplate, instantiateTemplate } = await import('../../src/core/fields.ts');
+const { applySpec } = await import('../../src/runtime/spec.ts');
 
 // source 字段 = 每个栏目的「原始资料袋」：杂乱资料先原样收下，之后再按字段字典整理。
 
@@ -193,7 +193,7 @@ test('CLI 渲染：旧的标「已被取代，留痕」，并报当前/留痕条
 // 放在文件末尾：本测试会直接覆写共享 store，模拟「老形状」数据，不能影响前面的用例。
 test('存量栏目缺 source 时 normalize 读一次即自愈（KV 表不加）', async () => {
   // 直接写一份「老形状」的 store：栏目只有一个 text 字段、没有 source
-  const { storePathInUse } = await import('../../src/core/store.js');
+  const { storePathInUse } = await import('../../src/core/store.ts');
   const { writeFile } = await import('node:fs/promises');
   const legacy = {
     version: 3,
@@ -240,3 +240,4 @@ test('sourceImageIds：收正文内嵌的附件图（去重、跳过外链），
   ]);
   assert.deepEqual(sourceImageIds(items), ['f_one'], '外链与 file item 都不算正文内嵌引用');
 });
+

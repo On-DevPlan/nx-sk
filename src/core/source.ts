@@ -1,0 +1,252 @@
+// 原始资料袋（`type: 'source'`）的条目形状与归一规则。
+//
+// 为什么单独一个 core 模块：这份形状同时被 CLI、面板、sk-source skill 三处读写。
+// 形状若各写一份，迟早漂成「面板能显示、agent 读不出」——所以口径只此一处。
+//
+// 一条 item 的形状：
+//   { id, kind, name, text?, fileId?, url?, addedAt, at?, note?, mapped?,
+//     superseded?, supersededBy?, supersedes? }
+//
+//   kind   text = 粘贴进来的**markdown**（图片内嵌在正文里，`![说明](f_xxx)` / 外链
+//              `![说明](https://…)`——聊天记录图文混排，图和文不能分开存）；
+//          file = 附件库里的原件（fileId）；url = 一个网址
+//   name   人读的名字（用户可改），默认从内容推断
+//   mapped 整理去向：这条资料已经被同步到哪些字段 key（双向同步的锚点）
+//   at     **资料自身的时间**（如邮件时间）；缺省用 addedAt（入袋时间）
+//   superseded / supersededBy  被更新的一条取代（旧的**留痕**，不删）
+//
+// 三条纪律写在代码里，不只是文档：
+//   1. **只增不删**——袋里的东西是原始证据，整理完也留着（要删由人显式做）。
+//   2. **原文不改写**——text 原样存（底层是 markdown；面板上改是**人显式**点了「编辑」），
+//      整理后的结果写进**字段**或写进新的一条，不就地改写原件（否则「原始」这个词就没意义了）。
+//   3. **冲突以新的为准，但旧的留痕**——同名即冲突（同一件事有了新版本）：
+//      时间新的那条是「当前版本」，旧的被标 `superseded` 但**仍留在袋里**。
+import { newId, nowIso } from './ids.ts';
+import { mdImageIds, parseMdImages } from './mdimages.ts';
+import type { SourceItem } from '../shared/fields/types.ts';
+
+export const SOURCE_KINDS = ['text', 'file', 'url'];
+
+/** 单条上限：袋子是暂存区，不是仓库。真要存几百条就该分条目存，而不是把一个条目塞满。 */
+export const SOURCE_MAX_ITEMS = 500;
+
+/** 归一前的宽松输入（历史脏数据 / CLI 输入）。 */
+interface RawSourceItem {
+  id?: unknown;
+  kind?: unknown;
+  name?: unknown;
+  text?: unknown;
+  fileId?: unknown;
+  url?: unknown;
+  addedAt?: unknown;
+  at?: unknown;
+  note?: unknown;
+  mapped?: unknown;
+  superseded?: unknown;
+  supersededBy?: unknown;
+  supersedes?: unknown;
+}
+
+export function isSourceItem(x: unknown): boolean {
+  if (!x || typeof x !== 'object' || Array.isArray(x)) return false;
+  return SOURCE_KINDS.includes((x as { kind?: string }).kind as string);
+}
+
+/** 这段数组像不像一袋 source（用于「没登记过的键自动推断类型」）。 */
+export function looksLikeSourceList(list: unknown): boolean {
+  if (!Array.isArray(list) || !list.length) return false;
+  if (!list.every(isSourceItem)) return false;
+  // 光有 kind 不够（entrylist 的列也可能叫 kind）——还得带内容字段之一
+  return list.some((x) => x.text || x.fileId || x.url);
+}
+
+/**
+ * 这条资料的时间：`at`（资料自身的时间，如邮件时间）优先，否则用入袋时间。
+ * 「以新的为准」比的就是它。
+ */
+export function sourceItemTime(item: SourceItem | null | undefined): number {
+  const t = Date.parse((item?.at || item?.addedAt || '') as string);
+  return Number.isFinite(t) ? t : 0;
+}
+
+/**
+ * 从一段 markdown 里推断人读标题：逐个非空行去掉图片语法后取第一个还有字的——
+ * 聊天记录的第一行常常**只是一张图**（`![截图](f_xxx)`），跳过它才能落到人话上。
+ */
+function firstLineTitle(text: unknown, fallback = '一段文字'): string {
+  for (const line of String(text || '').split('\n')) {
+    if (!line.trim()) continue;
+    const stripped = line.replace(/!\[([^\]]*)\]\(\s*[^)\s]+\s*\)/g, '').trim();
+    if (stripped) return stripped.slice(0, 40);
+  }
+  return fallback;
+}
+
+function inferName(item: RawSourceItem): string {
+  if (item.name) return String(item.name).trim();
+  if (item.kind === 'url') return String(item.url || '').slice(0, 60);
+  if (item.kind === 'file') return String(item.fileId || '附件');
+  return firstLineTitle(item.text);
+}
+
+/**
+ * 归一一条 item：补 id / name / addedAt，丢掉没有内容的空壳。
+ * 返回 null = 这条是空的（直接丢弃，不报错）。
+ */
+export function normalizeSourceItem(
+  raw: RawSourceItem | null | undefined,
+  { id, addedAt }: { id?: string; addedAt?: string } = {},
+): SourceItem | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const kind = (SOURCE_KINDS.includes(raw.kind as string) ? raw.kind : 'text') as SourceItem['kind'];
+  const item: SourceItem = {
+    id: String(raw.id || id || newId('s')),
+    kind,
+    name: inferName(raw),
+    addedAt: (raw.addedAt || addedAt || nowIso()) as string,
+  };
+  if (kind === 'text') {
+    const text = String(raw.text ?? '').trim();
+    if (!text) return null;
+    item.text = text;
+  } else if (kind === 'file') {
+    const fileId = String(raw.fileId || '').trim();
+    if (!fileId) return null;
+    item.fileId = fileId;
+  } else {
+    const url = String(raw.url || '').trim();
+    if (!url) return null;
+    item.url = url;
+  }
+  if (raw.at) item.at = String(raw.at);
+  if (raw.note) item.note = String(raw.note);
+  if (Array.isArray(raw.mapped) && raw.mapped.length) item.mapped = raw.mapped.map(String);
+  if (raw.superseded === true) item.superseded = true;
+  if (raw.supersededBy) item.supersededBy = String(raw.supersededBy);
+  if (Array.isArray(raw.supersedes) && raw.supersedes.length) item.supersedes = raw.supersedes.map(String);
+  return item;
+}
+
+/**
+ * 冲突判定：**同名即冲突**（同一件事有了新版本），**以新的为准**。
+ *
+ * 规则只有一条，但它是整套「乱入 → 整理」能长期用的前提：
+ * 用户第二次发来同一封邮件（改了密码），新的一条成为「当前版本」，
+ * 旧的那条**不删**（原始证据要留痕），只被标成 `superseded` + 指到取代它的那条。
+ * 面板与 CLI 都能一眼看出「这条是旧版」——但它还在，随时能翻回去看。
+ *
+ * 显式指定也支持：`--supersedes <id>`（新条指向旧条）会把旧条同样标成被取代。
+ */
+export function resolveSourceConflicts(items: SourceItem[] | null | undefined): SourceItem[] {
+  const out: SourceItem[] = (items || []).map((x) => ({ ...x }));
+  // 显式取代：新条指向的旧条，一律标被取代
+  for (const it of out) {
+    for (const oldId of (it.supersedes as string[] | undefined) || []) {
+      const old = out.find((x) => x.id === oldId);
+      if (old && old.id !== it.id) { old.superseded = true; old.supersededBy = it.id; }
+    }
+  }
+  // 同名冲突：时间新的胜出（同时间则后加入的胜出）
+  const byName = new Map<string, SourceItem[]>();
+  for (const it of out) {
+    const key = String(it.name || '').trim().toLowerCase();
+    if (!key) continue;
+    if (!byName.has(key)) byName.set(key, []);
+    byName.get(key)!.push(it);
+  }
+  for (const group of byName.values()) {
+    if (group.length < 2) continue;
+    const sorted = [...group].sort((a, b) => (sourceItemTime(a) - sourceItemTime(b)) || String(a.addedAt).localeCompare(String(b.addedAt)));
+    const newest = sorted[sorted.length - 1];
+    for (const it of sorted.slice(0, -1)) {
+      it.superseded = true;
+      it.supersededBy = newest.id;
+    }
+  }
+  return out;
+}
+
+/**
+ * 归一整袋。接受三种入口：
+ *   - 数组（面板/JSON）
+ *   - JSON 串（CLI `--set source='[...]'`）
+ *   - 一段普通文字（CLI `--set source=随手记`）→ 变成一条 text item
+ */
+export function normalizeSourceItems(raw: unknown): SourceItem[] | null {
+  if (raw === null || raw === undefined) return null;
+  let list: unknown = raw;
+  if (typeof raw === 'string') {
+    const s = raw.trim();
+    if (!s) return null;
+    if (s.startsWith('[') || s.startsWith('{')) {
+      try { list = JSON.parse(s); } catch { list = [{ kind: 'text', text: s }]; }
+    } else {
+      list = [{ kind: 'text', text: s }];
+    }
+  }
+  if (!Array.isArray(list)) {
+    if (isSourceItem(list)) list = [list];
+    else list = [{ kind: 'text', text: String(list) }];
+  }
+  const out: SourceItem[] = [];
+  for (const item of list as unknown[]) {
+    const norm = normalizeSourceItem(item as RawSourceItem);
+    if (norm) out.push(norm);
+  }
+  if (out.length > SOURCE_MAX_ITEMS) {
+    throw new Error(`原始资料最多 ${SOURCE_MAX_ITEMS} 条，收到 ${out.length} 条——多了就分成多个条目存`);
+  }
+  if (!out.length) return null;
+  // 冲突判定放在归一这一层：无论数据从哪条路进来（面板 / CLI / 导入），
+  // 「同名以新的为准、旧的留痕」都只在这一处发生，不会各写一遍。
+  return resolveSourceConflicts(out);
+}
+
+/** 当前版本（没被取代的）——面板默认只显示这些，旧的留痕但可展开看。 */
+export function currentSourceItems(items: SourceItem[] | null | undefined): SourceItem[] {
+  return (items || []).filter((x) => !x.superseded);
+}
+
+/**
+ * 一条 item 的人读摘要（CLI 一行一条、面板清单副标题都用它）。
+ *
+ * text 的底层是 **markdown**（图片内嵌在正文里，`![说明](f_xxx)` / `![说明](https://…)`）：
+ * 摘要里把图片语法压成 `[图: 说明]`——一行摘要里出现一串 `![截图](f_mvts…)` 没人读得下去。
+ */
+export function sourceItemSummary(item: SourceItem | null | undefined): string {
+  if (!isSourceItem(item)) return '';
+  if (item!.kind === 'url') return (item!.url as string) || '';
+  if (item!.kind === 'file') return `附件 ${item!.fileId}`;
+  const t = String(item!.text || '').replace(/!\[([^\]]*)\]\(\s*[^)\s]+\s*\)/g, (_m, alt) => `[图: ${alt || '图'}]`).replace(/\s+/g, ' ').trim();
+  return t.length > 80 ? `${t.slice(0, 80)}…` : t;
+}
+
+/** 这条（或这袋）资料里内嵌的附件图片 id —— 打包导出与完整性检查都用它。 */
+export function sourceImageIds(items: SourceItem[] | null | undefined): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const item of items || []) {
+    if (!isSourceItem(item) || item.kind !== 'text' || !item.text) continue;
+    for (const id of mdImageIds(item.text)) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+      out.push(id);
+    }
+  }
+  return out;
+}
+
+/** 正文里的 `![alt](f_xxx)` 引用（保序，含外链）。面板解析图片、CLI 渲染都用它。 */
+export function sourceItemImages(text: unknown) {
+  return parseMdImages(text);
+}
+
+/** 人读时间：优先资料自身的时间（at），否则入袋时间。 */
+export function sourceItemTimeLabel(item: SourceItem | null | undefined): string {
+  const raw = (item?.at || item?.addedAt || '') as string;
+  if (!raw) return '';
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return String(raw);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
