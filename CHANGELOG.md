@@ -2,6 +2,30 @@
 
 本文件格式参考 [Keep a Changelog](https://keepachangelog.com/)，中文正文。
 
+## 0.28.0 (2026-11-10)
+
+**全量 TypeScript 化：后端与前端源码统一为 `.ts/.tsx`；字段与模块改为注册表驱动。对外行为不变。**
+
+### Changed
+
+- **源码全量 TypeScript**：`src/**` 不再有 `.js/.jsx`；`pnpm build` 先用 `tsc -p tsconfig.build.json`
+  产出 `dist/**/*.js`（`.ts` 导入后缀在 emit 时改写），再把面板构建到 `dist/web/public`。
+- **字段收敛为穷举注册表**：服务端 `FIELD_BEHAVIOR` / `FIELD_SEAL`、前端 `FIELD_CONTROLS`
+  都是 `Record<FieldType, …>`；`FIELD_TYPES` 加一项而漏实现/漏控件，会直接编译失败。
+- **模块「目录即声明」**：`src/modules/<id>/index.ts` 自动装载，新增模块不再需要改注册表与 eslint 清单。
+- **前端只消费 `shared`**：类型与零依赖纯函数从 `src/shared/**` 引入，eslint 边界规则覆盖 `.ts/.tsx`，
+  继续拦住 `import '../../core/**'` 与 `import '../../modules/**'`。
+
+### Fixed
+
+- **导出 ZIP 时表格的敏感列按列定义解密**：此前 `plainValues` 只处理 `entrylist`，含敏感列的表格会带密文出包，
+  换机器后永久不可解（独立提交 `fc4b9e2`）。
+
+### 说明
+
+- 命令、HTTP 响应形状、面板文案与交互、`store.json` 格式均未变化；`engines.node` 仍是 `>=18.17`。
+- 贡献者：单测直接执行 `.ts` 需要 Node `>=22.18`；改了后端源码要重新 `pnpm build`。
+
 ## 0.27.0 (2026-11-08)
 
 **表格字段重做：列头 ⋮ 属性菜单、行列都有抓手、去掉了那一整块「列设置」表单。**
