@@ -7,7 +7,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-const { toggleTaskAtLine, taskStats } = await import('../../src/web/frontend/mdSource.js');
+const { toggleTaskAtLine, taskStats } = await import('../../src/web/frontend/mdSource.ts');
 
 test('只翻转指定那一行，其余行原样', () => {
   const text = ['- [ ] 一', '- [ ] 二', '- [ ] 三'].join('\n');

@@ -12,11 +12,11 @@ import { useTempHome } from '../helpers.mjs';
 await useTempHome();
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
-const { ACTIONS, MODULES, SELF_CHECK, selfCheckActions } = await import('../../src/runtime/registry.js');
-const { ALL_COMMANDS, helpEntries, resolveCommand } = await import('../../src/runtime/cli.js');
-const { ROUTES, routeTable } = await import('../../src/runtime/api.js');
-const { cliPathsOf } = await import('../../src/runtime/spec.js');
-const { VIEWS } = await import('../../src/web/frontend/registry.js');
+const { ACTIONS, MODULES, SELF_CHECK, selfCheckActions } = await import('../../src/runtime/registry.ts');
+const { ALL_COMMANDS, helpEntries, resolveCommand } = await import('../../src/runtime/cli.ts');
+const { ROUTES, routeTable } = await import('../../src/runtime/api.ts');
+const { cliPathsOf } = await import('../../src/runtime/spec.ts');
+const { VIEWS } = await import('../../src/web/frontend/registry.ts');
 
 const listDirs = async (rel) => (await readdir(join(ROOT, rel), { withFileTypes: true })).filter((d) => d.isDirectory()).map((d) => d.name).sort();
 
@@ -27,7 +27,7 @@ async function readIfExists(p) {
 test('模块目录 ↔ 后端注册表对账（双向）', async () => {
   const dirs = await listDirs('src/modules');
   const registered = MODULES.map((m) => m.id).sort();
-  assert.deepEqual(dirs, registered, `src/modules 下的目录与 registry.js 的 MODULES 必须一一对应`);
+  assert.deepEqual(dirs, registered, `src/modules 下的目录与 registry.ts 的 MODULES 必须一一对应`);
 });
 
 const VIEW_DIR = 'src/web/frontend/modules';
@@ -36,7 +36,7 @@ test('视图目录 ↔ 前端 VIEWS 一一对应，后端模块不声明视图',
   // 后端只描述 action。一旦某个模块重新长出 view / tab 这类视图字段，
   // 面板就又变成「两份声明」，本条断言负责在提交前拦住。
   for (const m of MODULES) {
-    assert.equal(m.view, undefined, `模块 ${m.id} 不得声明 view——视图只在 src/web/frontend/registry.js 登记`);
+    assert.equal(m.view, undefined, `模块 ${m.id} 不得声明 view——视图只在 src/web/frontend/registry.ts 登记`);
     assert.equal(m.tab, undefined, `模块 ${m.id} 不得声明 tab——那是面板导航的属性，不是对外接口`);
   }
 
@@ -46,27 +46,27 @@ test('视图目录 ↔ 前端 VIEWS 一一对应，后端模块不声明视图',
   assert.deepEqual(registered, dirs, `${VIEW_DIR} 下的目录与 VIEWS 必须一一对应`);
 
   // 登记必须用字面量 import()，否则 Vite 静态分析不了、失去代码分割
-  const regSrc = await readFile(join(ROOT, 'src/web/frontend/registry.js'), 'utf8');
+  const regSrc = await readFile(join(ROOT, 'src/web/frontend/registry.ts'), 'utf8');
   for (const v of VIEWS) {
-    const p = join(ROOT, VIEW_DIR, v.id, 'view.jsx');
-    assert.ok(await readIfExists(p), `VIEWS 登记了 ${v.id} 却没有 ${VIEW_DIR}/${v.id}/view.jsx`);
+    const p = join(ROOT, VIEW_DIR, v.id, 'view.tsx');
+    assert.ok(await readIfExists(p), `VIEWS 登记了 ${v.id} 却没有 ${VIEW_DIR}/${v.id}/view.tsx`);
     assert.ok(
-      regSrc.includes(`import('./modules/${v.id}/view.jsx')`),
-      `VIEWS 里 ${v.id} 的 component 必须写成字面量 import('./modules/${v.id}/view.jsx')`,
+      regSrc.includes(`import('./modules/${v.id}/view.tsx')`),
+      `VIEWS 里 ${v.id} 的 component 必须写成字面量 import('./modules/${v.id}/view.tsx')`,
     );
   }
 });
 
-test('后端源码里不出现 .jsx 引用（视图不属于后端模块）', async () => {
+test('后端源码里不出现 .tsx 引用（视图不属于后端模块）', async () => {
   const problems = [];
   for (const id of await listDirs('src/modules')) {
     for (const name of await readdir(join(ROOT, 'src/modules', id))) {
-      if (!name.endsWith('.js')) continue;
+      if (!name.endsWith('.ts')) continue;
       const src = await readFile(join(ROOT, 'src/modules', id, name), 'utf8');
-      if (src.includes('.jsx')) problems.push(`src/modules/${id}/${name}`);
+      if (src.includes('.tsx')) problems.push(`src/modules/${id}/${name}`);
     }
   }
-  assert.deepEqual(problems, [], `后端文件里出现了 .jsx 引用:\n${problems.join('\n')}`);
+  assert.deepEqual(problems, [], `后端文件里出现了 .tsx 引用:\n${problems.join('\n')}`);
 });
 
 const CRUD_VERB = { list: 'list', get: 'get', create: 'add', update: 'update', remove: 'remove' };
@@ -188,8 +188,8 @@ test('装载期自检真的会触发（用一份故意写坏的清单反证）',
 });
 
 // —— 视图里调用的 /api 字面量 ——
-// 只看 `api(...)` 调用点的第一个实参：这样才能把 import 路径（`.../api/client.js`）排除掉，
-// 而 import 路径里的 "/api/client.js" 恰好是一条**不存在**的后端路由。
+// 只看 `api(...)` 调用点的第一个实参：这样才能把 import 路径（`.../api/client.ts`）排除掉，
+// 而 import 路径里的 "/api/client.ts" 恰好是一条**不存在**的后端路由。
 // 模板变量归一成 :param，避免为了「可测」把视图写成硬编码拼接。
 function literalsOf(source) {
   const out = [];
@@ -228,11 +228,11 @@ test('视图里调用的每个 /api/... 都有对应路由（规则本身先反�
 
   const files = [];
   for (const id of await listDirs(VIEW_DIR)) {
-    const p = join(ROOT, VIEW_DIR, id, 'view.jsx');
+    const p = join(ROOT, VIEW_DIR, id, 'view.tsx');
     if (await readIfExists(p)) files.push({ id, path: p });
   }
   const frontendFiles = await readdir(join(ROOT, 'src/web/frontend'), { withFileTypes: true });
-  for (const f of frontendFiles.filter((x) => x.isFile() && x.name.endsWith('.jsx'))) {
+  for (const f of frontendFiles.filter((x) => x.isFile() && x.name.endsWith('.tsx'))) {
     files.push({ id: f.name, path: join(ROOT, 'src/web/frontend', f.name) });
   }
   assert.ok(files.length >= 6, `应该扫到至少 6 个前端文件，实际 ${files.length}`);
@@ -250,19 +250,29 @@ test('视图里调用的每个 /api/... 都有对应路由（规则本身先反�
   assert.deepEqual(problems, [], `视图里调用了不存在的端点:\n${problems.join('\n')}`);
 });
 
-test('eslint 的模块互依禁列覆盖所有兄弟模块（settings 是唯一数据依赖；system / transfer 是聚合例外）', async () => {
+test('eslint 的模块互依禁列由 src/modules 派生（settings 是唯一数据依赖；system / transfer 是聚合例外）', async () => {
   const cfg = await readFile(join(ROOT, 'eslint.config.js'), 'utf8');
-  const block = /const SIBLING_MODULES = \[([\s\S]*?)\];/.exec(cfg);
-  assert.ok(block, '找不到 SIBLING_MODULES 声明');
-  const listed = [...block[1].matchAll(/'\.\.\/([\w-]+)\/\*'/g)].map((m) => m[1]);
+  // 禁列不再是手写清单，而是从磁盘派生：这里验证派生规则确实覆盖了所有兄弟模块，
+  // 并且没有把 settings 误列进来（它是基础模块）。
+  const { default: config } = await import('../../eslint.config.js');
+  const block = config.find((c) => Array.isArray(c.files) && c.files.includes('src/modules/**/*.{js,ts}')
+    && Array.isArray(c.rules?.['no-restricted-imports']));
+  assert.ok(block, '找不到模块互依禁列规则');
+  const listed = block.rules['no-restricted-imports'][1].patterns
+    .flatMap((p) => p.group || [])
+    .map((g) => /^\.\.\/([\w-]+)\/\*$/.exec(g)?.[1])
+    .filter(Boolean);
   const expect = MODULES.map((m) => m.id).filter((id) => id !== 'settings').sort();
   assert.deepEqual([...listed].sort(), expect,
-    '新增模块必须往 SIBLING_MODULES 里补一行——漏补是**静默**的，没有任何断言会替你发现');
+    '模块互依禁列必须由 src/modules 目录派生并与 MODULES 对齐——新增模块不需要再手改 eslint');
 
   // 前端禁列的 files 必须覆盖整个前端目录（视图现在就在里面），
-  // 否则真正写视图的那个文件反而不受约束
-  const frontFiles = /files: \['src\/web\/frontend\/\*\*\/\*\.\{js,jsx\}'\]/.exec(cfg);
-  assert.ok(frontFiles, '前端禁列的 files 必须用通配覆盖 src/web/frontend 下的所有 js/jsx（写死单个文件会被"改个名字"绕过）');
+  // 否则真正写视图的那个文件反而不受约束。
+  // TS 重构后扩展名清单必须是 js/jsx/ts/tsx 四种：漏掉 ts/tsx 等于新代码不受边界约束。
+  const frontFiles = [...cfg.matchAll(/files: \['src\/web\/frontend\/\*\*\/\*\.\{([^}]+)\}'\]/g)]
+    .map((m) => m[1].split(',').map((x) => x.trim()))
+    .find((exts) => ['js', 'jsx', 'ts', 'tsx'].every((x) => exts.includes(x)));
+  assert.ok(frontFiles, '前端禁列的 files 必须用通配覆盖 src/web/frontend 下的所有前端文件（js/jsx/ts/tsx，写死单个文件会被"改个名字"绕过）');
 });
 
 test('面板无 emoji、不使用浏览器原生弹窗', async () => {
@@ -278,13 +288,13 @@ test('面板无 emoji、不使用浏览器原生弹窗', async () => {
     }
   };
   for (const id of await listDirs('src/modules')) {
-    for (const name of ['service.js', 'index.js']) {
+    for (const name of ['service.ts', 'index.ts']) {
       const p = join(ROOT, 'src/modules', id, name);
       if (await readIfExists(p)) files.push(p);
     }
   }
-  await collect('src/core', /\.js$/);
-  await collect('src/web/frontend', /\.(jsx|js|css)$/);
+  await collect('src/core', /\.ts$/);
+  await collect('src/web/frontend', /\.(tsx|ts|css)$/);
   await collect('bin', /\.mjs$/);
   await collect('scripts', /\.mjs$/);
   for (const p of files) {
@@ -445,7 +455,9 @@ test('反向：代码里的写命令都声明了 --dry-run；本地备份已删�
     const isWrite = Array.isArray(a.http) && a.http[0] !== 'GET';
     if (!isWrite) continue;
     if (!(a.flags && a.flags['dry-run'])) missingDryRun.push(a.id);
-    const src = await readFile(join(ROOT, 'src/modules', a.module, 'service.js'), 'utf8');
+    // P4：模块陆续迁到 .ts，读源码时优先 .ts、回退 .js
+    const src = await readFile(join(ROOT, 'src/modules', a.module, 'service.ts'), 'utf8')
+      .catch(() => readFile(join(ROOT, 'src/modules', a.module, 'service.js'), 'utf8'));
     const fnName = a.id.split('.').slice(1).join('.');
     snapshots.push({ id: a.id, module: a.module, hasSnapshot: /snapshotStore|snapshot\(/.test(src), fnName });
   }
@@ -533,7 +545,7 @@ test('视图写请求的 body 键必须声明过（applySpec 会静默丢掉未�
 
   const files = [];
   for (const id of await listDirs(VIEW_DIR)) {
-    const p = join(ROOT, VIEW_DIR, id, 'view.jsx');
+    const p = join(ROOT, VIEW_DIR, id, 'view.tsx');
     if (await readIfExists(p)) files.push({ id, path: p });
   }
   const problems = [];

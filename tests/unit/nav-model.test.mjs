@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-const m = await import('../../src/web/frontend/components/navModel.js');
+const m = await import('../../src/web/frontend/components/navModel.ts');
 
 const ALL = ['job', 'projects', 'campus', 'servers', 'secret'];
 

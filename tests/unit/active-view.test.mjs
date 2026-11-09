@@ -5,7 +5,7 @@
 // 浏览器里看起来「一切正常」，所以只能靠断言钉住。
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { LEGACY_VIEW, normalizeViewId, resolveActiveView } from '../../src/web/frontend/activeView.js';
+import { LEGACY_VIEW, normalizeViewId, resolveActiveView } from '../../src/web/frontend/activeView.ts';
 
 const S = (id) => ({ id, kind: 'section' });
 const V = (id) => ({ id, kind: 'view' });

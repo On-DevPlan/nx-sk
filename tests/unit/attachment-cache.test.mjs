@@ -7,7 +7,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-const { mergeFiles } = await import('../../src/web/frontend/api/files.js');
+const { mergeFiles } = await import('../../src/web/frontend/api/files.ts');
 
 test('mergeFiles：刚上传的记录立刻可查（不必等列表刷新）', () => {
   const stale = [{ id: 'f_old', name: '旧图.png', url: '/api/files/f_old/content' }];

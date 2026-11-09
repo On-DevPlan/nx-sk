@@ -11,13 +11,26 @@ nx-sk serve          # 打开面板（http://127.0.0.1:7866）
 
 ## 安装
 
+**要求 Node.js >= 18.17。** 包内是构建好的 `dist/`（纯 JS），运行时不需要 TypeScript。
+
+```bash
+npm i -g nx-sk        # 命令名就是包名
+nx-sk version
+nx-sk serve           # 打开面板
+```
+
+## 开发
+
+**开发/测试需要 Node >= 22.18**（单测用 `node --test` 直接跑 `.ts`，依赖 Node 原生类型剥离）；
+运行 CLI 与面板仍只需 >= 18.17。改了后端要重新构建——`dist/` 是运行时唯一入口。
+
 命令名就是包名。**推荐做成全局垫片**（全局 node_modules 里是指向本项目的软链，
 改代码立刻生效，不用重新安装）：
 
 ```bash
 cd <本项目>
 pnpm install          # 只为构建面板；CLI 侧零依赖
-pnpm run build        # 产出 src/web/public，serve 才有面板可服务
+pnpm run build        # tsc → dist/**/*.js，vite → dist/web/public
 npm link              # → 全局多了 nx-sk / nx-sk.cmd / nx-sk.ps1
 nx-sk version         # 从任何目录都能跑
 nx-sk serve           # 打开面板
@@ -45,7 +58,7 @@ nx-sk serve           # 打开面板
 >
 > 别忘了 `chmod +x ~/.local/bin/nx-sk`。验证：`cd / && nx-sk version`。
 
-> 不想污染全局也行：`node bin/nx-sk.mjs <子命令>` 等价，或 `npx --no-install . <子命令>`。
+> 不想污染全局也行：先 `pnpm build`，再 `node bin/nx-sk.mjs <子命令>`，或 `npx --no-install . <子命令>`。
 
 ### skill：用**软链垫片**（推荐）
 

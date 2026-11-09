@@ -6,8 +6,8 @@ import { useTempHome } from '../helpers.mjs';
 
 const dir = await useTempHome();
 
-const { parseDataArg, parseStdinValue } = await import('../../src/core/argsafe.js');
-const { parseArgs } = await import('../../src/runtime/cli.js');
+const { parseDataArg, parseStdinValue } = await import('../../src/core/argsafe.ts');
+const { parseArgs } = await import('../../src/runtime/cli.ts');
 
 // 这些桩函数证明「读 stdin / 读文件」不是不可测的隐式依赖：
 // 走哪条通道由参数决定，测试能把通道换成桩。
@@ -78,8 +78,8 @@ test('合法多行值（LF）原样取出，行数正确', () => {
 // —— 经 CLI 解析层走一遍：入口真的接上了吗 ——
 // 上面测的是纯函数；这里从 resolveCommand 拿到真实 action，走同一条 parseArgs 通道，
 // 防止「函数写好了但 CLI 没接上」这种只在真机才发现的断线。
-const { resolveCommand } = await import('../../src/runtime/cli.js');
-const { applySpec } = await import('../../src/runtime/spec.js');
+const { resolveCommand } = await import('../../src/runtime/cli.ts');
+const { applySpec } = await import('../../src/runtime/spec.ts');
 
 // parseArgs 未导出，这里经由「命令解析 → 建 ctx」复刻 CLI 的真实调用形态：
 // runCli 里就是 applySpec(action, parseArgs(action, rest)) 这一句。

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { reorderAt } from '../../src/web/frontend/listSort.js';
+import { reorderAt } from '../../src/web/frontend/listSort.ts';
 
 // 拖拽排序的落点是**插入位**（0 = 最前，n = 最后），不是目标下标 ——
 // 这两个语义差一，而「差一」的表现是「拖到第二行结果跑到第三行」，

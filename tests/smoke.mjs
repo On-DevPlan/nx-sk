@@ -558,7 +558,7 @@ const staticText = await staticRes.text();
 if (staticRes.status === 200) {
   step('静态面板可访问', staticText.includes('nx-sk') && staticRes.headers.get('content-type').includes('text/html'));
 } else {
-  step('未构建时给可操作的提示（503）', staticRes.status === 503 && staticText.includes('vite build'), `HTTP ${staticRes.status}`);
+  step('未构建时给可操作的提示（503）', staticRes.status === 503 && staticText.includes('pnpm build'), `HTTP ${staticRes.status}`);
 }
 
 const spa = await fetch(info.url + '/whatever/deep/path');

@@ -4,12 +4,12 @@ import { useTempHome } from '../helpers.mjs';
 
 await useTempHome();
 
-const sections = await import('../../src/modules/sections/service.js');
-const entries = await import('../../src/modules/entries/service.js');
+const sections = await import('../../src/modules/sections/service.ts');
+const entries = await import('../../src/modules/entries/service.ts');
 const { validateFieldDef } = sections;
-const { loadStore } = await import('../../src/core/store.js');
-const { readZip } = await import('../../src/core/zip.js');
-const { isCipherBlob, maskValue } = await import('../../src/core/crypto.js');
+const { loadStore } = await import('../../src/core/store.ts');
+const { readZip } = await import('../../src/core/zip.ts');
+const { isCipherBlob, maskValue } = await import('../../src/core/crypto.ts');
 
 // entrylist（结构清单）字段：值 = 变长的行对象数组，列在字段定义的 fields 里声明。
 // 敏感列与顶层敏感字段同一条边界：密文落盘、默认原文、--mask 打码。
@@ -156,7 +156,7 @@ test('CLI 渲染：清单一行一条，用列标签；--mask 时敏感列跟着
 });
 
 test('模板漂移把列定义算进去（列变了要报，别无声分叉）', async () => {
-  const { fieldDrift } = await import('../../src/core/fields.js');
+  const { fieldDrift } = await import('../../src/core/fields.ts');
   const mine = { key: 'accounts', label: '账号清单', type: 'entrylist', fields: COLS };
   assert.deepEqual(fieldDrift(mine, { ...mine, fields: COLS.map((c) => ({ ...c })) }), [], '等价定义不算漂移');
   const diff = fieldDrift(mine, { ...mine, fields: COLS.map((c) => ({ ...c, sensitive: true })) });
@@ -164,7 +164,7 @@ test('模板漂移把列定义算进去（列变了要报，别无声分叉）',
 });
 
 test('导出包里的清单敏感列是明文（密文对象进了包就再也解不开了）', async () => {
-  const transfer = await import('../../src/modules/transfer/service.js');
+  const transfer = await import('../../src/modules/transfer/service.ts');
   const { join } = await import('node:path');
   const { readFile, mkdtemp } = await import('node:fs/promises');
   const { tmpdir } = await import('node:os');
@@ -177,3 +177,4 @@ test('导出包里的清单敏感列是明文（密文对象进了包就再也�
   assert.equal(entry.values.accounts[0].pass, 'p@ss-重填2');
   assert.equal(entry.values.accounts[0].user, 'ops');
 });
+

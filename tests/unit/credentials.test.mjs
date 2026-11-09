@@ -4,11 +4,11 @@ import { useTempHome } from '../helpers.mjs';
 
 await useTempHome();
 
-const sections = await import('../../src/modules/sections/service.js');
-const entries = await import('../../src/modules/entries/service.js');
-const { loadStore } = await import('../../src/core/store.js');
-const { isCipherBlob, maskValue } = await import('../../src/core/crypto.js');
-const { getTemplate, looksSecretish } = await import('../../src/core/fields.js');
+const sections = await import('../../src/modules/sections/service.ts');
+const entries = await import('../../src/modules/entries/service.ts');
+const { loadStore } = await import('../../src/core/store.ts');
+const { isCipherBlob, maskValue } = await import('../../src/core/crypto.ts');
+const { getTemplate, looksSecretish } = await import('../../src/core/fields.ts');
 
 // 凭据自动化：**大胆写**，但落盘是密文。
 //
@@ -165,3 +165,4 @@ test('没有 KV 栏目时 key set 自动补建 secret（读命令不建）', asy
   const raw = after.entries.find((e) => e.section === kv.id);
   assert.ok(isCipherBlob(raw.values.value), '密文落盘');
 });
+

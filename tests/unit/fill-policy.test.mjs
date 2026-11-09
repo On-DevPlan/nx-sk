@@ -4,9 +4,9 @@ import { useTempHome } from '../helpers.mjs';
 
 await useTempHome();
 
-const { FILL_LABELS, FILL_POLICIES, fillPolicy, isExcludedField } = await import('../../src/core/fields.js');
-const { completeness, dumpSection, serializeEntry } = await import('../../src/core/render.js');
-const { validateFieldDef } = await import('../../src/modules/sections/service.js');
+const { FILL_LABELS, FILL_POLICIES, fillPolicy, isExcludedField } = await import('../../src/core/fields.ts');
+const { completeness, dumpSection, serializeEntry } = await import('../../src/core/render.ts');
+const { validateFieldDef } = await import('../../src/modules/sections/service.ts');
 
 /** 三个照常填 + 一个 optional + 一个 avoid。 */
 const mkSection = () => ({
@@ -134,7 +134,7 @@ test('validateFieldDef：非法策略报错，不静默忽略', () => {
 // `excluded` 是**策略标记**：字段被标成 optional/avoid，就永远是 excluded。
 // 但它可能已经被填上值。渲染时若照单全列，一份填满的资料会被报成
 // 「另有 7 项已标不填」，自相矛盾（这个 bug 是「容器平台」条目暴露的）。
-const { renderEntryGet, renderEntryList } = await import('../../src/modules/entries/service.js');
+const { renderEntryGet, renderEntryList } = await import('../../src/modules/entries/service.ts');
 
 test('渲染：「不填」只列真的空着的可选字段', () => {
   const s = mkSection();
@@ -149,3 +149,4 @@ test('渲染：「不填」只列真的空着的可选字段', () => {
   const filledList = renderEntryList({ count: 1, total: 1, entries: [filled] });
   assert.ok(!filledList.includes('不填'), filledList);
 });
+

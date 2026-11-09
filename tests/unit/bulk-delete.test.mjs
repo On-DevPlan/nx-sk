@@ -11,9 +11,9 @@ import { useTempHome } from '../helpers.mjs';
 
 await useTempHome();
 
-const sections = await import('../../src/modules/sections/service.js');
-const entries = await import('../../src/modules/entries/service.js');
-const { loadStore } = await import('../../src/core/store.js');
+const sections = await import('../../src/modules/sections/service.ts');
+const entries = await import('../../src/modules/entries/service.ts');
+const { loadStore } = await import('../../src/core/store.ts');
 
 // 注意 id 不能撞上**首次运行播种**的那 6 个栏目（job / projects / …）：
 // 撞了就是「栏目已存在」，测试会在准备阶段挂掉，看起来像是树的问题。
@@ -103,7 +103,7 @@ test('批量删条目：一个都找不到 → NOT_FOUND；空列表 → INVALID
 });
 
 test('两个批量删除的 CLI 都能跑通（含 --dry-run 的试运行输出）', async () => {
-  const { ACTIONS } = await import('../../src/runtime/registry.js');
+  const { ACTIONS } = await import('../../src/runtime/registry.ts');
   const sec = ACTIONS.find((a) => a.id === 'section.remove-many');
   const ent = ACTIONS.find((a) => a.id === 'entry.remove-many');
   assert.ok(sec && ent);
@@ -120,3 +120,4 @@ test('两个批量删除的 CLI 都能跑通（含 --dry-run 的试运行输出�
   assert.match(text, /条目乙/);
   assert.ok((await loadStore()).entries.some((e) => e.id === li.id), '试运行不能真删');
 });
+

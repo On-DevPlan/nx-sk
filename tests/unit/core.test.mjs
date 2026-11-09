@@ -4,10 +4,10 @@ import { useTempHome } from '../helpers.mjs';
 
 await useTempHome();
 
-const { decryptValue, deriveKey, encryptValue, isCipherBlob, keyId, maskValue, newKey } = await import('../../src/core/crypto.js');
-const { resolveVaultKey, vaultStatus } = await import('../../src/core/vault.js');
-const { completeness, displaySensitive, dumpSection, formatValue, serializeEntry } = await import('../../src/core/render.js');
-const { findSection, groupFields, instantiateTemplate, isSensitiveField, syncSectionGroups } = await import('../../src/core/fields.js');
+const { decryptValue, deriveKey, encryptValue, isCipherBlob, keyId, maskValue, newKey } = await import('../../src/core/crypto.ts');
+const { resolveVaultKey, vaultStatus } = await import('../../src/core/vault.ts');
+const { completeness, displaySensitive, dumpSection, formatValue, serializeEntry } = await import('../../src/core/render.ts');
+const { findSection, groupFields, instantiateTemplate, isSensitiveField, syncSectionGroups } = await import('../../src/core/fields.ts');
 
 const SEC = instantiateTemplate('secret', { id: 'secret', title: '密钥' });
 const JOB = instantiateTemplate('job', { id: 'job', title: '求职' });
@@ -203,7 +203,7 @@ test('syncSectionGroups：无 group 的字段归入 other', () => {
 });
 
 test('normalizeSection 收口自愈：groups 为空但字段有引用时，读出来就补齐', async () => {
-  const { normalize } = await import('../../src/core/store.js');
+  const { normalize } = await import('../../src/core/store.ts');
   const store = normalize({
     version: 3,
     sections: [{

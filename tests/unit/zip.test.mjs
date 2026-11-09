@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-const { createZip, readZip, crc32, assertSafeZipName } = await import('../../src/core/zip.js');
+const { createZip, readZip, crc32, assertSafeZipName } = await import('../../src/core/zip.ts');
 
 const byName = (list) => new Map(list.map((e) => [e.name, e.data]));
 
@@ -63,7 +63,7 @@ test('crc32 与标准值一致（"123456789" → 0xCBF43926）', () => {
 
 // —— 带口令的信封（securezip） ——
 // 目的：同一个导入入口既能吃明文包也能吃加密包；口令错、缺口令、包被改都要明确报错。
-import { isEncryptedPackage, openPackage, sealPackage } from '../../src/core/securezip.js';
+import { isEncryptedPackage, openPackage, sealPackage } from '../../src/core/securezip.ts';
 test('明文包 isEncryptedPackage=false，openPackage 原样返回', () => {
   const zip = createZip([{ name: 'a.txt', data: 'hello' }]);
   assert.equal(isEncryptedPackage(zip), false);

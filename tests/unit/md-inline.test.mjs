@@ -8,8 +8,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-const { tokenizeMd, imageRefs, linkCount, isHttpUrl, splitTail } = await import('../../src/web/frontend/mdInline.js');
-const { cleanHttpUrl, linkTextParts, cutAtCjkPunct, encodeUrl, decodeUrl } = await import('../../src/web/frontend/mdInline.js');
+const { tokenizeMd, imageRefs, linkCount, isHttpUrl, splitTail } = await import('../../src/web/frontend/mdInline.ts');
+const { cleanHttpUrl, linkTextParts, cutAtCjkPunct, encodeUrl, decodeUrl } = await import('../../src/web/frontend/mdInline.ts');
 
 const kinds = (text) => tokenizeMd(text).map((t) => t.type);
 

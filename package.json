@@ -1,6 +1,6 @@
 {
   "name": "nx-sk",
-  "version": "0.27.0",
+  "version": "0.28.0",
   "description": "nx-sk · 本机个人资源管理器（server-cli-web 骨架）：栏目化存储个人信息与大模型密钥，CLI 与 Web 同源，敏感字段密文落盘。",
   "type": "module",
   "bin": {
@@ -8,10 +8,11 @@
   },
   "files": [
     "bin/",
-    "src/",
+    "dist/",
     "assets/",
     "README.md",
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "LICENSE"
   ],
   "engines": {
     "node": ">=18.17"
@@ -30,17 +31,18 @@
     "vitePort": 5180
   },
   "scripts": {
-    "dev": "node scripts/dev.mjs",
+    "dev": "pnpm run build && node scripts/dev.mjs",
     "link:local": "node scripts/link-local.mjs",
     "unlink:local": "node scripts/link-local.mjs --unlink",
     "dev:vite": "vite",
-    "dev:serve": "node bin/nx-sk.mjs serve --no-open",
-    "build": "vite build && node scripts/link-local.mjs --auto",
+    "dev:serve": "pnpm run build && node bin/nx-sk.mjs serve --no-open",
+    "build": "tsc -p tsconfig.build.json && vite build && node scripts/link-local.mjs --auto",
     "start": "pnpm run build && node bin/nx-sk.mjs serve",
     "lint": "eslint .",
-    "test:unit": "node --test",
+    "typecheck": "tsc -b",
+    "test:unit": "node --test \"tests/**/*.test.mjs\" \"tests/**/*.test.ts\"",
     "test:smoke": "node tests/smoke.mjs",
-    "test": "pnpm run lint && pnpm run build && pnpm run test:smoke && pnpm run test:unit"
+    "test": "pnpm run lint && pnpm run typecheck && pnpm run build && pnpm run test:smoke && pnpm run test:unit"
   },
   "dependencies": {
     "react": "^18.3.1",
@@ -52,10 +54,15 @@
     "unist-util-visit": "^5.1.0"
   },
   "devDependencies": {
+    "@types/node": "22",
+    "@types/react": "18",
+    "@types/react-dom": "18",
     "@vitejs/plugin-react": "^4.3.4",
     "eslint": "^9.17.0",
     "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^7.1.1",
+    "typescript": "5.9.3",
+    "typescript-eslint": "^8.72.1",
     "vite": "^6.0.7"
   }
 }

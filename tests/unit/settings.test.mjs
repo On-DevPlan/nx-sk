@@ -6,9 +6,9 @@ import { useTempHome } from '../helpers.mjs';
 
 await useTempHome();
 
-const settings = await import('../../src/modules/settings/service.js');
-const sections = await import('../../src/modules/sections/service.js');
-const { loadStore, normalize, defaultSettings } = await import('../../src/core/store.js');
+const settings = await import('../../src/modules/settings/service.ts');
+const sections = await import('../../src/modules/sections/service.ts');
+const { loadStore, normalize, defaultSettings } = await import('../../src/core/store.ts');
 
 // 播种不再自带那一堆场景栏目：这里把 navGroups / navHidden / navOrder 用例要引用的建出来。
 // 顺序刻意打乱——归一成真实 id 之后，组的语义不该依赖创建顺序。
@@ -175,3 +175,4 @@ test('renderSettings 仍然列出 defaultSection（带校验器但不是「结�
   const d = await settings.getSettings();
   assert.match(settings.renderSettings(d), /defaultSection/);
 });
+

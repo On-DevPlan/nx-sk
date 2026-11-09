@@ -25,7 +25,7 @@ export function shouldServeLocally(url) {
 export default defineConfig({
   root: 'src/web/frontend',
   plugins: [react()],
-  build: { outDir: '../public', emptyOutDir: true },
+  build: { outDir: '../../../dist/web/public', emptyOutDir: true },
   server: {
     port: VITE_PORT,
     host: '127.0.0.1',

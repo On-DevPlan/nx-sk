@@ -1,0 +1,28 @@
+// 发布产物的构建配置：把 src/**/*.ts 原样 emit 成 dist/**/*.js。
+//
+// 为什么必须 emit：Node 拒绝对 node_modules 下的 .ts 做类型剥离
+// （ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING），所以「发布 .ts 直跑」只对仓库内成立。
+// 这里靠 rewriteRelativeImportExtensions 把源码里的 `./x.ts` 在 emit 时改写成 `./x.js`，
+// 全仓 import 后缀一个字都不用动。
+//
+// 与 tsconfig.server.json（typecheck，noEmit）的分工：那份覆盖测试与脚本，只查类型；
+// 这份只 emit src（不含前端），输出目录与 src 对齐。
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023"],
+    "types": ["node"],
+    "noEmit": false,
+    "outDir": "dist",
+    "rootDir": "src",
+    // emit 模式不能靠 allowImportingTsExtensions，改用后缀改写
+    "allowImportingTsExtensions": false,
+    "rewriteRelativeImportExtensions": true,
+    "declaration": false,
+    "sourceMap": false,
+    "incremental": true,
+    "tsBuildInfoFile": "node_modules/.tmp/tsconfig.build.tsbuildinfo"
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["src/web/frontend/**"]
+}

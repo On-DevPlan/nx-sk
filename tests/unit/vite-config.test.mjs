@@ -2,7 +2,7 @@
 // 规则容易在后续改配置时被顺手删掉，所以单测钉住它。
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { DEFAULT_PORT, DEV_VITE_PORT } from '../../src/core/paths.js';
+import { DEFAULT_PORT, DEV_VITE_PORT } from '../../src/core/paths.ts';
 import viteConfig, { shouldServeLocally } from '../../vite.config.js';
 
 test('前端源码路径交回 Vite，接口路径走代理', () => {
@@ -25,7 +25,7 @@ test('前端源码路径交回 Vite，接口路径走代理', () => {
 test('vite 必须绑 127.0.0.1（Node 18+ 默认 IPv6 会让 curl 拿 000）', () => {
   assert.equal(viteConfig.server.host, '127.0.0.1');
   assert.equal(viteConfig.root, 'src/web/frontend');
-  assert.equal(viteConfig.build.outDir, '../public');
+  assert.equal(viteConfig.build.outDir, '../../../dist/web/public');
 });
 
 test('端口只有一个来源：服务端默认端口 == vite 代理目标端口', () => {
