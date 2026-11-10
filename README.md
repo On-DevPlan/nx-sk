@@ -5,6 +5,8 @@
 
 ```
 nx-sk serve          # 打开面板（http://127.0.0.1:7866）
+# 敲 nx-sk 提示找不到命令？在仓库目录直接跑：node bin/nx-sk.mjs serve
+# （npm/pnpm 的全局 bin 目录不一定在 PATH 上，见「安装」后面的说明）
 ```
 
 ![结构](https://img.shields.io/badge/node-%3E%3D18.17-informational) ![license](https://img.shields.io/badge/license-MIT-informational)
