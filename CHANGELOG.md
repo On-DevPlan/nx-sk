@@ -2,6 +2,15 @@
 
 本文件格式参考 [Keep a Changelog](https://keepachangelog.com/)，中文正文。
 
+## 0.31.2 (2026-11-10)
+
+**README：快速开始补上「没有 nx-sk 命令时用 `node bin/nx-sk.mjs serve`」。**
+
+### Changed
+
+- 开头代码块从只有 `nx-sk serve` 改为同时给出仓库内直跑命令，并把「全局 bin 目录可能不在 PATH 上」的指向补在下面。
+  之前这段说明只放在「开发」一节末尾，首次安装的人看不到，容易卡在 command not found。
+
 ## 0.31.1 (2026-11-10)
 
 **开发脚本 `scripts/link-local.mjs`：`--auto` 跳过时补上可照做的下一步，并报告残留安装清单。npm 包内容与 0.31.0 相同（`scripts/` 不在发布清单里）。**
