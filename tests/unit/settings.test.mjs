@@ -2,6 +2,9 @@
 // 所以形状 / 栏目存在性 / 跨组重复 / 空组都要明确报错）+ 与 store.normalize 的默认值约定。
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { mkdtemp, stat } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { useTempHome } from '../helpers.mjs';
 
 await useTempHome();
@@ -174,5 +177,18 @@ test('defaultSection：只接受真实存在的栏目；空串 = 交给面板取
 test('renderSettings 仍然列出 defaultSection（带校验器但不是「结构化项」）', async () => {
   const d = await settings.getSettings();
   assert.match(settings.renderSettings(d), /defaultSection/);
+});
+
+test('store 文件不存在：首次读取即落盘，重复读取 id 稳定（否则每次请求都重播种 → 保存 404）', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'nx-sk-seed-'));
+  const p = join(dir, 'store.json');
+
+  const first = await loadStore(p);
+  const second = await loadStore(p);
+  assert.equal(first.entries[0].id, second.entries[0].id, '同一文件两次读取不应换 id');
+  assert.ok((await stat(p)).isFile(), '首次读取应把种子写进 store.json');
+
+  const third = await loadStore(p);
+  assert.equal(third.entries[0].id, first.entries[0].id, '落盘后再读仍是同一套 id');
 });
 
