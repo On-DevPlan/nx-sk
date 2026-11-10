@@ -58,91 +58,61 @@ body {
 .grow { flex: 1; min-width: 0; }
 .right { margin-left: auto; }
 
-/* ── 骨架 ───────────────────────────────────────────── */
-.app { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+/* ── 骨架（Notion 化）：左边是可收起的导航树，右边是「面包屑 + 内容」 ── */
+.app { display: flex; flex-direction: row; height: 100%; min-height: 0; }
+.app > .main { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
 
-header.top {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 14px;
-  border-bottom: var(--border);
-  flex-shrink: 0;
-}
-/* 品牌：头部唯一的「标题级」元素，字号/字重都要压过其它所有文字 */
-header.top .brand { font-size: 15px; font-weight: 700; letter-spacing: .2px; line-height: 1; display: inline-flex; align-items: center; gap: 8px; }
-header.top .brand img { width: 22px; height: 22px; border-radius: 6px; display: block; }
-/* 定位语：紧贴品牌但从属——更小更淡，别和品牌抢第一眼 */
-header.top .tagline { color: var(--mid); font-size: 11px; }
-/* 版本：做成 chip，避免「本机个人资源管理器 v0.5.0」连成一句话读 */
-header.top .ver {
-  font-size: 10px;
-  color: var(--mid);
+/* ── 侧栏：浅灰底、无边框（Notion 的侧栏靠底色区分，不画线） ── */
+.sb {
+  display: flex; flex-direction: column;
+  width: 264px; flex-shrink: 0;
   background: var(--soft);
-  border: var(--border);
-  border-radius: 999px;
-  padding: 1px 8px;
-  line-height: 1.7;
+  min-height: 0;
 }
-/* 右侧元信息 + 操作：存储路径降级成弱信息，别在头部最显眼处**
-   挤一段长路径（超长时省略号截断，完整值看 title） */
-header.top .store { display: inline-flex; align-items: center; gap: 6px; min-width: 0; font-size: 11px; color: var(--mid); }
-header.top .store .store-label { color: var(--mid); }
-header.top .store .copyable { max-width: 30ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sb-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 12px 6px;
+}
+.sb-head .brand { font-size: 14px; font-weight: 700; letter-spacing: .2px; line-height: 1; display: inline-flex; align-items: center; gap: 8px; }
+.sb-head .brand img { width: 20px; height: 20px; border-radius: 6px; display: block; }
+.sb-head .ver { font-size: 10px; color: var(--mid); background: var(--soft-2); border-radius: 999px; padding: 1px 8px; line-height: 1.7; }
+.sb-search { padding: 4px 10px 6px; }
+.sb-tree { flex: 1; min-height: 0; overflow: auto; padding: 0 6px 8px; }
+.sb-foot {
+  padding: 6px 12px 8px;
+  border-top: var(--border);
+  font-size: 10px; color: var(--mid);
+  min-width: 0;
+}
+.sb-store { display: inline-block; max-width: 100%; }
+/* 树行：图标 + 名称 + 计数；单色线性图标，与文字同灰阶 */
+.sb .ant-tree { background: transparent; font-size: var(--fs-core); }
+.sb .ant-tree-treenode { padding: 1px 0; }
+.sb .ant-tree-node-content-wrapper { border-radius: 6px; padding: 0 4px; }
+.sb .ant-tree-node-content-wrapper:hover { background: var(--soft-2); }
+.sb .ant-tree-node-content-wrapper.ant-tree-node-selected { background: var(--soft-2); color: var(--ink); }
+.sb .ant-tree-title { display: flex; align-items: center; min-width: 0; }
+.sb-row { display: inline-flex; align-items: center; gap: 7px; min-width: 0; max-width: 100%; }
+.sb-label { flex: 1; min-width: 0; }
+.sb-icon { color: var(--mid); font-size: 12px; flex-shrink: 0; }
+.sb-icon-leaf { opacity: .75; }
+.sb .count { color: var(--mid); font-size: 10px; font-variant-numeric: tabular-nums; }
 
-nav.tabs {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 14px;
+/* ── 面包屑栏：头部的替代品——收起开关 + 位置 + 刷新，一行 36px，细线压底 ── */
+.crumbs {
+  display: flex; align-items: center; gap: 8px;
+  padding: 4px 12px;
+  min-height: 36px;
   border-bottom: var(--border);
   flex-shrink: 0;
-}
-/* 分组细线：内容栏目 ‖ 系统工具 */
-.tabs-sep { width: 1px; height: 18px; background: var(--soft-2); margin: 0 4px; }
-
-/* ── 分组入口：一个 pill 收拢多个栏目（同域栏目不再挤成一排） ── */
-.tab-group { position: relative; display: inline-flex; }
-/* 展开指示用 CSS 三角，不引字符/图标 */
-.tab-group .caret {
-  width: 0; height: 0; margin-left: 1px;
-  border-left: 4px solid transparent;
-  border-right: 4px solid transparent;
-  border-top: 4px solid var(--mid);
-}
-.tab-group .tab.active .caret { border-top-color: var(--ink); }
-/* 展开时三角翻上去：开没开一眼可辨，不必等菜单出现才知道点中了。
-   只动 transform，不改布局（0×0 的三角绕中心转）。 */
-.tab-group .caret { transition: transform .12s ease; }
-.tab-group .tab[aria-expanded="true"] .caret { border-top-color: var(--ink); transform: rotate(180deg); }
-@media (prefers-reduced-motion: reduce) { .tab-group .caret { transition: none; } }
-/* 上下列表：浮层用一层柔和投影 + 极淡描边（不再是浮雕） */
-.tab-menu {
-  position: absolute; top: calc(100% + 4px); left: 0; z-index: 40;
-  min-width: 172px; padding: 4px;
-  display: flex; flex-direction: column; gap: 2px;
   background: var(--paper);
-  border: var(--border);
-  border-radius: var(--radius-btn);
-  box-shadow: var(--shadow-float);
 }
-/* 桥：盖住 pill 与菜单之间那几像素的「死区」——鼠标下滑穿过它时不能被判成离开，
-   否则菜单刚探出头就消失（hover 菜单的经典坑） */
-.tab-menu::before {
-  content: ''; position: absolute; left: 0; right: 0; top: -5px; height: 5px;
-}
-.tab-menu-row {
-  display: flex; align-items: center; gap: 10px; width: 100%;
-  height: var(--row-h); padding: 0 8px;
-  border: 0; border-radius: 6px; background: none;
-  color: var(--ink); font: inherit; font-size: var(--fs-core);
-  text-align: left; cursor: pointer;
-}
-.tab-menu-row:hover { background: var(--soft); }
-.tab-menu-row.current { font-weight: 600; }
-.tab-menu-row .count { color: var(--mid); font-size: 10px; font-variant-numeric: tabular-nums; }
+.crumbs .ant-breadcrumb { font-size: var(--fs-core); }
+.crumbs .crumb { color: var(--ink); }
+.crumbs .crumb-link { color: var(--mid); cursor: pointer; }
+.crumbs .crumb-link:hover { color: var(--ink); }
+.crumbs .crumb-entry { color: var(--mid); }
+.icon-btn { width: 26px; padding: 0; justify-content: center; }
 
 main.body { flex: 1; min-height: 0; overflow: auto; }
 
@@ -1683,3 +1653,59 @@ body.col-resizing, body.col-resizing * { cursor: col-resize !important; user-sel
 }
 .file-picker-list.expanded { max-height: none; }
 .file-picker-list .file-preview { flex-shrink: 0; }
+
+/* ── 设置页（Notion 式）：左侧设置导航 + 右侧无边框行式内容 ──
+   整页拆成两栏；左栏浅灰底与侧栏同语言，右栏白底、内容限宽居左，
+   行与行之间只用 1px 细线，不再用卡片把每一块框起来。 */
+.settings { display: flex; align-items: stretch; min-height: 100%; }
+.settings-nav {
+  position: sticky; top: 0;
+  align-self: flex-start;
+  width: 208px; flex-shrink: 0;
+  padding: 12px 8px;
+  display: flex; flex-direction: column; gap: 2px;
+  max-height: 100vh; overflow: auto;
+}
+.sn-item {
+  display: flex; align-items: center; gap: 8px;
+  height: 30px; padding: 0 10px;
+  border: 0; border-radius: 6px;
+  background: transparent; color: var(--mid);
+  font: inherit; font-size: var(--fs-core);
+  text-align: left; cursor: pointer;
+  transition: background .12s, color .12s;
+}
+.sn-item:hover { background: var(--soft-2); color: var(--ink); }
+.sn-item.active { background: var(--paper); color: var(--ink); font-weight: 600; }
+
+.settings-body { flex: 1; min-width: 0; padding: 18px 40px 48px; }
+.set-head { max-width: 720px; }
+.set-title {
+  display: flex; align-items: center; gap: 8px;
+  margin: 0; font-size: 19px; font-weight: 700; line-height: 1.3;
+}
+.set-title .sb-icon { font-size: 17px; }
+.set-sub { color: var(--mid); margin-top: 2px; }
+.set-actions { margin-top: 10px; padding-bottom: 6px; }
+
+.set-content { max-width: 720px; margin-top: 8px; }
+/* 行：名称 + 说明在左，控件在右；1px 细线分隔，hover 只提一点底色 */
+.set-row {
+  display: flex; align-items: center; gap: 16px;
+  min-height: 40px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--line);
+}
+.set-row:last-child { border-bottom: 0; }
+.set-row .set-k {
+  flex: 1; min-width: 0;
+  display: flex; flex-direction: column; gap: 1px;
+}
+.set-row .set-k .name { font-weight: 600; }
+.set-row .set-k .desc { color: var(--mid); font-size: 11px; }
+.set-row .set-v {
+  display: flex; align-items: center; gap: 8px;
+  flex-shrink: 0; max-width: 55%;
+  min-width: 0; justify-content: flex-end;
+}
+.set-row .set-v .mono { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

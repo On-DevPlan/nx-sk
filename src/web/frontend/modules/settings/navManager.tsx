@@ -2,7 +2,7 @@
 //   一个栏目要么在「平铺」里、要么在某个分组里、要么在「隐藏」里；
 //   拖，就是把它从一个容器挪到另一个。
 //
-// 「隐藏」不再是一个开关，就是一个容器：拖进去 = 不出现在头部（`#/栏目id` 直达仍可用）。
+// 「隐藏」不再是一个开关，就是一个容器：拖进去 = 不出现在侧栏（`#/栏目id` 直达仍可用）。
 // 这样「显隐」和「归组」是同一套操作，不用记两种交互。
 //
 // **受控组件**：数据（cfg）与保存都在设置页；这里只管画与调 onChange。
@@ -138,9 +138,9 @@ export default function NavManager({ sections, value, onChange }: {
 
   return (
     <div className="stack">
-      {/* ① 平铺：不进任何容器的栏目（= 头部平铺显示） */}
+      {/* ① 平铺：不进任何容器的栏目（= 侧栏平铺显示） */}
       <section {...zone('pool', 'nav-pool')}>
-        <div className="hint">平铺：不进分组也不隐藏的栏目，直接显示在头部（拖到这里 = 移出分组 / 取消隐藏）</div>
+        <div className="hint">平铺：不进分组也不隐藏的栏目，直接显示在侧栏（拖到这里 = 移出分组 / 取消隐藏）</div>
         {pool.length ? (
           <div className="nav-list">
             {pool.map((sid, i) => (
@@ -189,12 +189,12 @@ export default function NavManager({ sections, value, onChange }: {
         </section>
       ))}
 
-      {/* ③ 隐藏：与分组同构的容器——拖进去即「不进头部」 */}
+      {/* ③ 隐藏：与分组同构的容器——拖进去即「不进侧栏」 */}
       <section {...zone('hidden', 'card nav-group nav-hidden')}>
         <div className="colhead">
           隐藏
           <span className="muted">{value.hidden.length} 个栏目</span>
-          <span className="right muted">不进头部 · #/栏目id 直达仍可用</span>
+          <span className="right muted">不进侧栏 · #/栏目id 直达仍可用</span>
         </div>
         {value.hidden.length ? (
           <div className="nav-list">
@@ -212,7 +212,7 @@ export default function NavManager({ sections, value, onChange }: {
 
       <div className="rowgap">
         <button className="btn" onClick={() => onChange(nav.addGroup(value))}>新增分组</button>
-        <span className="hint">组顺序 = 头部显示顺序；组内顺序 = 展开列表里的顺序</span>
+        <span className="hint">组顺序 = 侧栏显示顺序；组内顺序 = 树里的展开顺序</span>
       </div>
     </div>
   );

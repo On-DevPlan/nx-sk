@@ -1,6 +1,6 @@
 {
   "name": "nx-sk",
-  "version": "0.32.0",
+  "version": "0.33.0",
   "description": "nx-sk · 本机个人资源管理器（server-cli-web 骨架）：栏目化存储个人信息与大模型密钥，CLI 与 Web 同源，敏感字段密文落盘。",
   "type": "module",
   "bin": {
@@ -45,6 +45,8 @@
     "test": "pnpm run lint && pnpm run typecheck && pnpm run build && pnpm run test:smoke && pnpm run test:unit"
   },
   "dependencies": {
+    "@ant-design/icons": "^5.6.1",
+    "antd": "^5.24.0",
     "flexlayout-react": "0.8.17",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

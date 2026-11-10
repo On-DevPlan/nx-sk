@@ -1,4 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import type { ComponentType } from 'react';
+import {
+  AppstoreOutlined, AimOutlined, CodeOutlined, DatabaseOutlined,
+  LockOutlined, SwapOutlined, WarningOutlined,
+} from '@ant-design/icons';
 import { api } from '../../api/client.ts';
 import { useStore } from '../../store.tsx';
 import { CliHints, Copyable, Tag } from '../../components/ui.tsx';
@@ -29,6 +34,15 @@ interface SettingsSaveResult {
 /** 保存后的基准：脏值判断与「放弃改动」都以它为准。 */
 interface Baseline { form: Settings; navCfg: nav.NavConfig }
 
+/** 设置页左侧导航的一项。 */
+interface SettingsPage {
+  id: string;
+  title: string;
+  icon: ComponentType<{ className?: string }>;
+  /** 条件页（数据迁移 / 上次读取异常）：不满足就不出现在导航里 */
+  when?: boolean;
+}
+
 export default function SettingsView() {
   const { boot, reload, toast, guard } = useStore();
   const [data, setData] = useState<SettingsData | null>(null);
@@ -36,6 +50,8 @@ export default function SettingsView() {
   const [navCfg, setNavCfg] = useState(nav.emptyConfig());
   // 保存后的基准：脏值判断与「放弃改动」都以它为准，不靠逐项对比
   const [baseline, setBaseline] = useState<Baseline | null>(null);
+  // 左侧导航当前页：Notion 式设置 = 左边选区块、右边看内容
+  const [page, setPage] = useState('nav');
   // 面板地址不写死：直接取用户此刻访问的这个 origin，换端口/换 host 都自动跟上
   const panelUrl = typeof window === 'undefined' ? '' : window.location.origin;
   const panelPort = typeof window === 'undefined' ? '' : (window.location.port || '80');
@@ -94,53 +110,85 @@ export default function SettingsView() {
     setNavCfg(structuredClone(baseline.navCfg));
   };
 
+  // 条件页：迁移与异常记录只在真的有时出现（导航与内容共用同一个 when 判断）
+  const pages = useMemo<SettingsPage[]>(() => [
+    { id: 'nav', title: '栏目管理', icon: AppstoreOutlined },
+    { id: 'default', title: '默认行为', icon: AimOutlined },
+    { id: 'storage', title: '存储与运行', icon: DatabaseOutlined },
+    { id: 'vault', title: '密钥', icon: LockOutlined },
+    { id: 'panel', title: '面板与 CLI', icon: CodeOutlined },
+    { id: 'migration', title: '数据迁移', icon: SwapOutlined, when: !!boot?.migration },
+    { id: 'corrupt', title: '上次读取异常', icon: WarningOutlined, when: !!boot?.corrupt },
+  ], [boot]);
+
+  const pageIds = useMemo(() => new Set(pages.filter((p) => p.when !== false).map((p) => p.id)), [pages]);
+  // 深状态失效（如迁移记录消失）时落回第一页，别停在空白上
+  const active = pageIds.has(page) ? page : 'nav';
+  const ActiveIcon = pages.find((p) => p.id === active)?.icon;
+
   if (!data || !form) return <div className="pad muted">加载中…</div>;
 
   return (
-    <>
-      <div className="toolbar rowgap pad">
-        <strong>设置</strong>
-        <span className="muted">本机配置与运行状态</span>
-        <span className="grow" />
-        {dirty ? (
-          <span className="rowgap">
-            <span className="tag">有未保存的改动</span>
-            <button className="btn small" onClick={() => { void save(); }}>保存</button>
-            <button className="btn small ghost" onClick={discard}>放弃改动</button>
-          </span>
-        ) : <span className="muted">已保存</span>}
-        <button className="btn small ghost" onClick={load}>重新读取</button>
-      </div>
+    <div className="settings">
+      {/* 左侧导航：参考 Notion Preferences——分组列表 + 搜索框省略（区块只有 7 个，不配搜索） */}
+      <nav className="settings-nav">
+        {pages.filter((p) => p.when !== false).map((p) => (
+          <button
+            key={p.id}
+            className={`sn-item ${p.id === active ? 'active' : ''}`}
+            onClick={() => setPage(p.id)}
+          >
+            <p.icon className="sb-icon" />
+            <span className="nowrap">{p.title}</span>
+          </button>
+        ))}
+      </nav>
 
-      <div className="card">
-        <div className="colhead">
-          栏目管理
-          <span className="right muted">
-            头部显示 {sectionIds.length - navCfg.hidden.length} 个 · 隐藏 {navCfg.hidden.length} 个
-            {navCfg.groups.length ? ` · ${navCfg.groups.length} 个分组` : ''}
-          </span>
-        </div>
-        <div className="pad stack">
-          <div className="hint">
-            拖动就是把结构摆成你要的样子：栏目可以拖进分组、组内换位、拖回平铺区即移出；拖分组把手换分组顺序。
-            被隐藏的栏目只是头部不显示入口，用 <code>#/栏目id</code> 直达仍可用。
+      {/* 右侧内容：无边框、行式表单——左边是「名称 + 说明」，右边是控件，行间 1px 细线 */}
+      <div className="settings-body">
+        <div className="set-head">
+          <h1 className="set-title">
+            {ActiveIcon ? <ActiveIcon className="sb-icon" /> : null}
+            {pages.find((p) => p.id === active)?.title}
+          </h1>
+          <div className="set-sub">本机配置与运行状态</div>
+          <div className="set-actions rowgap">
+            {dirty ? (
+              <>
+                <span className="tag">有未保存的改动</span>
+                <button className="btn small" onClick={() => { void save(); }}>保存</button>
+                <button className="btn small ghost" onClick={discard}>放弃改动</button>
+              </>
+            ) : <span className="muted">已保存</span>}
+            <button className="btn small ghost" onClick={load}>重新读取</button>
           </div>
-          <NavManager sections={sections} value={navCfg} onChange={setNavCfg} />
-          {problems.length ? (
+        </div>
+
+        <div className="set-content">
+          {active === 'nav' ? (
             <div className="stack">
-              {problems.map((p) => <div key={p.field} className="hint bad">· {p.message}</div>)}
+              <div className="hint">
+                侧栏显示 {sectionIds.length - navCfg.hidden.length} 个栏目 · 隐藏 {navCfg.hidden.length} 个
+                {navCfg.groups.length ? ` · ${navCfg.groups.length} 个分组` : ''}。
+                拖动就是把结构摆成你要的样子：栏目可以拖进分组、组内换位、拖回平铺区即移出；拖分组把手换分组顺序。
+                被隐藏的栏目只是侧栏不显示入口，用 <code>#/栏目id</code> 直达仍可用。
+              </div>
+              <NavManager sections={sections} value={navCfg} onChange={setNavCfg} />
+              {problems.length ? (
+                <div className="stack">
+                  {problems.map((p) => <div key={p.field} className="hint bad">· {p.message}</div>)}
+                </div>
+              ) : null}
             </div>
           ) : null}
-        </div>
-      </div>
 
-      <div className="card">
-        <div className="colhead">默认行为</div>
-        <div className="pad">
-          <div className="grid">
-            <div className="field">
-              <div className="flabel"><span>默认栏目</span><span className="fkey">打开面板时落在哪</span></div>
-              <div className="fctrl">
+          {active === 'default' ? (
+            <div className="set-row">
+              <div className="set-k">
+                <span className="name">默认栏目</span>
+                <span className="desc">打开面板时落在哪</span>
+              </div>
+              <div className="set-v">
                 <select value={form.defaultSection || ''} onChange={(e) => setForm({ ...form, defaultSection: e.target.value })}>
                   <option value="">（第一个栏目）</option>
                   {sections.map((s) => <option key={s.id} value={s.id}>{s.title}（{s.id}）</option>)}
@@ -151,99 +199,91 @@ export default function SettingsView() {
                   ) : null}
                 </select>
               </div>
-              <div className="hint">地址里带 <code>#/栏目id</code> 时以地址为准；改完下次打开生效。</div>
             </div>
-          </div>
-        </div>
-      </div>
+          ) : null}
 
-      <div className="card">
-        <div className="colhead">存储与运行</div>
-        <div className="colbody">
-          <InfoRow label="数据目录" value={boot?.home} copy={boot?.home} />
-          <InfoRow label="store.json" value={boot?.storePath} copy={boot?.storePathRaw} />
-          <InfoRow label="栏目 / 条目" value={boot ? `${boot.counts.sections} / ${boot.counts.entries}` : ''} />
-          <InfoRow label="命令条数" value={boot ? String(boot.counts.commands) : ''} />
-          <InfoRow label="app / node" value={boot ? `v${boot.app.version} · node ${boot.app.node} · ${boot.app.platform}` : ''} />
-          <InfoRow
-            label="环境变量覆盖"
-            value={boot ? Object.entries(boot.envOverrides).filter(([, v]) => v).map(([k, v]) => `${k}=${v}`).join('　') || '（无）' : ''}
-          />
-        </div>
-      </div>
+          {active === 'storage' ? (
+            <>
+              <InfoRow label="数据目录" value={boot?.home} copy={boot?.home} />
+              <InfoRow label="store.json" value={boot?.storePath} copy={boot?.storePathRaw} />
+              <InfoRow label="栏目 / 条目" value={boot ? `${boot.counts.sections} / ${boot.counts.entries}` : ''} />
+              <InfoRow label="命令条数" value={boot ? String(boot.counts.commands) : ''} />
+              <InfoRow label="app / node" value={boot ? `v${boot.app.version} · node ${boot.app.node} · ${boot.app.platform}` : ''} />
+              <InfoRow
+                label="环境变量覆盖"
+                value={boot ? Object.entries(boot.envOverrides).filter(([, v]) => v).map(([k, v]) => `${k}=${v}`).join('　') || '（无）' : ''}
+              />
+            </>
+          ) : null}
 
-      <div className="card">
-        <div className="colhead">密钥（密文落盘）</div>
-        <div className="colbody">
-          <InfoRow label="密钥来源" value={boot?.vault?.source === 'env' ? '环境变量 NX_SK_PASSPHRASE（口令不落盘）' : '本机密钥文件'} />
-          <InfoRow label="密钥文件" value={boot?.vault?.keyFile || boot?.vault?.saltFile || ''} copy={boot?.vault?.keyFile || boot?.vault?.saltFile} />
-          <div className="row">
-            <span className="desc">{boot?.vault?.note}</span>
-          </div>
-          <div className="row">
-            <span className="desc bad">删掉密钥文件或换掉口令后，已存的密文都解不开了——导出前先确认密钥可用。</span>
-          </div>
-        </div>
-      </div>
-
-      <div className="card">
-        <div className="colhead">面板与 CLI</div>
-        <div className="colbody">
-          <div className="row">
-            <span className="name">面板地址</span>
-            <span className="desc mono">{panelUrl}</span>
-            <span className="acts"><Copyable className="mono" text={panelUrl}>复制</Copyable></span>
-          </div>
-          <div className="row">
-            <span className="name">重启面板</span>
-            <span className="desc">面板本身就是 serve 提供的；改代码后重启它即可</span>
-            <span className="acts"><Copyable className="mono" text={`nx-sk serve --port ${panelPort}`}>{`nx-sk serve --port ${panelPort}`}</Copyable></span>
-          </div>
-        </div>
-      </div>
-
-      {boot?.migration ? (
-        <div className="card">
-          <div className="colhead">数据迁移</div>
-          <div className="colbody">
-            <div className="row">
-              <span className="desc">store 已从 v{boot.migration.from} 迁到 v{boot.migration.to}：密钥栏目字段 {boot.migration.fieldsBefore} → {boot.migration.fieldsAfter}，{boot.migration.entries} 条条目</span>
-            </div>
-            <div className="row">
-              <span className="desc">迁移前的原始文件</span>
-              <span className="acts"><Copyable className="mono" text={boot.migration.snapshotRaw || ''}>{boot.migration.snapshot}</Copyable></span>
-            </div>
-            {boot.migration.legacyValuesKept ? (
-              <div className="row">
-                <span className="desc">另保留了 {boot.migration.legacyValuesKept} 个旧字段的值（不再显示，但没删）</span>
+          {active === 'vault' ? (
+            <>
+              <InfoRow label="密钥来源" value={boot?.vault?.source === 'env' ? '环境变量 NX_SK_PASSPHRASE（口令不落盘）' : '本机密钥文件'} />
+              <InfoRow label="密钥文件" value={boot?.vault?.keyFile || boot?.vault?.saltFile || ''} copy={boot?.vault?.keyFile || boot?.vault?.saltFile} />
+              <div className="set-row">
+                <div className="set-k"><span className="desc">{boot?.vault?.note}</span></div>
               </div>
-            ) : null}
-          </div>
-        </div>
-      ) : null}
+              <div className="set-row">
+                <div className="set-k"><span className="desc bad">删掉密钥文件或换掉口令后，已存的密文都解不开了——导出前先确认密钥可用。</span></div>
+              </div>
+            </>
+          ) : null}
 
-      {boot?.corrupt ? (
-        <div className="card">
-          <div className="colhead">上次读取异常</div>
-          <div className="colbody">
-            <div className="row">
-              <span className="desc bad">store.json 解析失败，已挪到 {boot.corrupt.to}（原文件没有被覆盖）</span>
+          {active === 'panel' ? (
+            <>
+              <div className="set-row">
+                <div className="set-k">
+                  <span className="name">面板地址</span>
+                </div>
+                <div className="set-v">
+                  <span className="mono nowrap">{panelUrl}</span>
+                  <Copyable className="mono" text={panelUrl}>复制</Copyable>
+                </div>
+              </div>
+              <div className="set-row">
+                <div className="set-k">
+                  <span className="name">重启面板</span>
+                  <span className="desc">面板本身就是 serve 提供的；改代码后重启它即可</span>
+                </div>
+                <div className="set-v">
+                  <Copyable className="mono" text={`nx-sk serve --port ${panelPort}`}>{`nx-sk serve --port ${panelPort}`}</Copyable>
+                </div>
+              </div>
+              <CliHints module="settings" />
+            </>
+          ) : null}
+
+          {active === 'migration' && boot?.migration ? (
+            <>
+              <InfoRow label="迁移结果" value={`store 已从 v${boot.migration.from} 迁到 v${boot.migration.to}：密钥栏目字段 ${boot.migration.fieldsBefore} → ${boot.migration.fieldsAfter}，${boot.migration.entries} 条条目`} />
+              <InfoRow label="迁移前的原始文件" value={boot.migration.snapshot} copy={boot.migration.snapshotRaw || ''} />
+              {boot.migration.legacyValuesKept ? (
+                <InfoRow label="旧字段" value={`另保留了 ${boot.migration.legacyValuesKept} 个旧字段的值（不再显示，但没删）`} />
+              ) : null}
+            </>
+          ) : null}
+
+          {active === 'corrupt' && boot?.corrupt ? (
+            <div className="set-row">
+              <div className="set-k">
+                <span className="desc bad">store.json 解析失败，已挪到 {boot.corrupt.to}（原文件没有被覆盖）</span>
+              </div>
             </div>
-          </div>
+          ) : null}
         </div>
-      ) : null}
-
-      <CliHints module="settings" />
-    </>
+      </div>
+    </div>
   );
 }
 
 function InfoRow({ label, value, copy }: { label: string; value?: string; copy?: string }) {
   return (
-    <div className="row">
-      <span className="name">{label}</span>
-      <span className="desc mono">{value || '（空）'}</span>
-      {copy ? <span className="acts"><Copyable className="mono" text={copy}>复制</Copyable></span> : <Tag> </Tag>}
+    <div className="set-row">
+      <div className="set-k"><span className="name">{label}</span></div>
+      <div className="set-v">
+        <span className="mono nowrap" title={value || ''}>{value || '（空）'}</span>
+        {copy ? <Copyable className="mono" text={copy}>复制</Copyable> : <Tag> </Tag>}
+      </div>
     </div>
   );
 }
