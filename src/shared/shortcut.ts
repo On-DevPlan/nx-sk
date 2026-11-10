@@ -138,10 +138,8 @@ function normalizeItem(raw: any, groupIndex: number, itemIndex: number): Shortcu
     throw new Error(`第 ${groupIndex + 1} 组第 ${itemIndex + 1} 条不是对象`);
   }
   const combo = parseCombo(raw.combo ?? raw.keys);
+  // 说明允许为空：参考实现 `addShortcut` 不做非空校验，面板里「未填写」是合法状态。
   const description = String(raw.description ?? raw.desc ?? '').trim();
-  if (!description) {
-    throw new Error(`第 ${groupIndex + 1} 组第 ${itemIndex + 1} 条缺少 description（写清这条快捷键做什么）`);
-  }
   const condition = String(raw.condition ?? '').trim();
   const id = typeof raw.id === 'string' && raw.id.trim() ? raw.id.trim() : `s${groupIndex + 1}-${itemIndex + 1}`;
   const createdAt = Number.isFinite(raw.createdAt) ? Number(raw.createdAt) : undefined;
@@ -187,7 +185,15 @@ export function normalizeShortcutGroups(raw: unknown): ShortcutGroup[] {
     if (!itemsRaw) throw new Error(`组「${name}」缺少 shortcuts 数组`);
     const shortcuts = itemsRaw.map((it: unknown, si: number) => normalizeItem(it, gi, si));
     const id = typeof g.id === 'string' && g.id.trim() ? g.id.trim() : `g${gi + 1}`;
-    groups.push({ id, name, shortcuts });
+    const createdAt = Number.isFinite(g.createdAt) ? Number(g.createdAt) : undefined;
+    const updatedAt = Number.isFinite(g.updatedAt) ? Number(g.updatedAt) : undefined;
+    groups.push({
+      id,
+      name,
+      shortcuts,
+      ...(createdAt ? { createdAt } : {}),
+      ...(updatedAt ? { updatedAt } : {}),
+    });
   });
   return groups;
 }

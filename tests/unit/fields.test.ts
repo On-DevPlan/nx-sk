@@ -118,18 +118,28 @@ test('shortcut：三种写法归一到同一形状（字符串 / 标签数组 / 
   assert.equal(fromString[0].shortcuts[0].id, 's1-1');
 });
 
-test('shortcut：缺说明 / 坏键位 / 坏结构都报可读错误', () => {
+test('shortcut：说明允许为空，坏键位 / 坏结构报可读错误', () => {
   const def = { key: 'keys', label: '快捷键', type: 'shortcut', group: 'other' };
-  assert.throws(
-    () => FIELD_BEHAVIOR.shortcut.coerce(def, [{ name: '全局', shortcuts: [{ combo: 'Ctrl+R' }] }]),
-    /缺少 description/,
-  );
+  // 参考实现的 addShortcut 不校验说明非空；面板里「未填写」是合法状态
+  const noDesc = FIELD_BEHAVIOR.shortcut.coerce(def, [
+    { name: '全局', shortcuts: [{ combo: 'Ctrl+R' }] },
+  ]) as any[];
+  assert.equal(noDesc[0].shortcuts[0].description, '');
   assert.throws(
     () => FIELD_BEHAVIOR.shortcut.coerce(def, [{ name: '全局', shortcuts: [{ combo: 'Ctrl+？', description: 'x' }] }]),
     /认不出键位/,
   );
   assert.throws(() => FIELD_BEHAVIOR.shortcut.coerce(def, '不是 JSON'), /需要一个 JSON 数组/);
   assert.throws(() => FIELD_BEHAVIOR.shortcut.coerce(def, { foo: 1 }), /需要一个数组/);
+});
+
+test('shortcut：组的 createdAt / updatedAt 会被保留', () => {
+  const def = { key: 'keys', label: '快捷键', type: 'shortcut', group: 'other' };
+  const groups = FIELD_BEHAVIOR.shortcut.coerce(def, [
+    { id: 'g1', name: '全局', createdAt: 1700000000000, updatedAt: 1700000001000, shortcuts: [] },
+  ]) as any[];
+  assert.equal(groups[0].createdAt, 1700000000000);
+  assert.equal(groups[0].updatedAt, 1700000001000);
 });
 
 test('shortcut：format 按组输出、refs 为空、不进表格单元格', () => {

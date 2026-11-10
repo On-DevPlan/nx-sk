@@ -2,6 +2,16 @@
 
 本文件格式参考 [Keep a Changelog](https://keepachangelog.com/)，中文正文。
 
+## 0.31.3 (2026-11-10)
+
+**快捷键面板：说明允许留空、分组与条目的 `createdAt` / `updatedAt` 与参考实现一致，修掉「加不进去 / 存不下来」。**
+
+### Fixed
+
+- 「+ 新增快捷键」在说明留空时被静默丢弃：`addShortcut` 里多了 `if (!desc) return`。参考实现只 trim 不校验，列表把空说明显示成「未填写」，现已对齐。
+- 存储层 `normalizeShortcutGroups` 对空说明直接抛「缺少 description」，导致新增空说明后保存整条条目失败；现在空说明按 `''` 落盘。
+- 分组不再丢时间戳：新建分组写 `createdAt` / `updatedAt`，增删改同组快捷键时刷新 `updatedAt`；导入的条目补 `createdAt`，追加到的分组刷新 `updatedAt`。存储结构因此与参考 `useShortcuts` 落盘一致。
+
 ## 0.31.2 (2026-11-10)
 
 **README：快速开始补上「没有 nx-sk 命令时用 `node bin/nx-sk.mjs serve`」。**
