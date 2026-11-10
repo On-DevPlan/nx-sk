@@ -1,0 +1,1461 @@
+/* index.css —— ShortcutLibrary 样式
+   约定:类名用 sl-sl- 前缀,颜色/间距全部走 var(--sl-*, fallback) token(Zenkaku fallback)
+   风格:扁平、白色背景、单一强调色,gap 用 4/8/12/16/24 标准步长 */
+
+/* ===== Root =====
+   固定视口高度 + 内部滚动:
+   详情页 DetailPage 是 position:fixed + height:100vh + overflow:hidden,
+   root 用 min-height 会被内容撑高后被外层裁剪。
+   改成 height:100vh + overflow:hidden,让 sidebar list / table viewport
+   各自成为独立滚动容器,外层裁剪不再影响内容可达性 */
+.sl-sl-root {
+  display: grid;
+  grid-template-columns: var(--sl-sl-sidebar-w, 280px) 4px 1fr;
+  height: 100vh;
+  overflow: hidden;
+  background: var(--sl-color-bg, #fafafa);
+  color: var(--sl-color-text, #1f2328);
+  font-family: var(--sl-font-family, system-ui, -apple-system, "Segoe UI", "PingFang SC", sans-serif);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ===== 通用 ===== */
+.sl-sl-input {
+  font: inherit;
+  padding: 8px 10px;
+  border: 1px solid var(--sl-color-border, #e4e4e7);
+  border-radius: 6px;
+  background: var(--sl-color-surface, #fff);
+  color: var(--sl-color-text, #1f2328);
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  width: 100%;
+  box-sizing: border-box;
+}
+.sl-sl-input:focus {
+  border-color: var(--sl-color-primary, #2563eb);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+.sl-sl-input--inline { padding: 4px 8px; font-size: 13px; }
+.sl-sl-input--desc { flex: 0 0 240px; }
+
+.sl-sl-btn {
+  font: inherit;
+  padding: 6px 14px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  background: var(--sl-color-surface-alt, #f4f4f5);
+  color: var(--sl-color-text, #1f2328);
+}
+.sl-sl-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.sl-sl-btn--primary {
+  background: var(--sl-color-primary, #2563eb);
+  color: var(--sl-color-on-primary, #fff);
+}
+.sl-sl-btn--primary:hover:not(:disabled) { background: #1d4ed8; }
+.sl-sl-btn--ghost {
+  background: transparent;
+  border-color: var(--sl-color-border, #e4e4e7);
+}
+
+.sl-sl-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 28px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--sl-color-text-soft, #6b7280);
+  cursor: pointer;
+  font-size: 14px;
+  transition: background 0.15s, color 0.15s;
+}
+.sl-sl-icon-btn:hover { background: var(--sl-color-surface-alt, #f4f4f5); color: var(--sl-color-text, #1f2328); }
+.sl-sl-icon-btn--danger:hover { background: #fef2f2; color: #dc2626; }
+
+/* 就地二次确认:删除按钮 × 变成 ?,加红底 + 轻微脉冲,告诉用户再点一次才真删 */
+.sl-sl-icon-btn--danger.is-confirming {
+  background: var(--sl-color-danger, #ef4444);
+  color: #fff;
+  border-color: var(--sl-color-danger, #ef4444);
+  font-weight: 700;
+  animation: sl-sl-confirm-pulse 1.2s ease-in-out infinite;
+}
+.sl-sl-icon-btn--danger.is-confirming:hover {
+  background: color-mix(in srgb, var(--sl-color-danger, #ef4444) 85%, #000);
+  color: #fff;
+}
+@keyframes sl-sl-confirm-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.12); }
+}
+
+.sl-sl-empty {
+  color: var(--sl-color-text-mute, #9ca3af);
+  font-style: italic;
+}
+
+/* ===== Sidebar =====
+   root 固定 100vh 后 sidebar 作为 grid item 被 stretch 到全高;
+   去掉 min-height:100vh(会和 stretch 冲突,且不再需要);
+   内部 list 必须 flex:1 + min-height:0,否则 group 多时
+   会被内容撑出 sidebar,scroll 永远不出现 */
+/* ===== 拖拽面板 =====
+   panel = grid/flex item,尺寸随拖拽变化;inner = 冻结的内容层
+   (拖拽期间 inner 固定尺寸 + contain:size,外部尺寸变化不传导进子树) */
+.sl-sl-panel {
+  overflow: hidden;
+  min-width: 0;
+  min-height: 0;
+}
+.sl-sl-panel__inner {
+  min-width: 0;
+  min-height: 0;
+  box-sizing: border-box;
+}
+.sl-sl-panel__inner--main {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 24px 32px;
+  height: 100%;
+  overflow: hidden;
+}
+.sl-sl-panel__inner--preview {
+  padding: 20px;
+  overflow: hidden;
+  min-width: 0;
+  min-height: 0;
+}
+.sl-sl-panel--sidebar .sl-sl-panel__inner {
+  height: 100%;
+}
+
+.sl-sl-sidebar {
+  background: var(--sl-color-surface, #fff);
+  border-right: 1px solid var(--sl-color-border, #e4e4e7);
+  padding: 20px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow: hidden;
+  box-sizing: border-box;
+  height: 100%;
+}
+.sl-sl-sidebar__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--sl-color-text-mute, #9ca3af);
+}
+.sl-sl-sidebar__title { font-weight: 600; }
+.sl-sl-sidebar__count {
+  font-family: var(--sl-font-mono, ui-monospace, "JetBrains Mono", monospace);
+  font-size: 10px;
+  background: var(--sl-color-surface-alt, #f4f4f5);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.sl-sl-sidebar__new {
+  display: flex;
+  gap: 6px;
+}
+.sl-sl-sidebar__new .sl-sl-btn { padding: 6px 12px; }
+.sl-sl-sidebar__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+.sl-sl-sidebar__empty {
+  padding: 16px 8px;
+  text-align: center;
+  color: var(--sl-color-text-mute, #9ca3af);
+  font-size: 13px;
+}
+.sl-sl-sidebar__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.12s;
+  position: relative;
+}
+.sl-sl-sidebar__item:hover { background: var(--sl-color-surface-alt, #f4f4f5); }
+.sl-sl-sidebar__item.is-active {
+  background: var(--sl-color-primary, #2563eb);
+  color: var(--sl-color-on-primary, #fff);
+}
+.sl-sl-sidebar__item.is-active .sl-sl-sidebar__badge { background: rgba(255,255,255,0.2); color: #fff; }
+.sl-sl-sidebar__name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sl-sl-sidebar__badge {
+  font-family: var(--sl-font-mono, ui-monospace, "JetBrains Mono", monospace);
+  font-size: 10px;
+  background: var(--sl-color-surface-alt, #f4f4f5);
+  color: var(--sl-color-text-mute, #9ca3af);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.sl-sl-sidebar__actions {
+  display: none;
+  gap: 2px;
+  margin-left: auto;
+}
+.sl-sl-sidebar__item:hover .sl-sl-sidebar__actions { display: inline-flex; }
+
+/* ===== Main =====
+   main 作为 grid item 被 stretch 到 root 高度;
+   flex column + overflow:hidden + min-height:0
+   让内部 table 区能收缩并独立滚动 */
+.sl-sl-main {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.sl-sl-topbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.sl-sl-topbar__search { max-width: 480px; }
+.sl-sl-topbar__meta {
+  font-family: var(--sl-font-mono, ui-monospace, "JetBrains Mono", monospace);
+  font-size: 11px;
+  color: var(--sl-color-text-mute, #9ca3af);
+}
+
+.sl-sl-empty-state {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 80px 20px;
+  color: var(--sl-color-text-mute, #9ca3af);
+  text-align: center;
+}
+.sl-sl-empty-state h2 { color: var(--sl-color-text, #1f2328); margin: 0 0 12px; font-weight: 500; }
+.sl-sl-empty-state p { margin: 0; max-width: 360px; line-height: 1.6; }
+
+/* ===== Table =====
+   表格区在 main 里 flex:1 占满剩余高度;自身 flex column,
+   head 固定不滚,viewport 是独立滚动容器(长表格从此可滚) */
+.sl-sl-table {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--sl-color-surface, #fff);
+  border: 1px solid var(--sl-color-border, #e4e4e7);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.sl-sl-table__head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--sl-color-border, #e4e4e7);
+}
+.sl-sl-table__title { font-size: 16px; font-weight: 600; margin: 0; }
+.sl-sl-table__sub {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--sl-color-text-mute, #9ca3af);
+  font-family: var(--sl-font-mono, ui-monospace, "JetBrains Mono", monospace);
+}
+/* 表头右侧:条件筛选器 + 主操作按钮排成一行 */
+.sl-sl-table__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sl-sl-filter {
+  /* 原生 <select> 各浏览器外观不一致(箭头/内边距/focus 环),统一去掉,
+     换成自定义 chevron,与旁边主按钮同高、同 6px 圆角 */
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  box-sizing: border-box;
+  font: inherit;
+  font-size: 14px;
+  height: 32px;
+  padding: 0 34px 0 12px;
+  max-width: 220px;
+  border: 1px solid var(--sl-color-border, #e4e4e7);
+  border-radius: 6px;
+  background-color: var(--sl-color-surface, #fff);
+  /* feather chevron-down,stroke 用 text-soft 灰,压在右侧内边距区 */
+  background-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='16'%20height='16'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%236b7280'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpolyline%20points='6%209%2012%2015%2018%209'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 11px center;
+  background-size: 14px;
+  color: var(--sl-color-text, #1f2328);
+  outline: none;
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s, background-color 0.15s;
+}
+.sl-sl-filter:hover {
+  border-color: var(--sl-color-text-soft, #6b7280);
+  background-color: var(--sl-color-surface-alt, #f4f4f5);
+}
+.sl-sl-filter:focus-visible {
+  border-color: var(--sl-color-primary, #2563eb);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+.sl-sl-filter:active {
+  background-color: var(--sl-color-surface-alt, #f4f4f5);
+}
+.sl-sl-table__empty {
+  padding: 60px 20px;
+  text-align: center;
+  color: var(--sl-color-text-mute, #9ca3af);
+}
+.sl-sl-table__viewport { flex: 1 1 auto; min-height: 0; overflow: auto; }
+.sl-sl-table__grid {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.sl-sl-table__grid th {
+  /* 列头在 viewport 滚动时吸顶,长表格也能看到列名 */
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--sl-color-surface-alt, #fafafa);
+  text-align: left;
+  padding: 10px 20px;
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--sl-color-text-mute, #9ca3af);
+  border-bottom: 1px solid var(--sl-color-border, #e4e4e7);
+}
+.sl-sl-table__grid td {
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--sl-color-border, #e4e4e7);
+  vertical-align: middle;
+}
+.sl-sl-row:last-child td { border-bottom: none; }
+.sl-sl-row--conflict { background: #fef2f2; }
+.sl-sl-row--conflict td { background: transparent; }
+.sl-sl-row--editing td, .sl-sl-row--adding td { background: var(--sl-color-surface-alt, #fafafa); padding: 16px 20px; }
+.sl-sl-table__col-combo { width: 24%; }
+.sl-sl-table__col-desc { width: 30%; }
+.sl-sl-table__col-cond { width: 22%; color: var(--sl-color-text-soft, #6b7280); font-size: 12px; }
+.sl-sl-table__col-act { width: 100px; text-align: right; }
+.sl-sl-table__col-act .sl-sl-icon-btn { margin-left: 4px; }
+.sl-sl-table__conflict-tag {
+  display: inline-block;
+  margin-left: 8px;
+  font-size: 10px;
+  padding: 2px 6px;
+  background: #fee2e2;
+  color: #dc2626;
+  border-radius: 4px;
+  font-weight: 600;
+}
+.sl-sl-add-row { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+.sl-sl-input--cond { flex: 0 0 220px; }
+
+/* ===== KeyChip / ComboDisplay ===== */
+.sl-sl-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--sl-color-border, #d4d4d8);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  background: var(--sl-color-surface, #fff);
+  font-family: var(--sl-font-mono, ui-monospace, "JetBrains Mono", monospace);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--sl-color-text, #374151);
+  line-height: 1;
+  box-sizing: border-box;
+}
+.sl-sl-chip--mod {
+  background: var(--sl-color-surface-alt, #f4f4f5);
+  color: var(--sl-color-text, #1f2328);
+  min-width: 32px;
+}
+.sl-sl-chip--sm { height: 22px; font-size: 11px; min-width: 22px; padding: 0 6px; }
+.sl-sl-combo { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.sl-sl-combo__cell { display: inline-flex; align-items: center; gap: 4px; }
+.sl-sl-combo__plus { color: var(--sl-color-text-mute, #9ca3af); font-size: 11px; }
+
+/* ===== Popover ===== */
+.sl-sl-popover {
+  background: var(--sl-color-surface, #fff);
+  border: 1px solid var(--sl-color-border, #e4e4e7);
+  border-radius: 8px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  outline: none;
+  min-width: 280px;
+  box-shadow: 0 8px 24px -8px rgba(0,0,0,0.18);
+}
+.sl-sl-popover__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.sl-sl-popover__title { font-weight: 600; font-size: 13px; }
+.sl-sl-popover__hint {
+  font-size: 11px;
+  color: var(--sl-color-text-mute, #9ca3af);
+  font-family: var(--sl-font-mono, ui-monospace, "JetBrains Mono", monospace);
+}
+.sl-sl-popover__chips {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  min-height: 32px;
+  padding: 6px;
+  background: var(--sl-color-surface-alt, #fafafa);
+  border-radius: 6px;
+}
+.sl-sl-popover__placeholder { color: var(--sl-color-text-mute, #9ca3af); font-size: 13px; padding: 0 4px; }
+.sl-sl-popover__chip-cell { display: inline-flex; align-items: center; gap: 4px; }
+.sl-sl-popover__plus { color: var(--sl-color-text-mute, #9ca3af); font-size: 11px; }
+.sl-sl-popover__condition {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.sl-sl-popover__condition-label {
+  font-size: 11px;
+  color: var(--sl-color-text-mute, #9ca3af);
+  font-family: var(--sl-font-mono, ui-monospace, "JetBrains Mono", monospace);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.sl-sl-popover__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* ===== Keyboard Preview ===== */
+.sl-sl-preview {
+  flex: 0 0 var(--sl-sl-preview-h, auto);
+  background: var(--sl-color-surface, #fff);
+  border: 1px solid var(--sl-color-border, #e4e4e7);
+  border-radius: 8px;
+  overflow: hidden;
+  min-height: 0;
+  min-width: 0;
+}
+.sl-sl-preview.is-collapsed { padding: 12px 20px; }
+.sl-sl-preview__head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.sl-sl-preview.is-collapsed .sl-sl-preview__head { margin-bottom: 0; }
+.sl-sl-preview__title {
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--sl-color-text-mute, #9ca3af);
+  font-weight: 600;
+}
+.sl-sl-preview__hint {
+  flex: 1 1 auto;
+  font-size: 11px;
+  color: var(--sl-color-text-mute, #9ca3af);
+  font-family: var(--sl-font-mono, ui-monospace, "JetBrains Mono", monospace);
+}
+.sl-sl-preview__toggle {
+  flex: 0 0 auto;
+  font-size: 16px;
+  line-height: 1;
+}
+/* ===== Keyboard Preview =====
+   使用条件:挂在 `.sl-sl-preview__inner` 内部、preview 面板宽度 ≥ ~750px
+   (主键区横向 ≈ 16u ≈ 720px + numpad 200px + 间距 ≈ 1000px)
+   时显示完整 1:1 ANSI 104 键;窄屏通过 `overflow:auto` 横向滚动。
+   --sl-kb-u 选 44px 是为了键上的"Shift / Backspace"等双单位键文字可读,
+   面板高度若不够,纵向也会滚(preview panel 已 overflow:hidden,由外层滚)。 */
+.sl-sl-kb {
+  --sl-kb-u: 44px;
+  --sl-kb-gap: 5px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: calc(var(--sl-kb-u) * 0.5);
+  overflow: auto;
+  padding: 4px;
+}
+.sl-sl-kb__cluster { display: flex; flex-direction: column; gap: var(--sl-kb-gap); }
+.sl-sl-kb__cluster--numpad {
+  display: grid;
+  grid-template-columns: repeat(4, var(--sl-kb-u));
+  grid-auto-rows: var(--sl-kb-u);
+  /* 与主键区 F 行对齐:小键盘从数字行开始 */
+  margin-top: calc(var(--sl-kb-u) + var(--sl-kb-gap));
+}
+.sl-sl-kb__cluster--numpad .sl-sl-kb__key {
+  width: auto; height: auto;
+  grid-column: var(--sl-kb-col, auto) / span var(--sl-kb-colspan, 1);
+  grid-row: var(--sl-kb-row, auto) / span var(--sl-kb-rowspan, 1);
+}
+.sl-sl-kb__row { display: flex; gap: var(--sl-kb-gap); }
+
+.sl-sl-kb__key,
+.sl-sl-kb__spacer {
+  /* w 单位宽 + 内部 gap 补偿 */
+  width: calc(var(--sl-kb-u) * var(--sl-kb-w, 1) + var(--sl-kb-gap) * (var(--sl-kb-w, 1) - 1));
+  height: var(--sl-kb-u);
+  flex: 0 0 auto;
+  box-sizing: border-box;
+}
+.sl-sl-kb__cluster--numpad .sl-sl-kb__key {
+  width: auto;
+  height: auto;
+  grid-column: var(--sl-kb-col, auto) / span var(--sl-kb-colspan, 1);
+  grid-row: var(--sl-kb-row, auto) / span var(--sl-kb-rowspan, 1);
+}
+.sl-sl-kb__spacer { background: none; border: none; }
+
+.sl-sl-kb__key {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  padding: 0 2px;
+  background: #f4f4f5;
+  border: 1px solid #e4e4e7;
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  font-family: var(--sl-font-mono, ui-monospace, "JetBrains Mono", monospace);
+  font-size: clamp(8px, calc(var(--sl-kb-u) * 0.32), 12px);
+  line-height: 1.1;
+  color: #6b7280;
+  cursor: pointer;
+  user-select: none;
+  overflow: hidden;
+  transition: background 0.24s ease-out, color 0.24s ease-out,
+              border-color 0.24s ease-out, box-shadow 0.24s ease-out, transform 0.08s;
+}
+.sl-sl-kb__label { white-space: nowrap; text-overflow: ellipsis; overflow: hidden; max-width: 100%; }
+.sl-sl-kb__sub { font-size: 0.8em; opacity: 0.55; }
+
+/* 有绑定的键:底部一条细强调线,不抢 is-on / is-hover 的视觉 */
+.sl-sl-kb__key.has-binding::after {
+  content: '';
+  position: absolute;
+  left: 20%; right: 20%; bottom: 2px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--sl-color-primary, #2563eb);
+  opacity: 0.5;
+}
+.sl-sl-kb__key.is-on {
+  background: var(--sl-color-primary, #2563eb);
+  border-color: #1d4ed8;
+  color: #fff;
+  transform: translateY(1px);
+  transition: none; /* 按住要稳态,不能渐变,否则"闪一下再亮" */
+}
+.sl-sl-kb__key.is-on::after { background: #fff; opacity: 0.7; }
+.sl-sl-kb__key.is-hover {
+  background: var(--sl-hover-bg, #fef3c7);
+  border-color: var(--sl-hover-border, #f59e0b);
+  color: var(--sl-hover-text, #92400e);
+  transform: translateY(1px);
+  box-shadow: 0 0 0 2px var(--sl-hover-glow, rgba(245, 158, 11, 0.25));
+}
+
+/* ===== Import Modal ===== */
+.sl-sl-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+.sl-sl-modal {
+  background: var(--sl-color-surface, #fff);
+  border-radius: 12px;
+  box-shadow: 0 20px 60px -12px rgba(0, 0, 0, 0.25);
+  width: min(640px, 90vw);
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.sl-sl-modal__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 24px 0;
+}
+.sl-sl-modal__title { font-size: 16px; font-weight: 600; margin: 0; }
+.sl-sl-modal__tabs {
+  display: flex;
+  gap: 0;
+  margin: 16px 24px 0;
+  border-bottom: 1px solid var(--sl-color-border, #e4e4e7);
+}
+.sl-sl-modal__tab {
+  padding: 8px 16px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--sl-color-text-mute, #9ca3af);
+  border-bottom: 2px solid transparent;
+  transition: color 0.15s, border-color 0.15s;
+}
+.sl-sl-modal__tab.is-active {
+  color: var(--sl-color-primary, #2563eb);
+  border-bottom-color: var(--sl-color-primary, #2563eb);
+}
+.sl-sl-modal__textarea {
+  margin: 16px 24px 0;
+  padding: 12px;
+  border: 1px solid var(--sl-color-border, #e4e4e7);
+  border-radius: 8px;
+  font-family: var(--sl-font-mono, ui-monospace, "JetBrains Mono", monospace);
+  font-size: 12px;
+  line-height: 1.6;
+  resize: vertical;
+  min-height: 180px;
+  outline: none;
+}
+.sl-sl-modal__textarea:focus {
+  border-color: var(--sl-color-primary, #2563eb);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+/* 虚线框本身由共享组件的 zone 形态提供(唯一事实源),这里只管外边距。 */
+.sl-sl-modal__file-zone {
+  margin: 24px;
+}
+/* nx-sk 无 Vue 共享层：按 FileDropZone zone 形态的视觉补一个原生虚线区 */
+.sl-sl-dropzone {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 36px 24px;
+  border: 1.5px dashed #d1d5db;
+  border-radius: 10px;
+  cursor: pointer;
+  text-align: center;
+  transition: border-color 120ms ease, background-color 120ms ease;
+}
+.sl-sl-dropzone:hover { border-color: var(--sl-color-primary, #2563eb); }
+.sl-sl-dropzone.is-dragging { border-color: var(--sl-color-primary, #2563eb); background: var(--sl-color-surface-alt, #f3f4f6); }
+.sl-sl-dropzone:focus-visible { outline: 2px solid var(--sl-color-primary, #2563eb); outline-offset: 2px; }
+.sl-sl-dropzone__title { font-size: 13px; font-weight: 500; color: var(--sl-color-text, #111827); }
+.sl-sl-dropzone__hint { font-size: 12px; line-height: 1.6; color: var(--sl-color-text-muted, #6b7280); }
+.sl-sl-modal__file-name { font-size: 12px; color: var(--sl-color-text-mute, #9ca3af); margin-top: 12px; text-align: center; }
+.sl-sl-modal__preview {
+  padding: 8px 24px;
+  font-size: 13px;
+}
+.sl-sl-modal__preview-text { color: var(--sl-color-text, #1f2328); }
+.sl-sl-modal__preview-warn { color: var(--sl-color-warning, #d97706); margin-left: 4px; }
+.sl-sl-modal__errors {
+  margin: 0 24px;
+  padding: 8px 12px;
+  background: var(--sl-color-error-bg, #fef2f2);
+  border-radius: 6px;
+  max-height: 120px;
+  overflow-y: auto;
+}
+.sl-sl-modal__error-item {
+  font-size: 12px;
+  color: var(--sl-color-error-text, #b91c1c);
+  line-height: 1.6;
+}
+.sl-sl-modal__format {
+  margin: 8px 24px 0;
+}
+.sl-sl-modal__format-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.sl-sl-modal__format-toggle {
+  background: none;
+  border: none;
+  font-size: 12px;
+  color: var(--sl-color-primary, #2563eb);
+  cursor: pointer;
+  padding: 4px 0;
+}
+.sl-sl-modal__format-copy {
+  background: transparent;
+  border: 1px solid var(--sl-color-border, #e4e4e7);
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--sl-color-text-soft, #6b7280);
+  cursor: pointer;
+  padding: 4px 10px;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  font-family: inherit;
+}
+.sl-sl-modal__format-copy:hover {
+  background: var(--sl-color-surface-alt, #f4f4f5);
+  border-color: var(--sl-color-primary, #2563eb);
+  color: var(--sl-color-primary, #2563eb);
+}
+.sl-sl-modal__format-copy.is-copied {
+  background: var(--sl-color-success-bg, #ecfdf5);
+  border-color: var(--sl-color-success-text, #065f46);
+  color: var(--sl-color-success-text, #065f46);
+  cursor: default;
+}
+.sl-sl-modal__format-body {
+  margin-top: 8px;
+  padding: 12px;
+  background: var(--sl-color-surface-alt, #f4f4f5);
+  border-radius: 6px;
+  overflow-x: auto;
+}
+.sl-sl-modal__format-body pre {
+  margin: 0;
+  font-family: var(--sl-font-mono, ui-monospace, "JetBrains Mono", monospace);
+  font-size: 11px;
+  line-height: 1.6;
+  white-space: pre;
+  color: var(--sl-color-text, #1f2328);
+}
+.sl-sl-modal__result {
+  margin: 12px 24px 0;
+  padding: 12px;
+  background: var(--sl-color-success-bg, #ecfdf5);
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--sl-color-success-text, #065f46);
+}
+.sl-sl-modal__result-warn {
+  font-size: 12px;
+  color: var(--sl-color-warning-text, #92400e);
+  margin-top: 4px;
+}
+.sl-sl-modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 16px 24px;
+  border-top: 1px solid var(--sl-color-border, #e4e4e7);
+  margin-top: 16px;
+}
+
+/* ===== Long-press Mapping Popup =====
+   portal 到 shadowRoot / document.body,固定定位到 key 旁边。
+   避免被 .sl-sl-preview 的 overflow-x:auto 裁剪。 */
+.sl-sl-longpress {
+  position: fixed;
+  z-index: 200;
+  width: 260px;
+  max-height: 240px;
+  overflow-y: auto;
+  /* 滚动到边界不联动背后页面(悬浮滚动长列表时页面不应跟着滚) */
+  overscroll-behavior: contain;
+  background: var(--sl-color-surface, #fff);
+  border: 1px solid var(--sl-color-border, #e4e4e7);
+  border-radius: 8px;
+  box-shadow: 0 12px 32px -8px rgba(0, 0, 0, 0.22);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13px;
+}
+.sl-sl-longpress__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.sl-sl-longpress__title {
+  font-size: 12px;
+  color: var(--sl-color-text-soft, #6b7280);
+  font-family: var(--sl-font-mono, ui-monospace, "JetBrains Mono", monospace);
+}
+.sl-sl-longpress__title code {
+  background: var(--sl-color-surface-alt, #f4f4f5);
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-weight: 600;
+  color: var(--sl-color-text, #1f2328);
+}
+.sl-sl-longpress__empty {
+  color: var(--sl-color-text-mute, #9ca3af);
+  font-style: italic;
+  padding: 4px 0;
+}
+.sl-sl-longpress__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.sl-sl-longpress__item {
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--sl-color-surface-alt, #fafafa);
+}
+.sl-sl-longpress__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+}
+.sl-sl-longpress__group {
+  color: var(--sl-color-text-mute, #9ca3af);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.sl-sl-longpress__combo {
+  font-family: var(--sl-font-mono, ui-monospace, "JetBrains Mono", monospace);
+  font-size: 11px;
+  background: var(--sl-color-surface, #fff);
+  border: 1px solid var(--sl-color-border, #e4e4e7);
+  padding: 1px 6px;
+  border-radius: 3px;
+  color: var(--sl-color-text, #1f2328);
+}
+.sl-sl-longpress__desc {
+  font-size: 12px;
+  color: var(--sl-color-text, #1f2328);
+  margin-top: 4px;
+}
+.sl-sl-longpress__cond {
+  font-size: 11px;
+  color: var(--sl-color-warning-text, #92400e);
+  margin-top: 4px;
+  font-style: italic;
+}
+
+/* ===== Row-hover Description Tooltip ===== */
+.sl-sl-rowtip {
+  position: fixed;
+  z-index: 150;
+  width: 240px;
+  background: var(--sl-color-surface, #fff);
+  border: 1px solid var(--sl-color-border, #e4e4e7);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px -8px rgba(0, 0, 0, 0.18);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  pointer-events: none; /* tooltip 自身不接收事件,避免抢走行 hover */
+}
+.sl-sl-rowtip__combo {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  font-family: var(--sl-font-mono, ui-monospace, "JetBrains Mono", monospace);
+}
+.sl-sl-rowtip__desc {
+  font-size: 12px;
+  color: var(--sl-color-text, #1f2328);
+}
+.sl-sl-rowtip__cond {
+  font-size: 11px;
+  color: var(--sl-color-warning-text, #92400e);
+  font-style: italic;
+}
+
+/* ===== Sidebar 底部账户/同步区 =====
+   未登录时显示登录入口,设置齿轮常驻。已登录态与退出由全局 host UI 承担,
+   库内不再重复。footer 由宿主注入,渲染在 <aside> 内部列表之后,list flex:1 自动让位。 */
+.sl-sl-sidebar-foot {
+  flex: 0 0 auto;
+  border-top: 1px solid var(--sl-color-border, #e4e4e7);
+  padding-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13px;
+}
+/* 主操作(登录按钮)占满一行 */
+.sl-sl-sidebar-foot > .sl-sl-btn {
+  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.sl-sl-sidebar-foot__row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* ===== Sync mode toggle (auto / manual) =====
+   用 pill 按钮组替代裸 radio,更紧凑、视觉更清晰。
+   仍在 SettingsPanel 用(sl-sl-userkv-bar__mode 前缀保留,仅类名)。 */
+.sl-sl-userkv-bar__mode {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  border: 1px solid var(--sl-color-border, #d4d4d8);
+  border-radius: 999px;
+  padding: 2px;
+  background: var(--sl-color-surface, #fff);
+  margin-left: auto;
+}
+.sl-sl-userkv-bar__mode-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  cursor: pointer;
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--sl-color-text-mute, #6b7280);
+  transition: background 120ms ease, color 120ms ease;
+  user-select: none;
+}
+.sl-sl-userkv-bar__mode-label:hover {
+  color: var(--sl-color-text, #1f2328);
+}
+.sl-sl-userkv-bar__mode-label:has(input:checked) {
+  background: var(--sl-color-text, #1f2328);
+  color: var(--sl-color-surface, #fff);
+}
+.sl-sl-userkv-bar__mode-label input[type='radio'] {
+  /* 隐藏原生 radio — 视觉完全由 label 的 :has(input:checked) 控制 */
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+  margin: 0;
+}
+
+/* Settings panel 内的 sync 控件 —— mode pill + Save 按钮 stacked 垂直 */
+.sl-sl-settings-sync-ctrl {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.sl-sl-btn--save-dirty {
+  /* outline-only:克制,不当主操作,只是 "提示有未保存改动" */
+  background: var(--sl-color-surface, #fff);
+  color: var(--sl-color-warning, #b45309);
+  border: 1px solid var(--sl-color-warning, #f59e0b);
+  font-weight: 500;
+  position: relative;
+}
+.sl-sl-btn--save-dirty::before {
+  /* 左侧一个小圆点提示 dirty,免得按钮文字 "保存到云端" 不够醒目 */
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--sl-color-warning, #f59e0b);
+  margin-right: 6px;
+  vertical-align: middle;
+  animation: sl-sl-save-pulse 1.6s ease-in-out infinite;
+}
+@keyframes sl-sl-save-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+.sl-sl-btn--save-dirty:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--sl-color-warning, #f59e0b) 8%, var(--sl-color-surface, #fff));
+  border-color: var(--sl-color-warning, #b45309);
+  color: var(--sl-color-warning, #b45309);
+}
+.sl-sl-btn--save-dirty:active:not(:disabled) {
+  background: color-mix(in srgb, var(--sl-color-warning, #f59e0b) 18%, var(--sl-color-surface, #fff));
+}
+
+/* ===== Settings modal panel ===== */
+.sl-sl-settings-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgb(0 0 0 / 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: sl-sl-fade-in 160ms ease;
+}
+@keyframes sl-sl-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.sl-sl-settings-panel {
+  background: var(--sl-color-surface, #fff);
+  border-radius: 10px;
+  box-shadow: 0 20px 60px rgb(0 0 0 / 0.2);
+  width: min(560px, 92vw);
+  max-height: 86vh;
+  display: flex;
+  flex-direction: column;
+  animation: sl-sl-panel-in 200ms ease;
+}
+@keyframes sl-sl-panel-in {
+  from { opacity: 0; transform: translateY(-12px) scale(0.97); }
+  to { opacity: 1; transform: none; }
+}
+.sl-sl-settings-panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--sl-color-border, #e4e4e7);
+}
+.sl-sl-settings-panel__title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--sl-color-text, #1f2328);
+}
+.sl-sl-settings-panel__body {
+  padding: 4px 20px 20px;
+  overflow-y: auto;
+}
+/* ===== Settings auth (login / logout) block ===== */
+.sl-sl-settings__auth {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--sl-color-border, #e4e4e7);
+}
+.sl-sl-settings__auth .sl-sl-btn {
+  min-width: 108px;
+}
+.sl-sl-settings__hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--sl-color-text-mute, #6b7280);
+}
+.sl-sl-settings-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 20px;
+  align-items: start;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--sl-color-border, #e4e4e7);
+}
+.sl-sl-settings-row:last-child {
+  border-bottom: none;
+}
+.sl-sl-settings-row--disabled {
+  opacity: 0.6;
+}
+.sl-sl-settings-row__text {
+  min-width: 0;
+}
+.sl-sl-settings-row__title {
+  margin: 0 0 4px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--sl-color-text, #1f2328);
+}
+.sl-sl-settings-row__desc {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--sl-color-text-mute, #6b7280);
+}
+.sl-sl-settings-row__desc strong {
+  color: var(--sl-color-text, #1f2328);
+  font-weight: 600;
+}
+.sl-sl-settings-row__ctrl {
+  display: flex;
+  align-items: center;
+  min-height: 32px;
+}
+.sl-sl-settings-row__badge {
+  font-size: 11px;
+  color: var(--sl-color-text-mute, #6b7280);
+  background: var(--sl-color-surface-alt, #f4f4f5);
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+.sl-sl-settings-toggle {
+  position: relative;
+  display: inline-block;
+  width: 40px;
+  height: 22px;
+  cursor: pointer;
+}
+.sl-sl-settings-toggle input[type='checkbox'] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+  margin: 0;
+}
+.sl-sl-settings-toggle__track {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--sl-color-border, #d4d4d8);
+  border-radius: 999px;
+  transition: background 160ms ease;
+}
+.sl-sl-settings-toggle__thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  background: var(--sl-color-surface, #fff);
+  border-radius: 50%;
+  transition: left 160ms ease;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.15);
+}
+.sl-sl-settings-toggle input[type='checkbox']:checked + .sl-sl-settings-toggle__track {
+  background: var(--sl-color-primary, #2563eb);
+}
+.sl-sl-settings-toggle input[type='checkbox']:checked + .sl-sl-settings-toggle__track .sl-sl-settings-toggle__thumb {
+  left: 20px;
+}
+
+/* ===== 拖拽调整布局的 resize handle ===== */
+.sl-sl-root {
+  position: relative;
+  /* contain:隔离 layout/paint,防止拖拽 reflow 外溢到 ShadowRoot 外的宿主 */
+  contain: layout paint;
+}
+.sl-sl-main {
+  position: relative;
+  contain: layout paint;
+}
+
+/* 拖拽期间:禁所有 transition(reflow 后不触发动画重绘),缩小 keyboard/table 重绘范围 */
+.sl-sl-root.sl-sl-dragging *,
+.sl-sl-root.sl-sl-dragging *::before,
+.sl-sl-root.sl-sl-dragging *::after {
+  transition: none !important;
+}
+.sl-sl-root.sl-sl-dragging .sl-sl-kb,
+.sl-sl-root.sl-sl-dragging .sl-sl-table__viewport {
+  contain: paint;
+}
+
+.sl-sl-resize-handle {
+  flex-shrink: 0;
+  background: transparent;
+  transition: background 0.15s;
+  z-index: 10;
+  touch-action: none;
+}
+.sl-sl-resize-handle:hover,
+.sl-sl-resize-handle:active,
+.sl-sl-resize-handle:focus-visible {
+  background: var(--sl-color-primary, #2563eb);
+  opacity: 0.3;
+  outline: none;
+}
+/* 列向(sidebar 宽度):竖条,在 sidebar 右侧 */
+.sl-sl-resize-handle--col {
+  width: 4px;
+  cursor: col-resize;
+  align-self: stretch;
+}
+/* 行向(preview 高度):横条,在 preview 上方 */
+.sl-sl-resize-handle--row {
+  height: 4px;
+  cursor: row-resize;
+  width: 100%;
+  margin-bottom: 4px;
+  border-radius: 2px;
+  background: var(--sl-color-border, #e4e4e7);
+}
+.sl-sl-resize-handle--row:hover,
+.sl-sl-resize-handle--row:active,
+.sl-sl-resize-handle--row:focus-visible {
+  background: var(--sl-color-primary, #2563eb);
+  opacity: 0.5;
+}
+
+/* ===== 全屏热力键盘画布 =====
+   一把完整 ANSI 104 键,键背景按频度染色(冷→暖),键内下方一行频度数字。 */
+.sl-sl-canvas-backdrop {
+  position: fixed;
+  inset: 0;
+  background:
+    radial-gradient(ellipse at 50% 30%, #1a1d24 0%, #0d0f13 70%),
+    #0d0f13;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  color: #e8eaed;
+  font-family: var(--sl-font-family, system-ui, -apple-system, "Segoe UI", sans-serif);
+}
+.sl-sl-canvas__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 24px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  flex-shrink: 0;
+  background: rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(8px);
+}
+.sl-sl-canvas__title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: #f0f2f5;
+}
+.sl-sl-canvas__ctrls { display: flex; gap: 6px; align-items: center; }
+.sl-sl-canvas__scale {
+  font-family: var(--sl-font-mono, ui-monospace, "JetBrains Mono", monospace);
+  font-size: 12px;
+  color: #9ca3af;
+  min-width: 48px;
+  text-align: center;
+}
+.sl-sl-canvas__stage {
+  flex: 1;
+  overflow: hidden;
+  cursor: grab;
+  position: relative;
+  user-select: none;
+}
+.sl-sl-canvas__stage:active { cursor: grabbing; }
+
+/* world:三簇并列(main / nav / numpad) */
+.sl-sl-canvas__world {
+  display: flex;
+  gap: 20px;
+  padding: 0;
+  width: max-content;
+}
+.sl-sl-canvas__cluster {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.sl-sl-canvas__cluster--nav { gap: 6px; }
+/* nav 簇行高度对齐:模拟主键区行间距,空行占位 */
+.sl-sl-canvas__cluster--nav .sl-sl-canvas__row:empty {
+  height: 0;
+}
+/* numpad:grid,行高自适应(描述会撑高) */
+.sl-sl-canvas__cluster--numpad {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  grid-auto-rows: min-content;
+  gap: 6px;
+  align-items: start;
+}
+.sl-sl-canvas__row {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start; /* 绑得多的键更高,顶部对齐 */
+}
+
+/* 单个键:键帽头部(固定高)+ 描述栈(自适应高) */
+.sl-sl-canvas-key {
+  --k-w: 1;
+  width: calc(var(--k-w) * 44px);
+  min-height: 44px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow:
+    inset 0 -2px 0 rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 2px 4px rgba(0, 0, 0, 0.4);
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  box-sizing: border-box;
+  position: relative;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+  font-family: var(--sl-font-mono, ui-monospace, "JetBrains Mono", monospace);
+  overflow: hidden;
+}
+/* numpad 用 grid 定位:宽度不再由 --k-w 决定 */
+.sl-sl-canvas__cluster--numpad .sl-sl-canvas-key {
+  width: auto;
+  min-width: 44px;
+}
+.sl-sl-canvas-key.is-hot {
+  border-color: rgba(255, 255, 255, 0.35);
+  box-shadow:
+    inset 0 -2px 0 rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2),
+    0 0 12px rgba(229, 62, 62, 0.15),
+    0 2px 6px rgba(0, 0, 0, 0.5);
+}
+.sl-sl-canvas-key--spacer {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  width: calc(var(--k-w) * 44px);
+  min-height: 0;
+}
+
+/* 键帽头部:label + 频度,横排,固定高度 */
+.sl-sl-canvas-key__cap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 26px;
+  flex-shrink: 0;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.25);
+  padding: 0 4px;
+}
+.sl-sl-canvas-key__main {
+  font-size: 12px;
+  font-weight: 600;
+  color: #f0f2f5;
+  line-height: 1;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.sl-sl-canvas-key.is-cold .sl-sl-canvas-key__main {
+  color: #6b7280;
+}
+.sl-sl-canvas-key.is-hot .sl-sl-canvas-key__main {
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+/* 频度数字:键帽头部右侧,小字号 */
+.sl-sl-canvas-key__freq {
+  font-size: 9px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.95);
+  line-height: 1;
+  letter-spacing: 0.02em;
+  font-family: var(--sl-font-mono, ui-monospace, "JetBrains Mono", monospace);
+  background: rgba(0, 0, 0, 0.35);
+  padding: 2px 4px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+/* 该键绑定的快捷键列表(可缩放看清) */
+.sl-sl-canvas-key__bindings {
+  list-style: none;
+  margin: 0;
+  padding: 3px 4px 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-family: var(--sl-font-family, system-ui, -apple-system, "Segoe UI", sans-serif);
+}
+.sl-sl-canvas-key__binding {
+  font-size: 8px;
+  line-height: 1.15;
+  color: rgba(255, 255, 255, 0.92);
+  word-break: break-word;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+.sl-sl-canvas-key__combo {
+  font-family: var(--sl-font-mono, ui-monospace, "JetBrains Mono", monospace);
+  font-weight: 700;
+  font-size: 8px;
+  color: #fff;
+  letter-spacing: 0.02em;
+}
+.sl-sl-canvas-key__desc {
+  font-size: 7.5px;
+  color: rgba(255, 255, 255, 0.7);
+  line-height: 1.1;
+}
+
+
+/* legend(底部频度色阶) */
+.sl-sl-canvas__legend {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 24px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(8px);
+  flex-shrink: 0;
+  font-size: 12px;
+  color: #9ca3af;
+}
+.sl-sl-canvas__legend-label {
+  font-family: var(--sl-font-mono, ui-monospace, "JetBrains Mono", monospace);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 10px;
+  margin-right: 4px;
+}
+.sl-sl-canvas__legend-chip {
+  width: 28px;
+  height: 18px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 600;
+  color: #fff;
+  font-family: var(--sl-font-mono, ui-monospace, "JetBrains Mono", monospace);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* ===== nx-sk 集成：面板挂在 Peek body 内，高度由外壳决定（其余样式与参考实现 index.css 完全一致） ===== */
+.shortcut-panel .sl-sl-root {
+  height: 100%;
+  min-height: 0;
+}
+
