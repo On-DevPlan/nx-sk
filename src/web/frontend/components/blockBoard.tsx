@@ -40,6 +40,8 @@ export interface BoardGroup {
 export type BoardContext = {
   sectionTitle?: string;
   entryTitle?: string;
+  sectionId?: string;
+  entryId?: string;
 };
 
 interface BlockProps {
@@ -263,6 +265,9 @@ export interface BlockBoardProps {
   onPatch: (key: string, value: any) => void;
   sectionTitle?: string;
   entryTitle?: string;
+  /** 透传给 source / shortcut 的 peek 头部：「新标签页」深链。 */
+  sectionId?: string;
+  entryId?: string;
 }
 
 /**
@@ -270,9 +275,14 @@ export interface BlockBoardProps {
  * `board` 是**已经按当前字段对齐过**的版式（shared/blockLayout.ts 的 reconcileLayout），
  * 所以这里可以假定「每个字段在版式里都有一块」。
  */
-export default function BlockBoard({ groups, board, onBoard, draft, onPatch, sectionTitle, entryTitle }: BlockBoardProps) {
+export default function BlockBoard({
+  groups, board, onBoard, draft, onPatch, sectionTitle, entryTitle, sectionId, entryId,
+}: BlockBoardProps) {
   const mode = board?.mode === 'flow' ? 'flow' : 'grid';
-  const ctx = useMemo<BoardContext>(() => ({ sectionTitle, entryTitle }), [sectionTitle, entryTitle]);
+  const ctx = useMemo<BoardContext>(
+    () => ({ sectionTitle, entryTitle, sectionId, entryId }),
+    [sectionTitle, entryTitle, sectionId, entryId],
+  );
 
   // 面板顺序以版式为准：新分组（还没进版式）接在后面
   const ordered = useMemo(() => {
@@ -341,6 +351,8 @@ export default function BlockBoard({ groups, board, onBoard, draft, onPatch, sec
           onPatch={onPatch}
           sectionTitle={sectionTitle}
           entryTitle={entryTitle}
+          sectionId={sectionId}
+          entryId={entryId}
         />
       )) : ordered.map((g, i) => (
         <Panel

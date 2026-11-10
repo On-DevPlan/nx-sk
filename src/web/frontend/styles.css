@@ -1507,8 +1507,69 @@ body.col-resizing, body.col-resizing * { cursor: col-resize !important; user-sel
   to { opacity: 1; }
 }
 .peek-head { display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 12px; border-bottom: var(--border); flex-shrink: 0; }
-.peek-modes { display: flex; align-items: center; gap: 2px; }
-.peek-modes .btn.on { background: var(--soft-2); color: var(--ink); }
+
+/* 「打开方式」菜单（#6）。尺寸按 Notion 截图量取并换算到本项目的 12px 基准：
+   截图在 125% 缩放下菜单宽 270px、行距 40px、图标 17px、字号约 16px，
+   换算回 CSS px ≈ 216 / 32 / 16（视觉 14）/ 13。
+   颜色不照抄 Notion 的色板，而是映射到本项目的单色 token：
+   Notion 选中行 #f1f1ef ≈ var(--soft-2)，悬停 #f7f7f5 ≈ var(--soft)，
+   分隔线 #e9e9e7 ≈ var(--line)。 */
+.peek-mode-wrap { position: relative; }
+.peek-mode-trigger {
+  display: inline-flex; align-items: center; gap: 2px;
+  height: 26px; padding: 0 4px; border: 1px solid transparent; border-radius: 4px;
+  background: transparent; color: var(--mid); cursor: pointer;
+}
+.peek-mode-trigger:hover, .peek-mode-trigger[aria-expanded="true"] { background: var(--soft-2); color: var(--ink); }
+.peek-mode-trigger:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
+.peek-mode-caret {
+  width: 0; height: 0; margin-left: 2px;
+  border-left: 3px solid transparent; border-right: 3px solid transparent;
+  border-top: 4px solid currentColor;
+}
+.peek-menu {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 60;
+  width: 216px; padding: 5px; border: var(--border); border-radius: 6px;
+  background: var(--paper); box-shadow: var(--shadow-float);
+  display: flex; flex-direction: column;
+}
+.peek-menu-row {
+  display: flex; align-items: center; gap: 8px;
+  height: 32px; padding: 0 6px; border: 0; border-radius: 4px;
+  background: transparent; color: var(--ink);
+  font: inherit; font-size: 13px; line-height: 20px;
+  text-align: left; text-decoration: none; cursor: pointer;
+}
+.peek-menu-row:hover { background: var(--soft); }
+.peek-menu-row[aria-checked="true"] { background: var(--soft-2); }
+/* 键盘焦点必须可见：选中行的浅灰底对比不够，键盘态额外描边（鼠标点击不出现）。 */
+.peek-menu-row:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; background: var(--soft); }
+.peek-menu-icon { width: 16px; height: 16px; flex-shrink: 0; display: inline-flex; color: var(--mid); }
+.peek-menu-row[aria-checked="true"] .peek-menu-icon { color: var(--ink); }
+.peek-menu-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.peek-menu-check { width: 16px; height: 16px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; }
+.peek-menu-sep { height: 1px; margin: 4px 2px; background: var(--line); flex-shrink: 0; }
+/* 二级菜单朝左展开：主菜单右对齐在窗口右缘，朝右会直接溢出窗口。 */
+.peek-menu-subwrap { position: relative; }
+.peek-submenu {
+  position: absolute; top: -5px; right: calc(100% + 2px); z-index: 61;
+  width: 176px; padding: 5px; border: var(--border); border-radius: 6px;
+  background: var(--paper); box-shadow: var(--shadow-float);
+  display: flex; flex-direction: column;
+}
+/* 截图里未展开的二级项右侧是空的：箭头只在悬停/键盘聚焦/展开时出现，
+   静态像素与 Notion 对齐，同时保留「这里还能进一层」的提示。 */
+.peek-menu-chev {
+  width: 6px; height: 6px; margin-right: 2px; opacity: 0;
+  border-top: 1.4px solid currentColor; border-right: 1.4px solid currentColor;
+  transform: rotate(45deg); color: var(--mid);
+}
+.peek-menu-row:hover .peek-menu-chev,
+.peek-menu-row:focus-visible .peek-menu-chev,
+.peek-menu-row[aria-expanded="true"] .peek-menu-chev { opacity: 1; }
+@media (prefers-reduced-motion: reduce) {
+  .peek-menu, .peek-submenu { animation: none; }
+}
 .peek-body { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 @media (max-width: 900px) {
   .peek-side { width: 94vw; }
@@ -1582,7 +1643,9 @@ body.col-resizing, body.col-resizing * { cursor: col-resize !important; user-sel
 .shortcut-group-name { font: inherit; font-weight: 600; min-width: 120px; padding: 2px 4px; border: 1px solid transparent; border-radius: 3px; background: transparent; }
 .shortcut-group-name:hover, .shortcut-group-name:focus { border-color: var(--border); background: var(--paper); }
 .shortcut-table-wrap { flex: 0 1 auto; overflow: auto; min-height: 0; }
-.shortcut-table { width: 100%; min-width: 420px; border-collapse: collapse; font-size: 12px; }
+/* side 下可用宽度约 420px（46vw 减 168px 目录）。min-width 留 20px 容差：
+   否则字体/缩放一变就正好顶满，出横向滚动条（#6 走查缺陷）。 */
+.shortcut-table { width: 100%; min-width: 400px; border-collapse: collapse; font-size: 12px; }
 .shortcut-table th {
   position: sticky; top: 0; z-index: 1; background: var(--paper);
   text-align: left; font-weight: 600; color: var(--mid); padding: 6px 8px; border-bottom: var(--border);
@@ -1603,7 +1666,13 @@ body.col-resizing, body.col-resizing * { cursor: col-resize !important; user-sel
   border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 3px;
   background: var(--paper); font-size: 11px; text-align: center;
 }
-.shortcut-canvas { border-top: var(--border); padding: 10px 12px 14px; flex-shrink: 0; }
+/* 键盘图吃掉表格剩下的高度并垂直居中：2 组 5 条时 fullpage 底部原本会空出 500+px，
+   看起来像内容没加载完。表格本身仍是可滚动区（不压缩键盘图）。 */
+.shortcut-canvas {
+  border-top: var(--border); padding: 10px 12px 14px;
+  flex: 1 0 auto; min-height: 0;
+  display: flex; flex-direction: column; justify-content: center;
+}
 .shortcut-canvas-title { color: var(--mid); font-size: 11px; margin-bottom: 6px; }
 .sckb { display: flex; gap: 10px; align-items: flex-start; }
 .sckb-rows { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }

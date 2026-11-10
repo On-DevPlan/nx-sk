@@ -52,7 +52,7 @@
 | A5 | 分组 hover 展开延迟 130ms、离开收起延迟 180ms；`(hover: hover)` 才启用 hover | App.jsx:172-180,203-215 |
 | A6 | 分组同一时刻只开一个；外点 `pointerdown` 关闭；Esc 关闭；点击 pill 切换 | App.jsx:86-88,227-237,246-256 |
 | A7 | 分组角标 = 组内栏目数；title=`{组名}：{n} 个栏目`；展开行显示各自条目数 | App.jsx:195-197,251,267 |
-| A8 | 深链 `#/<id>` 优先；兜底选出的 tab **不**补 hash；hashchange 写回 `ui.view` | App.jsx:8-12,63-83 |
+| A8 | 深链 `#/<id>` 优先；0.30.0 起支持 `#/<id>?entry=<条目id>`（选中该条，peek 菜单「新标签页」用）；兜底选出的 tab **不**补 hash；hashchange 写回 `ui.view` / `ui.entry` | App.jsx:8-12,63-83 |
 | A9 | 空态：导航无条目「正在装载…」；boot 前「正在装载…」；懒加载「加载中…」 | App.jsx:133,144,147 |
 | A10 | boot 失败：块级「读不到后端上下文」+ 原始错误 + hint「确认 nx-sk serve 正在运行；或点右上角「刷新数据」重试。」 | App.jsx:137-143 |
 | A11 | 视图崩溃：ErrorBoundary「这个视图崩了」+ message + hint「切到别的 tab 仍然可用；修好之后本页会自愈。」 | components/ui.tsx:50-60 |
@@ -67,7 +67,7 @@
 | B2 | 「更多」三项：`导出选中 N 条（含凭据）`/`导出 ZIP（含凭据）`、对应「打码」、`导入 ZIP…` | view.jsx:402-413 |
 | B3 | 左右栏：默认 300px，拖动范围 240–560，双击分隔条恢复 300，松手才落盘 `ui.listW` | view.jsx:56-90,473-478 |
 | B4 | 列表头：全选（title「全选 / 取消全选（只影响导出与批量操作）」）、`已选 N / M` + `清空` | view.jsx:432-441 |
-| B5 | 每条：勾选框、标题（空显示「（无名）」）、完整度 `N%` 或 `已填满`、`⧉` 复制条目定位 | view.jsx:443-467 |
+| B5 | 每条：勾选框、标题（空显示「（无名）」）、shortcut 字段的 `N 组 · M 条`（0.30.0 补，title=`字段名：N 组 · M 条`）、完整度 `N%` 或 `已填满`、`⧉` 复制条目定位 | view.jsx:443-467 |
 | B6 | 复制定位文本含栏目/条目 id 与 `nx-sk entry get …`、`nx-sk entry update …` 两行命令；失败时回退 execCommand 并去掉「贴给 agent 即可」 | view.jsx:16-22,248-264 |
 | B7 | 条目头：面包屑（可点复制）、id、`完整度 N%`、`N 处改动未保存`、`保存` | view.jsx:487-506 |
 | B8 | 标题输入：label 取 `titleLabel`，默认「名称」 | view.jsx:510-518 |
@@ -104,7 +104,7 @@
 | `entrylist` | 列头（`密文` tag）+ 行输入；`ui.mask` 时敏感列为 password；`＋ 添加一行`；行尾 `⠿` 拖拽 + `×` 删除；无子字段时给专门提示；底部「N 行 / 还没有行　·　变长，空行保存时自动剔除　·　拖 ⠿ 可调顺序」 | components/fields/entrylist.tsx |
 | `table` | 见 §2.D | components/fields/table.tsx（P3.5 起自包含；原 tableField.jsx 已删除） |
 | `source` | `SourceControl`（引用/文本两种形态；文本 Ctrl+Enter 入袋；Esc 关闭弹层） | components/fields/source.tsx:583（控件本体 :525；抽屉 :68；Ctrl+Enter :365；Esc :538） |
-| `shortcut` | `ShortcutControl`：折叠条只显示「N 组 / N 条」与各组计数；`详细` 打开 `peek` 面板（默认 fullpage，可切 center/side）。面板 = 左分组目录 + 右快捷键表（按键/说明/条件/编辑/删）+ 底部键盘图；录入时直接按组合键，键位图点亮；Esc 由 `peek` 统一关闭 | components/fields/shortcut.tsx |
+| `shortcut` | `ShortcutControl`：折叠条只显示「N 组 / N 条」与各组计数；`详细` 打开 `peek` 面板（默认 fullpage，可切 center/side）。面板 = 左分组目录 + 右快捷键表（按键/说明/条件/编辑/删）+ 底部键盘图；录入时直接按组合键，键位图点亮；Esc 由 `peek` 统一关闭。0.30.0 起头部改为「打开方式」菜单（侧边预览/居中预览/整页/新标签页/编辑默认视图），默认形态可持久化；条目列表行同步显示 `N 组 · M 条` | components/fields/shortcut.tsx |
 | `file` | 多值附件列表；缺失引用提示「引用的附件已不存在（id）—— 重新上传，或移除。」；>5 行显示「展开全部 / 收起到 5 行」；「从附件库选…」「上传文件」「附件中心」；picker 搜索与空态；`maxItems` 上限提示；支持拖拽上传 | components/fields/file.tsx |
 | `md` | 有内容默认阅读态，`编辑正文` 切换；编辑态 `插入图片`、`从附件库插入…`、`完成`；预览 + 图库；待办可勾；IP 点击复制；空态「（还没有内容）」；gallery 仅在「有图或编辑态」出现 | components/fields/md.tsx |
 
@@ -246,6 +246,7 @@
 | P5 | 0 error | `tsc -b` 通过 | 366 pass / 0 fail | 364 modules | 137 项断言全过 | §2 全部小节 + 真机走查 | 通过（dist 发布形态；详见下方 P5 走查记录） |
 | P6 | 0 error | `tsc -b` 退出 0（已撤 `allowJs` / `checkJs`） | 366 pass / 0 fail | 364 modules | 137 项断言全过 | §2 全部小节 + 真机走查 | 通过（前端 27 个文件全部 `.ts/.tsx`，`any` 121 处集中在外数据边界与既有字段控件；详见下方 P6 走查记录） |
 | 0.29.0 | 0 error（5 warning 来自本轮之外的 line-budget 规则） | `tsc -b` 通过 | 376 pass / 0 fail | 368 modules | 137 项断言全过 | `shortcut` 控件 + `peek` 三态 + `source` 迁移；真实浏览器 57 项断言 | 通过（详见下方 0.29.0 走查记录） |
+| 0.30.0 | 0 error / 0 warning | `tsc -b` 通过 | 369 pass / 0 fail | 368 modules | 137 项断言全过 | 「打开方式」菜单 + 深链 + 默认视图；`#5` 列表计数/全屏空白/表格容差；真实浏览器 50 项断言 | 通过（详见下方 0.30.0 走查记录） |
 
 ### P5 真机走查记录（2026-11-09）
 
@@ -296,4 +297,75 @@ Playwright（`playwright-core` + 本机 Chrome，1280×900）真实点击/按键
 | `source` 三态 | 默认 side，center 带遮罩与 `aria-modal`，窄屏（800px）side 宽 94vw；遮罩/Esc 关闭后焦点回折叠条 | 0 |
 | reduced-motion | 三态 `animation-name` 均为 `none`；页面无横向溢出（1280/1280） | 0 |
 | CLI 归一与报错 | `"Ctrl+Alt+P"` 写入后读回 `Ctrl+Alt+P`；坏键位报「认不出键位「Foo」」；缺说明报「第 1 组第 1 条缺少 description（写清这条快捷键做什么）」 | — |
+
+### 0.30.0 走查与像素对照（2026-11-10）
+
+环境与 0.29.0 相同：`dist/` + `serve --port 7899`，home `D:\Temp\nxsk-review`，
+Playwright（`playwright-core` + 本机 Chrome，1280×900）真实点击/按键。
+本轮 50 项断言全过，控制台 error 与失败请求均为 0；截图见 `D:\Temp\pwtool\shots\peek-menu-notion-parity.png`。
+
+#### 1. 与 Notion「打开方式」截图的逐项对照
+
+附件截图（739×252）按 Windows 125% 缩放换算回 CSS px；下表的「实现」列是浏览器 `getComputedStyle` / `getBoundingClientRect` 实测值。
+
+| 项 | 截图量取 | 换算（÷1.25） | 实现 | 结论 |
+| --- | --- | --- | --- | --- |
+| 菜单宽 | 270 | 216 | `216px` | 一致 |
+| 行高 / 行距 | 40 | 32 | `32px`（5 行全 32） | 一致 |
+| 菜单内边距 | 6–7 | 5 | `5px` | 一致 |
+| 图标 | 17 视觉 | 13.6（16 盒内） | `16×16` 盒、描边内缩 | 一致 |
+| 字号 | ~16 | 12.8 | `13px` | 一致 |
+| 图标左距 | 13 | 10.4 | 11（菜单 5 + 行 6） | 一致（±1） |
+| 勾选视觉右距 | ~20 | 16 | 盒右距 12 + 图标内缩 ≈14 | 一致（±2） |
+| 分隔线 | 1px，左右各内缩 ~3 | 1px | 1px，左右各 7（菜单 5 + 外边距 2） | 内缩略多 4px，静态不显眼 |
+| 菜单圆角 | ~8 | 6.4 | `6px` | 一致 |
+| 行圆角 | ~5 | 4 | `4px` | 一致 |
+| 选中行底色 | `#f1f1ef` | — | `--soft-2` = `#ebedf0` | 映射到单色 token（见下） |
+| 悬停底色 | `#f7f7f5` | — | `--soft` = `#f5f6f7` | 映射到单色 token |
+| 勾选位置 | 行最右 | — | 行最右 16px 槽位，`aria-checked` 行有勾 | 一致 |
+| 菜单与按钮距离 | — | ~6 | `6px` | 一致 |
+
+明示差异（不是测量误差）：
+
+1. **文案中文**：截图是英文 Notion；本项目全中文，采用 Notion 简中译名（侧边预览/居中预览/整页/新标签页/编辑默认视图）。
+2. **颜色 token 化**：不引入 Notion 色板，按本项目单色约束映射（`--soft-2` / `--soft` / `--line`），相对层次与截图一致。
+3. **二级菜单朝左**：主菜单右对齐在窗口右缘，朝右会溢出，因此 `right: calc(100% + 2px)`。
+4. **子菜单箭头**：截图静态态没有箭头；实现只在 hover / 键盘聚焦 / 展开时显示，静态像素对齐。
+5. **分隔线内缩**比截图多 4px（截图 ~3，实现 7）。
+
+#### 2. 发现 → 修复 → 复验
+
+| # | 发现 | 修复 | 复验 |
+| --- | --- | --- | --- |
+| 1 | `shortcut` 面板的「新标签页」不出现：`ShortcutControl` 没接收 `ctx`，拿不到 `sectionId/entryId` | 接 `ctx` 并拼 `#/<栏目>?entry=<id>` | href 精确等于 `#/demo?entry=e_mw9…`；新标签页打开后该条为选中态 |
+| 2 | 「编辑默认视图」悬停已展开，再点击父项会把它关掉（hover 开 + click 切换冲突） | 父项点击改为「只开不关」；收起交给移出/Esc/← | 点击父项后二级保持展开，选「居中预览」立即生效并写盘 |
+| 3 | 静态菜单里多了截图没有的二级箭头 | 箭头 `opacity:0`，hover/focus/展开时显示 | 静态截图无箭头，悬停出现 |
+| 4 | side 表格 `min-width:420px` 正好顶满 420 可用宽，字体/缩放一变就横向滚动 | 降到 `400px`，留 20px 容差 | `scrollWidth=clientWidth=420`，`420-400=20` |
+| 5 | fullpage 下部键盘图贴底、下方单侧空 527px | 键盘图区接管剩余高度并垂直居中（上下 274/277） | 键盘区 726px 高、`canvasBottom=900`、表格与键盘区无额外间隙 |
+| 6 | 条目列表行没有 shortcut 数量（#5 漏项） | 行内加 `N 组 · M 条`，title 带字段名 | 「示例条目 … 2 组 · 5 条 …」，title=「快捷键：2 组 · 5 条」 |
+
+#### 3. 三态 / 深链 / 键盘 / 默认视图
+
+| 场景 | 结果 | error |
+| --- | --- | --- |
+| 菜单结构 | 5 行（3 形态 + 新标签页 + 编辑默认视图）+ 1 条分隔线；`role=menu` / `menuitemradio` | 0 |
+| 触发按钮 | 26px 高、`aria-haspopup=menu`、`aria-expanded` 同步；菜单贴按钮下 6px | 0 |
+| 键盘 | 打开落在选中项；↑↓/Home/End 循环；→ 进二级、← 退二级；Esc 只关菜单、第二次才关面板；焦点回触发按钮 | 0 |
+| 外部点击 | 点面板内部只关菜单，面板保留 | 0 |
+| 三态 | side 589×900 贴右无遮罩；center 900×774 居中 + 遮罩；fullpage 1280×900 | 0 |
+| 默认视图 | 选「居中预览」→ 当前立即 center + `localStorage['nx-sk-peek-default:shortcut']='center'`；重载后仍 center | 0 |
+| 新标签页 | `#/demo?entry=<id>` 新开页选中该条；直接访问该深链同样选中 | 0 |
+| 地址同步 | 点条目后（地址已在该栏目）`replaceState` 补 `?entry=` | 0 |
+| source | 默认 side 不变；菜单 / 二级默认项同样工作 | 0 |
+| reduced-motion | 三态 `animation-name:none` | 0 |
+
+#### 4. 取舍与验证边界
+
+- **side 下隐藏键盘导航列**是有意为之：side 只有 46vw（1280 下 589px），去掉 168px 分组目录后只剩 ~421px；
+  保留 150px 导航列会把键位压到 270px，`Ctrl/Shift` 等长键名会逐字换行。fullpage / center 有足够宽度，导航列保留。
+  该列的键位提示不是唯一入口：表格与键盘图仍然可读，录入也不依赖它。此取舍在本轮之前已存在，本轮只补文档。
+- **只验 Chromium**：本轮走查只跑了本机 Chrome（Chromium 内核）。Firefox / Safari / 移动端 WebView 未验证；
+  代码没有用 Chromium 专有 API（菜单/焦点/`aria` 均为标准 DOM），但**不据此宣称跨浏览器通过**。
+- **未验证**：键盘操作系统的 IME 组合键、屏幕阅读器（NVDA/VoiceOver）实际朗读；只做了 DOM 语义与焦点顺序检查。
+- 版本号、CHANGELOG、发布校验见本轮提交与 `CHANGELOG.md`。
 
