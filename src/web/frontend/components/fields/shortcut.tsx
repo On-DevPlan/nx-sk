@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { comboLabel, labelOfCode } from '../../../../shared/shortcut.ts';
 import type { ShortcutGroup, ShortcutItem, ShortcutStroke } from '../../../../shared/fields/types.ts';
-import { Peek } from '../peek.tsx';
+import { Peek, peekDefault } from '../peek.tsx';
 import type { PeekMode } from '../peek.tsx';
 import type { ControlProps } from './types.ts';
 import { MAIN_ROWS, NAV_ROWS } from './shortcutKeys.ts';
@@ -66,6 +66,12 @@ function looseGroups(value: unknown): ShortcutGroup[] {
     }));
 }
 
+/** 条目列表/折叠条只用数量：组数与总条数（#5「字段显示里只报分组数量」）。 */
+export function shortcutCount(value: unknown): { groups: number; items: number } {
+  const groups = looseGroups(value);
+  return { groups: groups.length, items: groups.reduce((n, g) => n + g.shortcuts.length, 0) };
+}
+
 function modifiersOf(e: ShortcutModState): ShortcutStroke[] {
   return MODIFIER_LABELS
     .filter(([key]) => e[key])
@@ -118,9 +124,10 @@ interface ShortcutPanelProps {
   mode: PeekMode;
   onMode: (mode: PeekMode) => void;
   onClose: () => void;
+  newTabHref?: string;
 }
 
-function ShortcutPanel({ label, groups, onChange, mode, onMode, onClose }: ShortcutPanelProps) {
+function ShortcutPanel({ label, groups, onChange, mode, onMode, onClose, newTabHref }: ShortcutPanelProps) {
   const [activeId, setActiveId] = useState(groups[0]?.id || '');
   const [hoverId, setHoverId] = useState<string | null>(null);
   const [draft, setDraft] = useState<ShortcutDraft | null>(null);
@@ -264,6 +271,9 @@ function ShortcutPanel({ label, groups, onChange, mode, onMode, onClose }: Short
       onMode={onMode}
       onClose={onClose}
       className="shortcut-panel"
+      newTabHref={newTabHref}
+      persistKey="shortcut"
+      defaultMode="fullpage"
     >
       <div className="shortcut-panel-body">
         <aside className="shortcut-groups-pane">
@@ -408,11 +418,17 @@ function ShortcutPanel({ label, groups, onChange, mode, onMode, onClose }: Short
   );
 }
 
-export function ShortcutControl({ def, value, onChange }: ControlProps) {
+export function ShortcutControl({ def, value, onChange, ctx }: ControlProps) {
   const groups = looseGroups(value);
   const [open, setOpen] = useState(false);
-  const [mode, setMode] = useState<PeekMode>('fullpage');
+  // 「编辑默认视图」可改写默认形态；没存过就是 fullpage（#5 的原始要求）。
+  const [mode, setMode] = useState<PeekMode>(() => peekDefault('shortcut', 'fullpage'));
   const total = groups.reduce((n, g) => n + g.shortcuts.length, 0);
+  const sectionId = typeof ctx?.sectionId === 'string' ? ctx.sectionId : '';
+  const entryId = typeof ctx?.entryId === 'string' ? ctx.entryId : '';
+  const newTabHref = sectionId && entryId
+    ? `#/${encodeURIComponent(sectionId)}?entry=${encodeURIComponent(entryId)}`
+    : undefined;
 
   return (
     <div className="shortcut-field">
@@ -438,6 +454,7 @@ export function ShortcutControl({ def, value, onChange }: ControlProps) {
           mode={mode}
           onMode={setMode}
           onClose={() => setOpen(false)}
+          newTabHref={newTabHref}
         />
       ) : null}
     </div>

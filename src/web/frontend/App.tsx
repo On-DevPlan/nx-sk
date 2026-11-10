@@ -31,15 +31,30 @@ interface NavGroupItem {
   sections: NavSectionItem[];
 }
 
-function viewFromHash(): string {
-  const m = /^#\/?([^?/]*)/.exec(window.location.hash || '');
+/**
+ * `#/<栏目>` 或 `#/<栏目>?entry=<id>`。
+ * entry 是 #6 补的深链：peek 菜单的「新标签页」打开 `#/栏目?entry=id`，
+ * 新标签页里必须直接选中这一条（entries/view 的 load 已经会读 ui.entry）。
+ */
+function routeFromHash(): { view: string; entry: string } {
+  const raw = (window.location.hash || '').replace(/^#/, '');
+  const cut = raw.indexOf('?');
+  const path = cut >= 0 ? raw.slice(0, cut) : raw;
+  const m = /^\/?([^/]*)/.exec(path);
   const id = m ? decodeURIComponent(m[1]) : '';
-  return normalizeViewId(id);
+  let entry = '';
+  if (cut >= 0) {
+    try {
+      entry = new URLSearchParams(raw.slice(cut + 1)).get('entry') || '';
+    } catch {
+      entry = '';
+    }
+  }
+  return { view: normalizeViewId(id), entry };
 }
 
 export default function App() {
   const { boot, bootError, ui, patchUi, reload } = useStore();
-  const view = normalizeViewId(ui.view);
   // 展开着哪个分组入口（按下标记）：**同一时刻只开一个**。
   // 交给 App 托管而不是各组件各开各的——否则快速划过两个分组会叠出两个菜单。
   const [openGroup, setOpenGroup] = useState<number | null>(null);
@@ -87,15 +102,19 @@ export default function App() {
   // 高亮/分组展开都按**解析后**的 tab 算：view 可能是空串（没选过）或已失效的 id
   const currentId = current ? current.id : '';
 
-  // hash → ui：挂载时把深链里的选择写回 ui，之后交给 hashchange
+  // hash → ui：挂载时把深链里的选择（栏目 + 条目）写回 ui，之后交给 hashchange。
+  // 只带 entry 不带栏目（`#/?entry=x`）不认，避免落到不确定的栏目里。
   useEffect(() => {
-    const fromHash = viewFromHash();
-    if (fromHash && fromHash !== view) patchUi({ view: fromHash });
+    const from = routeFromHash();
+    if (from.view) patchUi({ view: from.view, ...(from.entry ? { entry: from.entry } : {}) });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    const on = () => { const v = viewFromHash(); if (v) patchUi({ view: v }); };
+    const on = () => {
+      const from = routeFromHash();
+      if (from.view) patchUi({ view: from.view, ...(from.entry ? { entry: from.entry } : {}) });
+    };
     window.addEventListener('hashchange', on);
     return () => window.removeEventListener('hashchange', on);
   }, [patchUi]);

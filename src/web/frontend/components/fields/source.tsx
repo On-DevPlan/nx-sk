@@ -23,7 +23,7 @@ import { toggleTaskAtLine } from '../../mdSource.ts';
 import { Copyable, copyText } from '../ui.tsx';
 import { Lightbox } from '../lightbox.tsx';
 import { MdView } from '../mdView.tsx';
-import { Peek } from '../peek.tsx';
+import { Peek, peekDefault } from '../peek.tsx';
 import type { PeekMode } from '../peek.tsx';
 import { useStore } from '../../store.tsx';
 import type { ControlProps } from './types.ts';
@@ -60,13 +60,15 @@ interface SourceDrawerProps {
   onClose: () => void;
   title?: string;
   sectionTitle?: string;
+  sectionId?: string;
+  entryId?: string;
 }
 
 /**
  * 抽屉本体。单独一个组件：它有自己的焦点生命周期（打开聚焦、关闭归还），
  * 混在字段控件里会让两件事互相干扰。
  */
-function SourceDrawer({ items, onChange, onClose, title, sectionTitle }: SourceDrawerProps) {
+function SourceDrawer({ items, onChange, onClose, title, sectionTitle, sectionId, entryId }: SourceDrawerProps) {
   const { toast, guard } = useStore() as any;
   const [selId, setSelId] = useState(items[0]?.id || null);
   const [dragOver, setDragOver] = useState(false);
@@ -85,7 +87,8 @@ function SourceDrawer({ items, onChange, onClose, title, sectionTitle }: SourceD
   const dragDepth = useRef(0);
   const editorDepth = useRef(0);
   // 三态外壳：默认 side = 迁移前的右侧栏；center/fullpage 由 Peek 负责遮罩与焦点陷阱。
-  const [mode, setMode] = useState<PeekMode>('side');
+  // 默认形态可被「编辑默认视图」改写（localStorage，键按面板类型隔离）。
+  const [mode, setMode] = useState<PeekMode>(() => peekDefault('source', 'side'));
 
   const loadFiles = useCallback(async (force = false) => {
     try {
@@ -299,6 +302,9 @@ function SourceDrawer({ items, onChange, onClose, title, sectionTitle }: SourceD
         onMode={setMode}
         onClose={onClose}
         className="source-drawer"
+        newTabHref={sectionId && entryId ? `#/${encodeURIComponent(sectionId)}?entry=${encodeURIComponent(entryId)}` : undefined}
+        persistKey="source"
+        defaultMode="side"
       >
         <div className="source-drawer-body">
           {/* 左：清单 + 入口 */}
@@ -561,6 +567,8 @@ function SourceFieldControl({ def, value, onChange }: SourceFieldControlProps) {
           onClose={close}
           title={def.entryTitle}
           sectionTitle={def.sectionTitle}
+          sectionId={def.sectionId}
+          entryId={def.entryId}
         />
       ) : null}
     </div>

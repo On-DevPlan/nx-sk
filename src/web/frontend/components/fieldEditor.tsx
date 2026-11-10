@@ -22,10 +22,13 @@ export interface FieldGroupProps {
   onPatch: (key: string, value: any) => void;
   sectionTitle?: string;
   entryTitle?: string;
+  /** peek 头部的「新标签页」要能拼出 `#/<栏目>?entry=<id>`。 */
+  sectionId?: string;
+  entryId?: string;
 }
 
 /** 一整组字段（同一 group）的矩阵。 */
-export function FieldGroup({ title, fields, draft, onPatch, sectionTitle, entryTitle }: FieldGroupProps) {
+export function FieldGroup({ title, fields, draft, onPatch, sectionTitle, entryTitle, sectionId, entryId }: FieldGroupProps) {
   return (
     <>
       <div className="group-title">{title}</div>
@@ -46,7 +49,7 @@ export function FieldGroup({ title, fields, draft, onPatch, sectionTitle, entryT
                   def={def}
                   value={draft[def.key]}
                   onChange={(v) => onPatch(def.key, v)}
-                  ctx={{ sectionTitle, entryTitle }}
+                  ctx={{ sectionTitle, entryTitle, sectionId, entryId }}
                 />
               </div>
             </div>

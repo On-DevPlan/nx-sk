@@ -10,6 +10,7 @@ import { reconcileLayout, sameLayout } from '../../../../shared/blockLayout.ts';
 import type { BlockLayout } from '../../../../shared/blockLayout.ts';
 import type { FieldDef } from '../../../../shared/fields/types.ts';
 import type { SerializedEntry } from '../../../../shared/model.ts';
+import { shortcutCount } from '../../components/fields/shortcut.tsx';
 import KvTable from './kvTable.tsx';
 
 /** `/api/sections/:id/dump` 的栏目摘要。 */
@@ -101,6 +102,18 @@ function entryRefText(section: { id: string; title: string }, entry: { id: strin
   ].join('\n');
 }
 
+/**
+ * 选中条目后把 `?entry=<id>` 同步进地址栏，让当前地址本身就能分享/新开标签。
+ * 只在地址栏已经指向这个栏目时替换——兜底选出来的栏目仍然不补 hash（见 App.tsx）。
+ */
+function syncEntryHash(sectionId: string, entryId: string): void {
+  if (!sectionId) return;
+  const base = `#/${encodeURIComponent(sectionId)}`;
+  const hash = window.location.hash || '';
+  if (hash !== base && !hash.startsWith(`${base}?`)) return;
+  const next = `${base}?entry=${encodeURIComponent(entryId)}`;
+  if (hash !== next) window.history.replaceState(null, '', next);
+}
 
 /**
  * 栏目详情视图。按栏目的形状分两种布局：
@@ -115,6 +128,8 @@ export default function SectionView({ sectionId: rawId }: { sectionId?: string }
   const sectionId = rawId || '';
   const { ui, patchUi, toast, guard, dialog, reload } = useStore();
   const [data, setData] = useState<SectionDump | null>(null);
+  // 条目列表里 shortcut 字段只报数量（#5 原文：字段显示只需要分组数量）。
+  const shortcutDefs = data ? data.fields.filter((f) => f.type === 'shortcut') : [];
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -526,7 +541,11 @@ export default function SectionView({ sectionId: rawId }: { sectionId?: string }
                 <div
                   key={e.id}
                   className={`row selectable ${e.id === draft?.id ? 'selected' : ''}`}
-                  onClick={() => { patchUi({ entry: e.id }); setDraft({ id: e.id, title: e.title, values: { ...e.values } }); }}
+                  onClick={() => {
+                    patchUi({ entry: e.id });
+                    syncEntryHash(sectionId, e.id);
+                    setDraft({ id: e.id, title: e.title, values: { ...e.values } });
+                  }}
                 >
                   <input
                     type="checkbox"
@@ -538,6 +557,14 @@ export default function SectionView({ sectionId: rawId }: { sectionId?: string }
                   />
                   <span className="name">{e.title || '（无名）'}</span>
                   <span className="acts">
+                    {shortcutDefs.map((def) => {
+                      const c = shortcutCount(e.values[def.key]);
+                      return (
+                        <span key={def.key} className="tag" title={`${def.label}：${c.groups} 组 · ${c.items} 条`}>
+                          {c.groups} 组 · {c.items} 条
+                        </span>
+                      );
+                    })}
                     {e.missing.length ? <span className="tag">{e.completeness.ratio}%</span> : <span className="tag strong">已填满</span>}
                     <button
                       type="button"
@@ -623,6 +650,8 @@ export default function SectionView({ sectionId: rawId }: { sectionId?: string }
                 onPatch={patchField}
                 sectionTitle={data.section.title}
                 entryTitle={current?.title || draft.title}
+                sectionId={sectionId}
+                entryId={draft.id}
               />
 
               <div className="rowgap pad">
