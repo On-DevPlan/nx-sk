@@ -247,6 +247,7 @@
 | P6 | 0 error | `tsc -b` 退出 0（已撤 `allowJs` / `checkJs`） | 366 pass / 0 fail | 364 modules | 137 项断言全过 | §2 全部小节 + 真机走查 | 通过（前端 27 个文件全部 `.ts/.tsx`，`any` 121 处集中在外数据边界与既有字段控件；详见下方 P6 走查记录） |
 | 0.29.0 | 0 error（5 warning 来自本轮之外的 line-budget 规则） | `tsc -b` 通过 | 376 pass / 0 fail | 368 modules | 137 项断言全过 | `shortcut` 控件 + `peek` 三态 + `source` 迁移；真实浏览器 57 项断言 | 通过（详见下方 0.29.0 走查记录） |
 | 0.30.0 | 0 error / 0 warning | `tsc -b` 通过 | 369 pass / 0 fail | 368 modules | 137 项断言全过 | 「打开方式」菜单 + 深链 + 默认视图；`#5` 列表计数/全屏空白/表格容差；真实浏览器 50 项断言 | 通过（详见下方 0.30.0 走查记录） |
+| 0.31.0 | 0 error / 0 warning | `tsc -b` 通过 | 370 pass / 0 fail | 368 modules | 137 项断言全过 | `shortcut` 面板按参考实现 1:1 复刻 + TOML 导入 + store 首次播种落盘；真实浏览器 35 项断言 | 通过（详见下方 0.31.0 走查记录） |
 
 ### P5 真机走查记录（2026-11-09）
 
@@ -368,4 +369,44 @@ Playwright（`playwright-core` + 本机 Chrome，1280×900）真实点击/按键
   代码没有用 Chromium 专有 API（菜单/焦点/`aria` 均为标准 DOM），但**不据此宣称跨浏览器通过**。
 - **未验证**：键盘操作系统的 IME 组合键、屏幕阅读器（NVDA/VoiceOver）实际朗读；只做了 DOM 语义与焦点顺序检查。
 - 版本号、CHANGELOG、发布校验见本轮提交与 `CHANGELOG.md`。
+
+### 0.31.0 `shortcut` 面板复刻与导入（2026-11-10）
+
+环境与 0.30.0 相同：`dist/` + `serve`，home 为临时目录，Playwright（本机 Chrome，1280×900）真实点击/按键。
+本轮 35 项断言全过，控制台 error 与失败请求均为 0；截图见 `D:\Temp\pwtool\shots\shortcut-library-7.png`、
+`shortcut-center-8.png`、`shortcut-side-8.png`、`shortcut-import-10.png`。
+
+#### 1. 与参考实现的对照结论
+
+| 项 | 参考实现 | 本实现 | 结论 |
+| --- | --- | --- | --- |
+| 样式表 | `index.css` | 前 1434 行逐字节一致，仅追加 Peek 内 `height:100%` 一条集成规则 | 一致 |
+| 预览默认高度 | `PREVIEW_DEFAULT = 200` | `200` | 一致 |
+| 键盘键单位 | 44px，空间不足滚动 | `44px`，同上 | 一致 |
+| 新增快捷键 | 表内说明/条件 + 录入弹层（只录组合键与条件） | 同左，允许说明为空 | 一致 |
+| 组件结构 | Sidebar / ShortcutTable / Keyboard / CapturePopover / FullscreenCanvas / KeyChip / keymap / keyboardLayout | 逐行对齐，仅改类型名 | 一致 |
+| 导入 | `ImportModal` + `import-parser`（粘贴/文件、格式说明、结果汇总） | 原样移植，入口在顶栏 | 一致（见下 2） |
+
+#### 2. 显式差异（均由 nx-sk 的运行环境决定）
+
+1. **登录与保存模式设置未移植**：参考实现由宿主注入 `login` / `settings` 页脚与 `footer` 槽位，
+   nx-sk 没有账号体系和服务端保存模式；面板其余部分不受影响。
+2. **共享 `FileDropZone` → 原生拖放区**：参考用 Vue 共享层 + `SharedMount` 挂载文件区；nx-sk 无此层，
+   改用同视觉的虚线拖放区（`.sl-sl-dropzone`，支持点击/键盘/拖放，扩展名过滤 `.toml`）。
+3. **原生 `alert` → 弹窗内提示**：项目不变量禁止 `alert/confirm/prompt`；4 处错误提示改为
+   `role="alert"` 的块级提示，文案不变。
+4. **`⚠` → “注意”**：项目不变量禁止 U+2600–U+27BF；说明文本语义不变。
+5. **全屏画布重置按钮 `⟲` → `1:1`**：同上，规避 emoji 范围字符，行为不变。
+
+#### 3. 三态与交互
+
+| 场景 | 结果 | error |
+| --- | --- | --- |
+| fullpage 默认 / 面板铺满 | 面板高度等于 Peek body，侧栏 280、表格与预览可拖拽 | 0 |
+| center / side | 900×774 居中 + 遮罩；side 46vw 贴右无遮罩，顶栏不换行 | 0 |
+| 行悬浮 | 表格行高亮 + 键盘对应键位联动 + tooltip | 0 |
+| 键位弹层 | 悬浮/长按/双击打开，Esc 只关弹层不关 Peek | 0 |
+| 全屏热力画布 | 缩放/平移/重置/图例，Esc 只关画布 | 0 |
+| 导入 | 粘贴 TOML → 解析预览 → 确认 → 新分组入侧栏，总条数 5→6 | 0 |
+| 保存落盘 | 编辑组合键后重开面板与服务端回读一致（store 播种修复后不再 404） | 0 |
 
