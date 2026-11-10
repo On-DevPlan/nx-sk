@@ -104,13 +104,14 @@
 | `entrylist` | 列头（`密文` tag）+ 行输入；`ui.mask` 时敏感列为 password；`＋ 添加一行`；行尾 `⠿` 拖拽 + `×` 删除；无子字段时给专门提示；底部「N 行 / 还没有行　·　变长，空行保存时自动剔除　·　拖 ⠿ 可调顺序」 | components/fields/entrylist.tsx |
 | `table` | 见 §2.D | components/fields/table.tsx（P3.5 起自包含；原 tableField.jsx 已删除） |
 | `source` | `SourceControl`（引用/文本两种形态；文本 Ctrl+Enter 入袋；Esc 关闭弹层） | components/fields/source.tsx:583（控件本体 :525；抽屉 :68；Ctrl+Enter :365；Esc :538） |
+| `shortcut` | `ShortcutControl`：折叠条只显示「N 组 / N 条」与各组计数；`详细` 打开 `peek` 面板（默认 fullpage，可切 center/side）。面板 = 左分组目录 + 右快捷键表（按键/说明/条件/编辑/删）+ 底部键盘图；录入时直接按组合键，键位图点亮；Esc 由 `peek` 统一关闭 | components/fields/shortcut.tsx |
 | `file` | 多值附件列表；缺失引用提示「引用的附件已不存在（id）—— 重新上传，或移除。」；>5 行显示「展开全部 / 收起到 5 行」；「从附件库选…」「上传文件」「附件中心」；picker 搜索与空态；`maxItems` 上限提示；支持拖拽上传 | components/fields/file.tsx |
 | `md` | 有内容默认阅读态，`编辑正文` 切换；编辑态 `插入图片`、`从附件库插入…`、`完成`；预览 + 图库；待办可勾；IP 点击复制；空态「（还没有内容）」；gallery 仅在「有图或编辑态」出现 | components/fields/md.tsx |
 
 共同约定：
 
 - `def.hint` 在每个复杂控件末尾渲染（file/md/entrylist/table）。
-- `FieldGroup` 给 `textarea/file/md/entrylist/table/source` 加 `wide`（`fieldEditor.tsx`）。
+- `FieldGroup` 给 `textarea/file/md/entrylist/table/source/shortcut` 加 `wide`（`fieldEditor.tsx`）。
 - 字段标签区：`label` + 敏感 `密文` tag + `def.fill` 策略 tag（`fillLabel || fill`）+ `key`（`fieldEditor.tsx`）。
 - 未知类型：落到 `controlOf()` 的 `?? TextControl`（`fields/index.ts`）——见 §4-D2。
 
@@ -244,6 +245,7 @@
 | P4 | 0 error | `tsc -b` 通过 | 366 pass / 0 fail | 364 modules | 137 项断言全过 | §2.G（`--help` / `section list` / `entry get` / `export`/`import` 输出与退出码逐项比对） | 通过（`.ts` 直跑阶段） |
 | P5 | 0 error | `tsc -b` 通过 | 366 pass / 0 fail | 364 modules | 137 项断言全过 | §2 全部小节 + 真机走查 | 通过（dist 发布形态；详见下方 P5 走查记录） |
 | P6 | 0 error | `tsc -b` 退出 0（已撤 `allowJs` / `checkJs`） | 366 pass / 0 fail | 364 modules | 137 项断言全过 | §2 全部小节 + 真机走查 | 通过（前端 27 个文件全部 `.ts/.tsx`，`any` 121 处集中在外数据边界与既有字段控件；详见下方 P6 走查记录） |
+| 0.29.0 | 0 error（5 warning 来自本轮之外的 line-budget 规则） | `tsc -b` 通过 | 376 pass / 0 fail | 368 modules | 137 项断言全过 | `shortcut` 控件 + `peek` 三态 + `source` 迁移；真实浏览器 57 项断言 | 通过（详见下方 0.29.0 走查记录） |
 
 ### P5 真机走查记录（2026-11-09）
 
@@ -277,4 +279,21 @@
 | 深链兜底 `#/<不存在>` | 回落到「字段样例」，不白屏 | 0 |
 
 > 说明：其中一次会话在根文档导航上留下过一条 `net::ERR_ABORTED http://127.0.0.1:7891/`；换一次干净加载后控制台与网络列表均为空，判定为导航中断而非应用异常，未复现。
+
+### 0.29.0 走查记录（2026-11-10）
+
+环境：`pnpm build` 后的 `dist/` 起 `serve --port 7899`，home 指向临时目录 `D:\Temp\nxsk-review`；
+Playwright（`playwright-core` + 本机 Chrome，1280×900）真实点击/按键，57 项断言全过，控制台 error 与失败请求均为 0。
+
+| 场景 | 结果 | error |
+| --- | --- | --- |
+| 折叠条计数 | 「2 组 / 5 条 / 全局 × 2 · 列表 × 3」；分组目录逐项 `2`、`3`；面板头 `2 组 · 5 条` | 0 |
+| `详细` 默认形态 | fullpage 1280×900，`role=dialog` + `aria-modal=true` | 0 |
+| 三态几何 | center 900×774 居中；side 589px（46vw）贴右、`top/right/bottom=0`、`z-index=45`、`side-in` 动画、阴影、1px 左边框、不锁背景滚动 | 0 |
+| 遮罩 / Esc / 焦点归还 | 点遮罩与 Esc 均关闭；焦点回到「详细」或 `source-strip`；Tab 末→首、Shift+Tab 首→末 | 0 |
+| 表格与键盘图 | 三态下前三列均单行（33px），表头与数据列 x 坐标一致；side 无横向滚动（420/420）；fullpage 表格与键盘图间距 0；「加组」紧跟分组列表 | 0 |
+| 录入 / 增删 / 校验 | 直接按 `Ctrl+Shift+K` 录入；未按键提示「先按组合键」、缺说明提示「说明必填」且保存禁用；悬停点亮 `Ctrl/Shift/K`；保存 2→3 行、删除回 2 行 | 0 |
+| `source` 三态 | 默认 side，center 带遮罩与 `aria-modal`，窄屏（800px）side 宽 94vw；遮罩/Esc 关闭后焦点回折叠条 | 0 |
+| reduced-motion | 三态 `animation-name` 均为 `none`；页面无横向溢出（1280/1280） | 0 |
+| CLI 归一与报错 | `"Ctrl+Alt+P"` 写入后读回 `Ctrl+Alt+P`；坏键位报「认不出键位「Foo」」；缺说明报「第 1 组第 1 条缺少 description（写清这条快捷键做什么）」 | — |
 

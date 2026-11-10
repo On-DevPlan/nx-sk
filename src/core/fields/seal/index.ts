@@ -24,6 +24,7 @@ export const FIELD_SEAL: Record<FieldType, SealHook | null> = {
   entrylist: sealEntryList,
   table: sealTable,
   source: null,
+  shortcut: null,
   secret: sealScalar,
   file: null,
   md: null,

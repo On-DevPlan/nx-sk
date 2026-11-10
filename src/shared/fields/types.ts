@@ -11,7 +11,7 @@
 /** 字段类型清单。**顺序是可见行为的一部分**（bootstrap 原样下发，面板下拉框照此排序）。 */
 export const FIELD_TYPES = [
   'text', 'textarea', 'number', 'date', 'month', 'bool', 'select', 'tags',
-  'entrylist', 'table', 'source', 'secret', 'file', 'md',
+  'entrylist', 'table', 'source', 'secret', 'file', 'md', 'shortcut',
 ] as const;
 
 export type FieldType = (typeof FIELD_TYPES)[number];
@@ -34,6 +34,7 @@ export const FIELD_TYPE_LABELS: Record<FieldType, string> = {
   entrylist: '结构清单（变长行）',
   table: '表格（勾选/下拉/计算）',
   source: '原始资料（乱入后整理）',
+  shortcut: '快捷键（分组）',
   secret: '密文',
   file: '附件',
   md: '图文（可贴图）',
@@ -100,6 +101,38 @@ export interface SourceItem {
   [k: string]: unknown;
 }
 
+// ---------------------------------------------------------------------------
+// shortcut（快捷键分组）
+//
+// 为什么不是「一串字符串」：快捷键是一条一条的**条目**，每条要带条件（什么时候生效）
+// 和一句人话说明；分组是读者找东西的目录。结构：组(group) → 条目(shortcut) → 按键(combo)。
+// `combo` 存的是 `KeyboardEvent.code`（物理键位），不是 `key`——`key` 会被布局/输入法改写。
+// ---------------------------------------------------------------------------
+
+/** 组合键里的一次按键。`code` 是 KeyboardEvent.code，`label` 是展示名（Ctrl / R）。 */
+export interface ShortcutStroke {
+  code: string;
+  label: string;
+  isModifier?: boolean;
+}
+
+/** 一条快捷键。 */
+export interface ShortcutItem {
+  id: string;
+  combo: ShortcutStroke[];
+  description: string;
+  /** 生效条件（例如「在编辑器里」「全局」）；空表示全局。 */
+  condition?: string;
+  createdAt?: number;
+}
+
+/** 一组快捷键（面板左侧的目录项）。 */
+export interface ShortcutGroup {
+  id: string;
+  name: string;
+  shortcuts: ShortcutItem[];
+}
+
 interface FieldDefBase {
   key: string;
   label: string;
@@ -115,7 +148,7 @@ interface FieldDefBase {
 
 /** 标量 / 富内容字段：值是一个标量或字符串数组。 */
 export interface ScalarFieldDef extends FieldDefBase {
-  type: 'text' | 'textarea' | 'number' | 'date' | 'month' | 'bool' | 'select' | 'tags' | 'source' | 'secret' | 'file' | 'md';
+  type: 'text' | 'textarea' | 'number' | 'date' | 'month' | 'bool' | 'select' | 'tags' | 'source' | 'shortcut' | 'secret' | 'file' | 'md';
   options?: string[];
   /** file 字段的附件类别提示（doc / image …）。 */
   kind?: string;
@@ -147,6 +180,7 @@ export type FieldValue =
   | string[]
   | Record<string, unknown>[]
   | TableDoc
+  | ShortcutGroup[]
   | SourceItem[];
 
 export interface RevealOptions {

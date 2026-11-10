@@ -37,7 +37,7 @@
 ### 1.2 明确拒绝的做法
 
 - **富血值对象**（`TableValue` 类实例）：值必须能无损进出 JSON、能在加密边界上原样回传、能被 `section dump` 直读。类实例三个都破坏。
-- **动态 `registerField()` 插件 API**：字段类型是封闭集合（14 种），静态对象字面量可被静态分析、可被编译期穷举、不依赖 import 顺序。
+- **动态 `registerField()` 插件 API**：字段类型是封闭集合（15 种），静态对象字面量可被静态分析、可被编译期穷举、不依赖 import 顺序。
 - **为内部消费 codegen JSON Schema**：`validateFieldDef` 已是权威校验，`section dump` 已是 agent 可读结构；再生成一份只会产生第二个真相。
 
 ---
@@ -143,12 +143,14 @@ export type FieldType = (typeof FIELD_TYPES)[number];
 
 ### 3.3 加一种字段类型的清单
 
-1. `src/shared/fields/types.ts` 的 `FIELD_TYPES` 加一项（同时更新 `FieldDef` 判别联合）；
+1. `src/shared/fields/types.ts` 的 `FIELD_TYPES` 加一项（同时更新 `FieldDef` 判别联合与 `FieldValue`）；
 2. `src/core/fields/behaviors/<type>.ts` 写行为体（8 个钩子一个都不能少）；
 3. 在 `src/core/fields/registry.ts` 的 `FIELD_BEHAVIOR` 注册一行；
 4. 若需要密钥/文件系统，写 `src/core/fields/seal/<type>.ts` 并在 `FIELD_SEAL` 注册（否则显式 `null`）；
 5. `src/web/frontend/components/fields/<type>.tsx` 写控件并在 `FIELD_CONTROLS` 注册；
-6. 在 `tests/unit/fields.test.ts` 的夹具里补一条样例值。
+6. `src/shared/blockLayout.ts` 的 `WIDE_TYPES` / `DEFAULT_PX` 与 `components/fieldEditor.tsx` 的 wide 清单（两处都要改）；
+7. demo 种子（`src/core/fields.ts`）补一条样例值，契约测试会遍历全部类型；
+8. 在 `tests/unit/fields.test.ts` 补 `coerce` / `format` 断言，按 B03 同步三份文档。
 
 第 1 步加完，第 3/4/5 步不补就**编译不过**。这是设计目标，不是副作用。
 

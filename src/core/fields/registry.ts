@@ -21,6 +21,7 @@ import { tagsBehavior } from './behaviors/tags.ts';
 import { entrylistBehavior } from './behaviors/entrylist.ts';
 import { tableBehavior } from './behaviors/table.ts';
 import { sourceBehavior } from './behaviors/source.ts';
+import { shortcutBehavior } from './behaviors/shortcut.ts';
 import { secretBehavior } from './behaviors/secret.ts';
 import { fileBehavior } from './behaviors/file.ts';
 import { mdBehavior } from './behaviors/md.ts';
@@ -37,6 +38,7 @@ export const FIELD_BEHAVIOR: Record<FieldType, FieldBehavior> = {
   entrylist: entrylistBehavior,
   table: tableBehavior,
   source: sourceBehavior,
+  shortcut: shortcutBehavior,
   secret: secretBehavior,
   file: fileBehavior,
   md: mdBehavior,

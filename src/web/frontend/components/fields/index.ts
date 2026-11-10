@@ -20,6 +20,7 @@ import { TagsControl } from './tags.tsx';
 import { EntryListControl } from './entrylist.tsx';
 import { TableControl } from './table.tsx';
 import { SourceControl } from './source.tsx';
+import { ShortcutControl } from './shortcut.tsx';
 import { SecretControl } from './secret.tsx';
 import { FileControl } from './file.tsx';
 import { MdControl } from './md.tsx';
@@ -36,6 +37,7 @@ export const FIELD_CONTROLS: Record<FieldType, Control> = {
   entrylist: EntryListControl,
   table: TableControl,
   source: SourceControl,
+  shortcut: ShortcutControl,
   secret: SecretControl,
   file: FileControl,
   md: MdControl,

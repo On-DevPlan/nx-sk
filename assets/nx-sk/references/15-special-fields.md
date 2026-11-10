@@ -3,7 +3,7 @@
 大多数字段的值是标量（一行字、一个数字、一个日期）。这一篇只讲**值不是标量**的字段，
 以及它们各自的规则、写入时的体检、空值与默认值怎么处理：
 
-`table`（表格）· `entrylist`（结构清单）· `md`（图文）· `file`（附件）· `source`（原始资料袋）· `secret`（密文）
+`table`（表格）· `entrylist`（结构清单）· `md`（图文）· `file`（附件）· `source`（原始资料袋）· `shortcut`（快捷键）· `secret`（密文）
 
 > 为什么要单独一篇：这些字段的**值形状**决定了怎么读、怎么写、怎么在面板上编。
 > 把它们当普通字符串塞进去，最常见的后果不是报错，而是「存进去了但面板看不见」——
@@ -18,6 +18,7 @@
 | `md` | 一段 markdown 字符串 | — | 图文编辑器（Ctrl+V 贴图） | `entry get`（图片还原成路径） |
 | `file` | `[附件id, …]` | 字段字典的 `kind` / `maxItems` | 附件选择器（上传 / 从库里选） | `entry get`（附件名 + 物理路径） |
 | `source` | `[{id, kind, name, text\|fileId\|url, addedAt, …}]` | 内置（每个栏目自带一个） | 底部折叠条 → 右侧侧边栏 | `source get` |
+| `shortcut` | `[{id, name, shortcuts:[{id, combo:[{code,label}], description, condition?}]}]` | 数据自己（组 → 条目 → 按键） | 折叠条只报组数/条数；`详细` 打开键位面板（默认全屏，可切侧边/居中） | `entry get` |
 | `secret` | 一个字符串（落盘是密文） | — | 输入框 | `key get` / `entry get` |
 
 共同点：**写入即校验**（不合法就整条拒绝，不会存半条）、**空值有明确语义**、
@@ -189,6 +190,29 @@
   面板侧边栏里图片 Ctrl+V / 拖进编辑器就自动上传并插入引用。
   普通文字本来就是合法 markdown，老数据不用迁移。
 - 不计完整度（`fill: optional`）；袋里是明文，**敏感内容不要进袋**。
+
+## `shortcut` 快捷键
+
+- 值 = **组 → 条目 → 按键**三层：`[{ name, shortcuts: [{ combo, description, condition? }] }]`。
+  组是目录，条目是「这条快捷键做什么」，`condition` 写生效范围（不写 = 全局）。
+- `combo` 存 `KeyboardEvent.code`（物理键位），不是 `key`——换键盘布局/输入法不会让快捷键错位。
+- 写入时三种写法等价（都会归一成同一种形状）：
+
+```bash
+# 1) 最省事的字符串
+nx-sk entry add --section demo --title 快捷键示例 \
+  --set 'keys=[{"name":"全局","shortcuts":[{"combo":"Ctrl+Shift+R","description":"刷新"}]}]'
+
+# 2) 键名数组
+--set 'keys=[{"name":"列表","shortcuts":[{"combo":["J"],"description":"下一条"}]}]'
+
+# 3) 面板存下来的按键对象（精确控制左右修饰键）
+--set 'keys=[{"name":"全局","shortcuts":[{"combo":[{"code":"ControlLeft","label":"Ctrl"},{"code":"KeyK","label":"K"}],"description":"命令面板"}]}]'
+```
+
+- 每条必须有 `description`；键位认不出（例如 `Ctrl+？`）会整条拒绝并指出是第几组第几条。
+- 面板里点 `详细` 打开键位图：悬停条目点亮对应键；`新增` 后直接按组合键即可录入。
+- 不能当表格列（`cell: false`）；不引用附件，没有子密文。
 
 ## `secret` 密文
 

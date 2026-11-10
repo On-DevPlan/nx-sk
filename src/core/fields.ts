@@ -412,6 +412,7 @@ const DEMO_FIELDS = [
 
   // —— 富内容 ——
   f('note', '图文笔记', 'md', 'rich', { hint: 'markdown 正文：标题 / 列表 / 代码块都能渲染；直接 Ctrl+V 贴截图（自动进附件库）；待办勾选就是改正文本身' }),
+  f('keys', '快捷键', 'shortcut', 'rich', { hint: '快捷键：按组整理（组 → 条目 → 按键）。折叠条只报组数/条数，点「详细」打开键位面板；录入时直接按组合键，键位图会点亮' }),
   f('docs', '附件', 'file', 'rich', { kind: 'doc', hint: '附件字段：值是附件 id 的列表（不是路径）。在这里直接上传，或从附件库选' }),
   f('apikey', '密钥', 'secret', 'rich', { hint: '密文字段：值以 AES-256-GCM 落盘，读出来默认原文，--mask 才打码' }),
 ];
@@ -691,6 +692,38 @@ export function seedEntries(at: string): StoreEntry[] {
       '- [ ] 截图直接 Ctrl+V 粘进来（自动进附件库，正文里插入引用）',
       '- [ ] 勾选待办就是改正文本身，没有第二份勾选状态',
     ].join('\n'),
+    keys: [
+      {
+        id: 'g1',
+        name: '全局',
+        shortcuts: [
+          {
+            id: 's1-1',
+            combo: [{ code: 'ControlLeft', label: 'Ctrl', isModifier: true }, { code: 'KeyK', label: 'K' }],
+            description: '打开命令面板',
+          },
+          {
+            id: 's1-2',
+            combo: [
+              { code: 'ControlLeft', label: 'Ctrl', isModifier: true },
+              { code: 'ShiftLeft', label: 'Shift', isModifier: true },
+              { code: 'KeyF', label: 'F' },
+            ],
+            description: '全库搜索',
+            condition: '工作台',
+          },
+        ],
+      },
+      {
+        id: 'g2',
+        name: '列表',
+        shortcuts: [
+          { id: 's2-1', combo: [{ code: 'KeyJ', label: 'J' }], description: '下一条' },
+          { id: 's2-2', combo: [{ code: 'KeyK', label: 'K' }], description: '上一条' },
+          { id: 's2-3', combo: [{ code: 'Enter', label: 'Enter' }], description: '打开当前条目' },
+        ],
+      },
+    ],
   };
   return [{
     id: newId('e'),

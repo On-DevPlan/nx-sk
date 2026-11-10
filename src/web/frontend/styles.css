@@ -1447,34 +1447,76 @@ body.col-resizing, body.col-resizing * { cursor: col-resize !important; user-sel
 .source-strip-preview { color: var(--mid); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 42%; }
 .source-caret { color: var(--mid); }
 
-/* 侧边栏（原始资料）：常驻窗口右侧，**不遮不挡**——左边条目还能读、还能滚。
-   早先是「全屏遮罩 + 模态 dialog」，既挡视线又会被块的 overflow 裁掉。 */
-.source-drawer.side {
+/* peek 外壳：同一种内容的三态呈现。
+   - side：贴窗口右侧，**不遮不挡**——左边条目还能读、还能滚（默认，也是 source 迁移前的现状；
+     宽度、900px 断点、动画与旧的 `.source-drawer.side` 逐值一致，视觉不回退）
+   - center：居中弹层 + 遮罩，焦点锁在面板内
+   - fullpage：铺满窗口，适合「这条内容自己就是一页」 */
+.peek {
   position: fixed;
+  z-index: 45;
+  background: var(--paper);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  outline: none;
+}
+.peek-side {
   top: 0;
   right: 0;
   bottom: 0;
-  z-index: 45;
   width: min(720px, 46vw);
+  border-left: var(--border);
   box-shadow: var(--shadow-float);
   animation: side-in .16s ease-out;
+}
+.peek-center {
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(900px, 92vw);
+  height: min(86vh, 980px);
+  border: var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow-float);
+  animation: peek-pop .16s ease-out;
+}
+.peek-fullpage {
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  animation: peek-fade .16s ease-out;
+}
+.peek-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 44;
+  background: rgba(0, 0, 0, .28);
+  animation: peek-fade .16s ease-out;
 }
 @keyframes side-in {
   from { transform: translateX(18px); opacity: .5; }
   to { transform: none; opacity: 1; }
 }
+@keyframes peek-pop {
+  from { transform: translate(-50%, -48%) scale(.985); opacity: .5; }
+  to { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+}
+@keyframes peek-fade {
+  from { opacity: .6; }
+  to { opacity: 1; }
+}
+.peek-head { display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 12px; border-bottom: var(--border); flex-shrink: 0; }
+.peek-modes { display: flex; align-items: center; gap: 2px; }
+.peek-modes .btn.on { background: var(--soft-2); color: var(--ink); }
+.peek-body { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 @media (max-width: 900px) {
-  .source-drawer.side { width: 94vw; }
+  .peek-side { width: 94vw; }
+  .peek-center { width: 96vw; height: 92vh; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .source-drawer.side { animation: none; }
+  .peek-side, .peek-center, .peek-fullpage, .peek-backdrop { animation: none; }
 }
-.source-drawer {
-  background: var(--paper); border-left: var(--border);
-  width: min(760px, 94vw); height: 100%;
-  display: flex; flex-direction: column; overflow: hidden;
-}
-.source-drawer-head { display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 12px; border-bottom: var(--border); flex-shrink: 0; }
 .source-drawer-body { display: flex; flex: 1; min-height: 0; }
 
 .source-list-pane { width: 264px; flex-shrink: 0; border-right: var(--border); display: flex; flex-direction: column; min-height: 0; }
@@ -1502,10 +1544,82 @@ body.col-resizing, body.col-resizing * { cursor: col-resize !important; user-sel
 
 /* 模态内的焦点指示器：WCAG 2.2 要求可见且至少 2px（3:1 对比）。
    深墨色描边在白底上对比远超要求，且不引入新颜色（单色不变量）。 */
-.source-drawer :focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; border-radius: 3px; }
+.peek :focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; border-radius: 3px; }
 
 @media (prefers-reduced-motion: reduce) {
   .source-strip, .source-item { transition: none; }
+}
+
+/* shortcut（快捷键）：折叠条只报「几组/几条」，详细面板才是键位与说明的正文。
+   面板骨架 = 左目录 + 右表格 + 底部键盘图；键盘图用 flex 权重铺开，不写死像素。 */
+.shortcut-field { border: var(--border); border-radius: 4px; overflow: hidden; }
+.shortcut-strip { display: flex; align-items: center; gap: 6px; padding: 4px 8px; }
+.shortcut-strip-main {
+  display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0;
+  border: 0; background: transparent; color: inherit; font: inherit;
+  padding: 0; text-align: left; cursor: pointer;
+}
+.shortcut-groups { color: var(--mid); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 52%; }
+.shortcut-panel-body { display: flex; flex: 1; min-height: 0; }
+.shortcut-groups-pane { width: 200px; flex-shrink: 0; border-right: var(--border); display: flex; flex-direction: column; min-height: 0; }
+/* side 只有 46vw：目录收窄、键盘图去掉右侧导航列，把宽度让给表格与主键区，
+   否则 4 列表格会被挤到逐字换行。 */
+.peek-side .shortcut-groups-pane { width: 168px; }
+.peek-side .sckb-nav { display: none; }
+/* 分组少时「加组」紧跟列表，而不是钉在整栏最底部（全屏下会与右侧大片留白失衡）。 */
+.shortcut-groups-list { flex: 0 1 auto; overflow: auto; min-height: 0; }
+.shortcut-group-item {
+  display: flex; align-items: center; gap: 6px; width: 100%;
+  padding: 6px 10px; border: 0; border-bottom: 1px solid var(--soft-2);
+  background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
+.shortcut-group-item:hover { background: var(--soft); }
+.shortcut-group-item.sel { background: var(--soft-2); }
+.shortcut-group-add { display: flex; gap: 4px; padding: 8px; border-top: var(--border); flex-shrink: 0; }
+.shortcut-group-add input { flex: 1; min-width: 0; }
+.shortcut-main { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
+.shortcut-main-head { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-bottom: var(--border); flex-shrink: 0; }
+.shortcut-group-name { font: inherit; font-weight: 600; min-width: 120px; padding: 2px 4px; border: 1px solid transparent; border-radius: 3px; background: transparent; }
+.shortcut-group-name:hover, .shortcut-group-name:focus { border-color: var(--border); background: var(--paper); }
+.shortcut-table-wrap { flex: 0 1 auto; overflow: auto; min-height: 0; }
+.shortcut-table { width: 100%; min-width: 420px; border-collapse: collapse; font-size: 12px; }
+.shortcut-table th {
+  position: sticky; top: 0; z-index: 1; background: var(--paper);
+  text-align: left; font-weight: 600; color: var(--mid); padding: 6px 8px; border-bottom: var(--border);
+}
+.shortcut-table td { padding: 5px 8px; border-bottom: 1px solid var(--soft-2); vertical-align: middle; }
+.shortcut-table td input { width: 100%; min-width: 90px; font: inherit; }
+/* 按键与条件都是短标签：给足最小宽度并禁止逐字换行，宽度不够时交给列容器横向滚动。 */
+.shortcut-table th:nth-child(1), .shortcut-table td:nth-child(1) { white-space: nowrap; min-width: 104px; }
+.shortcut-table th:nth-child(2), .shortcut-table td:nth-child(2) { min-width: 110px; }
+.shortcut-table th:nth-child(3), .shortcut-table td:nth-child(3) { white-space: nowrap; min-width: 62px; }
+.shortcut-table tr.on td { background: var(--soft); }
+.shortcut-ops { width: 84px; white-space: nowrap; }
+.shortcut-ops .btn { padding: 1px 5px; }
+.shortcut-error { display: block; margin-top: 2px; color: #b42318; font-size: 11px; line-height: 1.3; }
+.shortcut-combo { display: inline-flex; gap: 3px; flex-wrap: wrap; }
+.shortcut-kbd {
+  display: inline-block; min-width: 18px; padding: 1px 5px;
+  border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 3px;
+  background: var(--paper); font-size: 11px; text-align: center;
+}
+.shortcut-canvas { border-top: var(--border); padding: 10px 12px 14px; flex-shrink: 0; }
+.shortcut-canvas-title { color: var(--mid); font-size: 11px; margin-bottom: 6px; }
+.sckb { display: flex; gap: 10px; align-items: flex-start; }
+.sckb-rows { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.sckb-nav { width: 150px; flex-shrink: 0; display: flex; flex-direction: column; gap: 4px; }
+.sckb-row { display: flex; gap: 4px; height: 22px; }
+.sckb-key {
+  display: flex; align-items: center; justify-content: center; min-width: 0;
+  border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 3px;
+  background: var(--soft); color: var(--mid); font-size: 10px; overflow: hidden;
+}
+.sckb-key.on { background: var(--ink); border-color: var(--ink); color: var(--paper); }
+.sckb-ghost { visibility: hidden; }
+.shortcut-empty { padding: 24px; }
+@media (max-width: 900px) {
+  .shortcut-groups-pane { width: 150px; }
+  .sckb-nav { display: none; }
 }
 
 /* 被取代的旧条：留痕但退居其次（灰掉 + 可展开） */
