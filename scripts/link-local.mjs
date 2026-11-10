@@ -240,6 +240,15 @@ function shimBodyFor(file) {
 
 const isExtensionless = (f) => !basename(f).includes('.');
 
+// --auto 跳过时给出能照做的下一步。没有这段，用户只看到「跳过」，
+// 会以为 build 坏了——实际是 build 刻意不建命令（见文件头注释），缺失的是指引。
+function printAutoHint() {
+  console.log('  本机要拿到 nx-sk 命令，任选其一：');
+  console.log('    pnpm run link:local   # 本地转发器，改码实时生效（无现成落点时会新建目录并追加用户 PATH）');
+  console.log(`    npm i -g ${pkg.name}        # 装发布版（全局 bin 目录需已在 PATH 上）`);
+  console.log('  不改 PATH、只临时跑一次：node bin/nx-sk.mjs serve');
+}
+
 function shimInstall() {
   const prev = readReceipt();
   const found = resolveTargets();
@@ -248,9 +257,17 @@ function shimInstall() {
   if (!found) {
     if (auto) {
       console.log('[link:local] --auto：PATH 上没有现成的 nx-sk，跳过（不新建、不动 PATH）。');
+      // 残留清单：上次 unlink 半途失败会留下「记录的文件已不在」，用户只看到命令消失、
+      // 不知道为什么。这里只报告，不替用户删除（自动删清单属于状态变更，交给 unlink）。
+      const stale = prev && Object.keys(prev.originals || {}).some((f) => !existsSync(f));
+      if (stale) {
+        console.log('[link:local] 检测到残留安装清单（记录的文件已不在）：pnpm run unlink:local 可清理。');
+      }
+      printAutoHint();
       return true;
     }
     console.log('[link:local] PATH 上没有现成的 nx-sk 可覆盖。');
+    printAutoHint();
     return shimInstallFallback();
   }
   if (found.type === 'exe') {
