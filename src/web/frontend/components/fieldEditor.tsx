@@ -32,7 +32,7 @@ export function FieldGroup({ title, fields, draft, onPatch, sectionTitle, entryT
       <div className="pad">
         <div className="grid">
           {fields.map((def) => (
-            <div key={def.key} className={`field ${['textarea', 'file', 'md', 'entrylist', 'table', 'source'].includes(def.type) ? 'wide' : ''}`}>
+            <div key={def.key} className={`field ${['textarea', 'file', 'md', 'entrylist', 'table', 'source', 'shortcut'].includes(def.type) ? 'wide' : ''}`}>
               <div className="flabel">
                 <span>{def.label}</span>
                 {def.sensitive ? <span className="tag bad">密文</span> : null}

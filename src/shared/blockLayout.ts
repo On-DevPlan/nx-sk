@@ -74,11 +74,11 @@ export function blockHeightPx(rows: unknown): number {
 }
 
 /**
- * 这些类型的字段**天然要一整行**：多行文本、附件、图文、清单、表格、资料袋——
+ * 这些类型的字段**天然要一整行**：多行文本、附件、图文、清单、表格、资料袋、快捷键——
  * 压成半列只会让内容挤成一条缝。其余（单行输入 / 下拉 / 日期 / 勾选）默认半列，
  * 两个并排刚好，也才有「把单列变成多列」的余地。
  */
-const WIDE_TYPES = new Set(['textarea', 'file', 'md', 'entrylist', 'table', 'source']);
+const WIDE_TYPES = new Set(['textarea', 'file', 'md', 'entrylist', 'table', 'source', 'shortcut']);
 
 /**
  * 各类型的**默认最小高度（px）**——不是「固定高度」：内容比它高就按内容长（见
@@ -100,6 +100,7 @@ const DEFAULT_PX: Record<string, number> = {
   entrylist: 150,
   table: 200,
   source: 90,
+  shortcut: 90,
 };
 
 const DEFAULT_H: Record<string, number> = Object.fromEntries(

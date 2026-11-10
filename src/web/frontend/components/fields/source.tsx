@@ -17,13 +17,14 @@
 //
 // P3.5：实现从 `components/sourcePanel.jsx` 原样迁入本文件（控件不再有第二份实现）。
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 import { api } from '../../api/client.ts';
 import { fileToDataUrl, listAttachments } from '../../api/files.ts';
 import { toggleTaskAtLine } from '../../mdSource.ts';
 import { Copyable, copyText } from '../ui.tsx';
 import { Lightbox } from '../lightbox.tsx';
 import { MdView } from '../mdView.tsx';
+import { Peek } from '../peek.tsx';
+import type { PeekMode } from '../peek.tsx';
 import { useStore } from '../../store.tsx';
 import type { ControlProps } from './types.ts';
 
@@ -83,7 +84,8 @@ function SourceDrawer({ items, onChange, onClose, title, sectionTitle }: SourceD
   const taRef = useRef<any>(null);
   const dragDepth = useRef(0);
   const editorDepth = useRef(0);
-  const triggerRef = useRef<any>(null);
+  // 三态外壳：默认 side = 迁移前的右侧栏；center/fullpage 由 Peek 负责遮罩与焦点陷阱。
+  const [mode, setMode] = useState<PeekMode>('side');
 
   const loadFiles = useCallback(async (force = false) => {
     try {
@@ -286,22 +288,18 @@ function SourceDrawer({ items, onChange, onClose, title, sectionTitle }: SourceD
   const fileRec = selected?.kind === 'file' ? files[selected.fileId] : null;
   const editing = editId !== null;
 
-  return createPortal((
+  return (
     <>
-    <aside
-      className="source-drawer side"
-      role="complementary"
-      aria-label="原始资料（侧边栏）"
-      ref={triggerRef}
-    >
-        <div className="source-drawer-head">
-          <strong className="nowrap">原始资料</strong>
-          <span className="muted nowrap">{sectionTitle ? `${sectionTitle} · ` : ''}{title || ''}</span>
-          <span className="grow" />
-          <span className="tag">{items.length} 条</span>
-          <button type="button" className="btn small ghost" onClick={onClose} title="关闭（Esc）">关闭</button>
-        </div>
-
+      <Peek
+        ariaLabel="原始资料（侧边栏）"
+        title="原始资料"
+        subtitle={`${sectionTitle ? `${sectionTitle} · ` : ''}${title || ''}`}
+        meta={<span className="tag">{items.length} 条</span>}
+        mode={mode}
+        onMode={setMode}
+        onClose={onClose}
+        className="source-drawer"
+      >
         <div className="source-drawer-body">
           {/* 左：清单 + 入口 */}
           <div
@@ -503,11 +501,11 @@ function SourceDrawer({ items, onChange, onClose, title, sectionTitle }: SourceD
             )}
           </div>
         </div>
-      </aside>
+      </Peek>
 
       {zoom ? <Lightbox item={zoom} onClose={() => setZoom(null)} /> : null}
     </>
-  ), document.body);
+  );
 }
 
 interface SourceFieldControlProps {
@@ -527,18 +525,11 @@ function SourceFieldControl({ def, value, onChange }: SourceFieldControlProps) {
   const [open, setOpen] = useState(false);
   const stripRef = useRef<any>(null);
 
-  // 关闭抽屉时把焦点还回折叠条（键盘用户的下一步还在原处）
+  // Esc 由 Peek 外壳统一处理（三态一致），这里只保留焦点归还。
   const close = useCallback(() => {
     setOpen(false);
     requestAnimationFrame(() => stripRef.current?.focus());
   }, []);
-
-  useEffect(() => {
-    if (!open) return undefined;
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [open, close]);
 
   // 摘要只显示**当前版本**（被取代的旧条不进摘要——它们是留痕，不是现状）
   const preview = items.filter((x) => !x.superseded).slice(0, 2).map(titleOf).join('　·　');

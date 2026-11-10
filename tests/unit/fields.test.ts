@@ -86,3 +86,63 @@ test('refs 口径固定：原始资料正文内嵌图片只在导出打包时算
     ['f_file', 'f_text'],
   );
 });
+
+test('shortcut：三种写法归一到同一形状（字符串 / 标签数组 / 按键对象）', () => {
+  const def = { key: 'keys', label: '快捷键', type: 'shortcut', group: 'other' };
+  const fromString = FIELD_BEHAVIOR.shortcut.coerce(def, [
+    { name: '全局', shortcuts: [{ combo: 'Ctrl+Shift+R', description: '刷新' }] },
+  ]) as any[];
+  const fromLabels = FIELD_BEHAVIOR.shortcut.coerce(def, [
+    { name: '全局', shortcuts: [{ combo: ['Ctrl', 'Shift', 'R'], description: '刷新' }] },
+  ]) as any[];
+  const fromObjects = FIELD_BEHAVIOR.shortcut.coerce(def, [
+    {
+      name: '全局',
+      shortcuts: [{
+        combo: [
+          { code: 'ShiftLeft', label: 'Shift', isModifier: true },
+          { code: 'ControlLeft', label: 'Ctrl', isModifier: true },
+          { code: 'KeyR', label: 'R' },
+        ],
+        description: '刷新',
+      }],
+    },
+  ]) as any[];
+
+  const combo = fromString[0].shortcuts[0].combo;
+  // 修饰键在前、主键在后：存储顺序固定，面板与 CLI 读出来不会「有时 Ctrl 在前、有时 R 在前」
+  assert.deepEqual(combo.map((s: any) => s.code), ['ControlLeft', 'ShiftLeft', 'KeyR']);
+  assert.deepEqual(fromLabels[0].shortcuts[0].combo, combo);
+  assert.deepEqual(fromObjects[0].shortcuts[0].combo, combo);
+  // 没给 id 时按位置补一个稳定 id（往返测试不会因为缺 id 而丢条目）
+  assert.equal(fromString[0].shortcuts[0].id, 's1-1');
+});
+
+test('shortcut：缺说明 / 坏键位 / 坏结构都报可读错误', () => {
+  const def = { key: 'keys', label: '快捷键', type: 'shortcut', group: 'other' };
+  assert.throws(
+    () => FIELD_BEHAVIOR.shortcut.coerce(def, [{ name: '全局', shortcuts: [{ combo: 'Ctrl+R' }] }]),
+    /缺少 description/,
+  );
+  assert.throws(
+    () => FIELD_BEHAVIOR.shortcut.coerce(def, [{ name: '全局', shortcuts: [{ combo: 'Ctrl+？', description: 'x' }] }]),
+    /认不出键位/,
+  );
+  assert.throws(() => FIELD_BEHAVIOR.shortcut.coerce(def, '不是 JSON'), /需要一个 JSON 数组/);
+  assert.throws(() => FIELD_BEHAVIOR.shortcut.coerce(def, { foo: 1 }), /需要一个数组/);
+});
+
+test('shortcut：format 按组输出、refs 为空、不进表格单元格', () => {
+  const def = { key: 'keys', label: '快捷键', type: 'shortcut', group: 'other' };
+  const value = FIELD_BEHAVIOR.shortcut.coerce(def, [
+    { name: '全局', shortcuts: [{ combo: 'Ctrl+K', description: '命令面板' }] },
+  ]);
+  assert.deepEqual(FIELD_BEHAVIOR.shortcut.format(def, value, {}), [
+    '[全局] 1 条',
+    '  Ctrl+K　命令面板',
+  ]);
+  assert.deepEqual(FIELD_BEHAVIOR.shortcut.refs(def, value), []);
+  assert.equal(FIELD_BEHAVIOR.shortcut.cell, false);
+  // 空值不抛：启动自检的探针就是拿 null 调的
+  assert.equal(FIELD_BEHAVIOR.shortcut.format(def, null, {}), null);
+});
