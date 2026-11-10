@@ -206,6 +206,15 @@ export default function SectionView({ sectionId: rawId }: { sectionId?: string }
   }, [sectionId, mask]);
 
   useEffect(() => { load(); }, [load]);
+  // 侧栏条目树点击：外部（App 侧栏）把 ui.entry 换成**同栏目**的另一条时，跟随切换选中。
+  // 数据不用重拉（dump 里本来就有全部条目）；目标条目不在本栏目时不动（load 的兜底逻辑管它）。
+  const entryWanted = ui.entry;
+  useEffect(() => {
+    if (!entryWanted || !data) return;
+    if (draft?.id === entryWanted) return;
+    const hit = data.entries.find((e) => e.id === entryWanted);
+    if (hit) setDraft({ id: hit.id, title: hit.title, values: { ...hit.values } });
+  }, [entryWanted, data, draft?.id]);
   // 切栏目、或条目被删掉后，选择里不能留下不存在的 id（导出会因为「找不到条目」整包失败）
   useEffect(() => { setSelected(new Set()); }, [sectionId]);
   useEffect(() => {
