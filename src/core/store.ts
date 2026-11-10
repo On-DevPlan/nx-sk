@@ -262,6 +262,9 @@ export function migrationNote() {
   return cacheMigrationNote;
 }
 
+// 首次读取时播种的并发门闩：两个请求同时发现文件不存在时，只播一次、写一次。
+let seedPromise: Promise<Store> | null = null;
+
 export async function loadStore(explicitPath?: string): Promise<Store> {
   const p = explicitPath || storeFile();
   try {
@@ -306,7 +309,25 @@ export async function loadStore(explicitPath?: string): Promise<Store> {
     // 解析失败时文件已被挪走，mtime 用 -1 强制下次重新判断
     cacheMtime = corrupt ? -1 : st.mtimeMs;
     return cache;
-  } catch {
+  } catch (e) {
+    // 文件不存在：播种后**立即落盘一次**。只在内存里播种会让每个请求都重新生成
+    // 一套随机 id（`e_...`），前端拿着上一次的 id 保存就会 404（真实走查事故）。
+    if ((e as NodeJS.ErrnoException)?.code === 'ENOENT') {
+      if (seedPromise) return seedPromise;
+      seedPromise = (async () => {
+        const seeded = emptyStore(true);
+        cache = seeded;
+        cachePath = p;
+        cacheMtime = -1;
+        try {
+          await saveStore(seeded, p);
+        } catch {
+          // 只读目录等写失败：保留内存态，至少本次进程内 id 稳定。
+        }
+        return cache ?? seeded;
+      })().finally(() => { seedPromise = null; });
+      return seedPromise;
+    }
     cache = emptyStore(true);
     cachePath = p;
     cacheMtime = -1;
