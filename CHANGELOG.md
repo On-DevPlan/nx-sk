@@ -2,6 +2,21 @@
 
 本文件格式参考 [Keep a Changelog](https://keepachangelog.com/)，中文正文。
 
+## 0.31.1 (2026-11-10)
+
+**开发脚本 `scripts/link-local.mjs`：`--auto` 跳过时补上可照做的下一步，并报告残留安装清单。npm 包内容与 0.31.0 相同（`scripts/` 不在发布清单里）。**
+
+### Fixed
+
+- `pnpm build` 的 `--auto` 在 PATH 上没有现成 `nx-sk` 时只打印「跳过」，用户无从得知下一步（误以为 build 坏了）。
+  现在补充三条可执行指引：`pnpm run link:local`、`npm i -g nx-sk`、`node bin/nx-sk.mjs serve`（不改 PATH 的临时用法）。
+- 上次 `unlink` 半途失败留下的 `~/nx-sk/dev/install.json`（记录的文件已不在）此前静默存在；`--auto` 现在会检测并提示用 `pnpm run unlink:local` 清理。
+
+### 说明
+
+- `--auto` 的语义不变：只覆盖 PATH 上现成的落点，**不新建目录、不改 PATH**——CI 与全新机器上跑 build 必须无副作用。
+  要拿到 `nx-sk` 命令仍走 `pnpm run link:local` 或全局安装，`--auto` 只负责「已有落点时让它指向本仓库」。
+
 ## 0.31.0 (2026-11-10)
 
 **`shortcut` 字段详情面板按参考实现 `shortcut-library` 一比一复刻（分组目录 / 表格 / ANSI 104 键 / 热力全屏 / 组合键录入同构），补齐 TOML 导入；并修复 store 首次读取不落盘导致的保存 404。**
