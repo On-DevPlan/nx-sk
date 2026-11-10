@@ -1580,6 +1580,42 @@ body.col-resizing, body.col-resizing * { cursor: col-resize !important; user-sel
 }
 .source-drawer-body { display: flex; flex: 1; min-height: 0; }
 
+/* flexlayout 外壳（#12）：三态窗口交给 flexlayout-react，side 的分栏线可拖拽。
+   shell 铺满视口但 pointer-events:none——右边面板与 splitter 才接收指针事件，
+   左边条目照常能点、能滚（保住 side peek「不遮不挡」的语义）。 */
+.nx-flexpeek { position: fixed; inset: 0; pointer-events: none; z-index: 45; }
+.nx-flexpeek .flexlayout__layout { background: transparent; }
+.nx-flexpeek .flexlayout__tabset { background: transparent; box-shadow: none; border: 0; }
+.nx-flexpeek .flexlayout__tabset_content,
+.nx-flexpeek .flexlayout__tab { background: transparent; overflow: hidden; }
+.nx-flexpeek .flexlayout__splitter { pointer-events: auto; background: transparent; }
+.nx-flexpeek .flexlayout__splitter:hover,
+.nx-flexpeek .flexlayout__splitter_drag { background: var(--line-strong, rgba(0, 0, 0, .16)); }
+.nx-flexpeek-ghost { width: 100%; height: 100%; pointer-events: none; }
+.nx-flexpeek-panelwrap { width: 100%; height: 100%; pointer-events: auto; display: flex; min-height: 0; }
+.nx-flexpeek .peek {
+  position: relative; inset: auto; width: 100%; height: 100%;
+  animation: none; border-radius: 0; box-shadow: none;
+}
+.nx-flexpeek .peek-center { transform: none; }
+.nx-flexpeek-side .nx-flexpeek-frame { position: absolute; inset: 0; }
+.nx-flexpeek-side .peek-side { border-left: var(--border); box-shadow: var(--shadow-float); }
+.nx-flexpeek-center .nx-flexpeek-frame {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  width: min(1100px, 92vw); height: min(820px, 86vh);
+  border: var(--border); border-radius: 10px; overflow: hidden;
+  box-shadow: var(--shadow-float); pointer-events: auto; background: var(--paper);
+}
+.nx-flexpeek-center .peek-center { border: 0; box-shadow: none; }
+.nx-flexpeek-fullpage .nx-flexpeek-frame {
+  position: absolute; inset: 0; background: var(--paper); pointer-events: auto;
+}
+.nx-flexpeek-fullpage .peek-fullpage { border: 0; }
+@media (max-width: 900px) {
+  .nx-flexpeek-center .nx-flexpeek-frame { width: 96vw; height: 92vh; }
+}
+
+
 .source-list-pane { width: 264px; flex-shrink: 0; border-right: var(--border); display: flex; flex-direction: column; min-height: 0; }
 .source-list-pane.drag { outline: 2px dashed var(--mid); outline-offset: -4px; background: var(--soft); }
 .source-list-tools { display: flex; align-items: center; gap: 6px; padding: 8px; border-bottom: var(--border); flex-wrap: wrap; }

@@ -19,6 +19,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import { FlexPeekShell } from './flexPeek.tsx';
 
 export type PeekMode = 'side' | 'center' | 'fullpage';
 
@@ -313,15 +314,16 @@ export function Peek({
           }}
         />
       ) : null}
-      <aside
-        ref={panelRef}
-        className={`peek peek-${mode}${className ? ` ${className}` : ''}`}
-        role={modal ? 'dialog' : 'complementary'}
-        aria-modal={modal ? true : undefined}
-        aria-label={ariaLabel}
-        tabIndex={-1}
-      >
-        <div className="peek-head">
+      <FlexPeekShell mode={mode} persistKey={persistKey}>
+        <aside
+          ref={panelRef}
+          className={`peek peek-${mode}${className ? ` ${className}` : ''}`}
+          role={modal ? 'dialog' : 'complementary'}
+          aria-modal={modal ? true : undefined}
+          aria-label={ariaLabel}
+          tabIndex={-1}
+        >
+          <div className="peek-head">
           <strong className="nowrap">{title}</strong>
           {subtitle ? <span className="muted nowrap">{subtitle}</span> : null}
           <span className="grow" />
@@ -430,7 +432,8 @@ export function Peek({
           <button type="button" className="btn small ghost" onClick={onClose} title="关闭（Esc）">关闭</button>
         </div>
         <div className="peek-body">{children}</div>
-      </aside>
+        </aside>
+      </FlexPeekShell>
     </>
   ), document.body);
 }

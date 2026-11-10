@@ -2,6 +2,25 @@
 
 本文件格式参考 [Keep a Changelog](https://keepachangelog.com/)，中文正文。
 
+## 0.32.0 (2026-11-10)
+
+**三态面板换成 flexlayout-react 外壳：侧边预览有真正的可拖拽分栏线，分栏宽度按面板类型记住。**
+
+### Added
+
+- `flexPeek`：三态（side / center / fullpage）统一交给 flexlayout-react 布局。side 形态铺满视口但外壳 `pointer-events:none`，只有右侧面板与 splitter 接收指针事件，左边条目照常可点可滚；拖拽分栏线会实时改变面板宽度，并按 `persistKey`（source / shortcut）写进 localStorage，下次沿用。
+- 窄屏（<900px）下列宽默认 86vw，不再缩成一条缝；center 形态改为响应式固定框（`min(1100px, 92vw) × min(820px, 86vh)`）。
+- `types/flexlayout-react.d.ts`：flexlayout-react 0.8.x 的类型入口内部是无扩展名相对导入，nodenext 下解析不到，补一份只覆盖本项目用法的本地声明（沿用 react-grid-layout 的做法）。
+
+### Changed
+
+- 快捷键字段的详细面板仍默认整页；可在「打开方式」菜单里切到侧边预览（现在带拽线）或居中预览。
+
+### 验证
+
+- `pnpm lint` / `pnpm typecheck` / `pnpm build` / `pnpm test:smoke`（137 项）/ `pnpm test:unit`（371 项）全绿。
+- 真机走查（Playwright + 本机 Chrome，隔离 store）：来源面板默认 side 且有 1 条 splitter；拖拽 160px 后面板 544→704，刷新重开仍是 704；居中框实测 1100×808 居中；窄屏 760px 下侧栏 647px；`elementFromPoint` 验证左侧命中页面内容（不是透明遮挡层）；Esc 关闭正常。
+
 ## 0.31.3 (2026-11-10)
 
 **快捷键面板：说明允许留空、分组与条目的 `createdAt` / `updatedAt` 与参考实现一致，修掉「加不进去 / 存不下来」。**
