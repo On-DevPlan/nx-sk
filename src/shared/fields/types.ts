@@ -131,6 +131,8 @@ export interface ShortcutGroup {
   id: string;
   name: string;
   shortcuts: ShortcutItem[];
+  createdAt?: number;
+  updatedAt?: number;
 }
 
 interface FieldDefBase {

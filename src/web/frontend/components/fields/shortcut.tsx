@@ -20,6 +20,8 @@ function looseGroups(value: unknown): ShortcutGroup[] {
     .map((g: any, gi: number) => ({
       id: String(g.id || `g${gi + 1}`),
       name: String(g.name || `组 ${gi + 1}`),
+      ...(Number.isFinite(g.createdAt) ? { createdAt: Number(g.createdAt) } : {}),
+      ...(Number.isFinite(g.updatedAt) ? { updatedAt: Number(g.updatedAt) } : {}),
       shortcuts: (Array.isArray(g.shortcuts) ? g.shortcuts : [])
         .filter((s: any) => s && typeof s === 'object')
         .map((s: any, si: number): ShortcutItem => ({

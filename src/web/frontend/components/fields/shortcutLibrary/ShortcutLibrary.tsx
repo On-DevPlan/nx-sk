@@ -269,13 +269,14 @@ export default function ShortcutLibrary({ groups, onChange }: Props) {
   // ── 数据变更（全部回写字段值） ────────────────────────────────
 
   function addGroup(name: string) {
-    const group: ShortcutGroup = { id: newId('g'), name, shortcuts: [] };
+    const now = Date.now();
+    const group: ShortcutGroup = { id: newId('g'), name, shortcuts: [], createdAt: now, updatedAt: now };
     onChange([...groups, group]);
     setSelectedGroupId(group.id);
   }
 
   function renameGroup(id: string, name: string) {
-    onChange(groups.map((g) => (g.id === id ? { ...g, name } : g)));
+    onChange(groups.map((g) => (g.id === id ? { ...g, name, updatedAt: Date.now() } : g)));
   }
 
   function deleteGroup(id: string) {
@@ -286,17 +287,17 @@ export default function ShortcutLibrary({ groups, onChange }: Props) {
 
   function addShortcut(combo: ShortcutStroke[], description: string, condition?: string) {
     if (!selectedGroup) return;
-    const desc = description.trim();
-    if (!desc) return;
+    // 与参考实现一致：说明允许为空（列表里显示「未填写」）。
+    const now = Date.now();
     const item: ShortcutItem = {
       id: newId('s'),
       combo,
-      description: desc,
+      description: description.trim(),
       ...(condition?.trim() ? { condition: condition.trim() } : {}),
-      createdAt: Date.now(),
+      createdAt: now,
     };
     onChange(groups.map((g) => (
-      g.id === selectedGroup.id ? { ...g, shortcuts: [...g.shortcuts, item] } : g
+      g.id === selectedGroup.id ? { ...g, shortcuts: [...g.shortcuts, item], updatedAt: now } : g
     )));
   }
 
@@ -306,6 +307,7 @@ export default function ShortcutLibrary({ groups, onChange }: Props) {
       if (g.id !== selectedGroup.id) return g;
       return {
         ...g,
+        updatedAt: Date.now(),
         shortcuts: g.shortcuts.map((s) => {
           if (s.id !== id) return s;
           const next: ShortcutItem = { ...s, ...patch };
@@ -320,7 +322,9 @@ export default function ShortcutLibrary({ groups, onChange }: Props) {
   function deleteShortcut(id: string) {
     if (!selectedGroup) return;
     onChange(groups.map((g) => (
-      g.id === selectedGroup.id ? { ...g, shortcuts: g.shortcuts.filter((s) => s.id !== id) } : g
+      g.id === selectedGroup.id
+        ? { ...g, shortcuts: g.shortcuts.filter((s) => s.id !== id), updatedAt: Date.now() }
+        : g
     )));
   }
 
@@ -578,17 +582,20 @@ export default function ShortcutLibrary({ groups, onChange }: Props) {
     const next: ShortcutGroup[] = groups.map((g) => ({ ...g, shortcuts: [...g.shortcuts] }));
     for (const g of data.groups) {
       const existing = next.find((eg) => eg.name.toLowerCase() === g.name.toLowerCase());
+      const now = Date.now();
       const added: ShortcutItem[] = g.shortcuts.map((s) => ({
         id: newId('s'),
         combo: s.combo,
         description: s.description,
         condition: s.condition,
+        createdAt: now,
       }));
       if (existing) {
         existing.shortcuts.push(...added);
+        existing.updatedAt = now;
         stats.groupsAppended += 1;
       } else {
-        next.push({ id: newId('g'), name: g.name, shortcuts: added });
+        next.push({ id: newId('g'), name: g.name, shortcuts: added, createdAt: now, updatedAt: now });
         stats.groupsAdded += 1;
       }
       stats.shortcutsAdded += added.length;
