@@ -2,6 +2,25 @@
 
 本文件格式参考 [Keep a Changelog](https://keepachangelog.com/)，中文正文。
 
+## [Unreleased]
+
+**任务 #18：统一内部资源定位 + schema v4（字段类型不再被 DB CHECK 约束）+ debug 引用字段 + 侧栏全局检索与悬浮预览。**
+
+### Added
+
+- `shared/locator.ts`：内部资源定位符唯一实现——`nx-sk://section/<id>`、`entry/<id>`、`field/<条目或栏目>/<key>`、`file/<id>`；parse 对脏输入返回 null 不抛；旧复合串 `<栏目>:<key>` 兼容读（磁盘格式零改动）。只读出口 `resolve`（CLI/HTTP）：给 locator 返回存在性与摘要，字段值密文默认打码。
+- `nx-sk resource search`（CLI + `GET /api/resources/search`）：跨栏目/条目/字段/附件全局检索，返回 locator+标题+定位信息。
+- **`debug` 字段类型**（引用型）：值 `{v:1, refs:[locator…]}` 自描述文档，非法项丢弃计入 warnings 不炸；面板渲染成**小格子**——悬浮预览引用内容（密文打码）、点击复制 locator、× 删除、「＋ 引用资源」走检索面板选择；失效引用标灰「已失效」。
+- **schema v4**：重建 fields/entry_fields 去掉 type 的 CHECK 枚举——**加新字段类型不再需要改库**（合法性由 validateFieldDef/behaviorOf 运行时保证，FIELD_TYPES 仍是唯一清单）。
+- 侧栏搜索升级：结果按「当前条目字段 / 全局字段 / 条目」三类分组，点字段结果直达条目并滚动定位+短暂高亮对应块。
+- 条目定位文本补一行 `定位: <locator>`（原两行 CLI 文案逐字不变，单测钉住）。
+
+### 验证
+
+- lint / typecheck / unit **431/431** / build / smoke **137/137**（零削弱）。
+- v4 迁移保真：真 v3 库升级前后四表逐行 deepEqual、id 全等、幂等、坏脚本回滚；期间发现并修复 1 个真缺陷（v4 apply 重复建索引使 0→4 全链必炸）。
+- 真机走查 25/25（Playwright + 本机 Chrome、隔离 home 7873）：三类检索、字段定位高亮、添加引用、格子标题、悬浮预览、失效标灰、locator 复制剪贴板校验、右键菜单/定位文本不回归、console 零错误。
+
 ## 0.40.0 (2026-11-11)
 
 **任务 #16：全局视觉改造——彻底无边框、Notion 配色令牌化。**
