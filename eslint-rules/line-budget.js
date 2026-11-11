@@ -1,44 +1,41 @@
-// 本地 ESLint 规则：文件行数预算（四条规则 ID，对应四档）。
+// 本地 ESLint 规则：单文件物理行数预算（三档）。
 //
-// 为什么不用内置 max-lines：它一个文件只产生一条消息、只认一个 max 阈值，
-// 表达不了「600 提醒 / 800 要审批 / 1000 硬报错」的分段语义。
+// 口径（固定在这里；改口径必须同时改注释和单测）：
+//   - 统计对象：单个文件的**物理行**，即 `sourceCode.lines.length`，
+//     等价于编辑器行号 / 内置 max-lines 的默认口径。
+//   - 空行、注释行、块注释都计入：本项目注释是设计意图的主要载体，
+//     行数在这里是「认知负担」的代理指标，注释不是噪声。
+//   - 不按函数或代码块统计：拆分决策发生在文件粒度。
 //
-// 为什么拆成多条规则 ID 而不是一条规则多档：
-//   ESLint 的严重级别是**按规则配置**定的，不是一条消息一个级别。
-//   同一条规则 ID 在同一个 config block 里只能有一个级别，所以「同规则不同档不同级」
-//   只能靠不同的规则 ID 实现。每条规则只负责自己那一个档，区间互斥。
+// 三档（阈值含等号，相邻档互斥，一个文件只落进一档）：
+//   >= 600 且 < 800   warn   提醒档，拆不拆自己判断
+//   >= 800 且 < 1000  error  必须登记：eslint-line-budget.json 的 registry 里有该路径、
+//                            且当前行数不超过登记上限 max，才放行
+//   >= 1000           error  硬禁止：**不接受任何登记豁免**，只能拆
 //
-// 四档（行数含注释与空行 = 编辑器行号 = 内置 max-lines 的默认口径）：
-//   line-budget-warn          601 ~ 800    warn    提醒，拆不拆自己决定
-//   line-budget-approve       801 ~ 1000   error   要审批：除非在 approved 名单里
-//   line-budget-hard          > 1000       error   硬上限：未登记即报错
-//   line-budget-hard-deferred > 1000       warn    硬上限的**存量过渡**豁免
+// 登记表每条必须写：path / lines（登记时行数）/ max（允许上限，必须 < 1000）/
+// reason（为什么暂不拆）/ by（登记人）/ at（登记日期）。
+// 文件回落到 800 以下后，该条登记即「陈旧」，由 warn 档报出来——登记表不能烂。
 //
-// 行数口径说明：本项目注释密度 13%~27%，注释是设计意图的载体而非噪声，
-// 算进去等于把「行数」当「认知负担」——与拆文件要解决的问题是同一个口径。
+// 生效目录：src/**、tests/**、scripts/**。登记表里的路径统一写成
+// `src/...` / `tests/...` / `scripts/...`（仓库内相对路径）。
 //
-// 两份名单都在 eslint-line-budget.json（可 code review）：
-//   approved —— 放行「801~1000 要审批」档
-//   deferred —— 「>1000 硬上限」档的存量过渡豁免；拆分完成后必须删掉对应记录
-//
-// 注意：本文件只跑在 src/**。tests / scripts 本来就允许长（smoke.mjs 583 行、
-// link-local.mjs 527 行），卡它们只会逼人把测试拆碎，不解决任何问题。
+// 为什么是两个规则 ID 而不是一条规则多档：ESLint 的严重级别是按规则配置定的，
+// 不是按消息定的；同一条规则不能既 warn 又 error，所以提醒档（含陈旧登记）
+// 与禁止档拆成两个 ID。
 
-/** 把仓库路径归一化成仓库内相对路径（win32 / posix 混用都要吃得住）。 */
+/** 把绝对/相对文件名归一化成仓库内相对路径（win32 / posix 混用都要吃得住）。 */
 function repoRelative(filePath) {
-  const norm = filePath.replace(/\\/g, '/');
-  const idx = norm.lastIndexOf('/src/');
-  if (idx >= 0) return norm.slice(idx + 1);
-  const marker = '/nx-sk/';
-  const m = norm.lastIndexOf(marker);
-  if (m >= 0) return norm.slice(m + marker.length);
-  return norm;
+  const norm = String(filePath).replace(/\\/g, '/');
+  const m = norm.match(/(?:^|\/)(src|tests|scripts)\/(.+)$/);
+  return m ? `${m[1]}/${m[2]}` : norm;
 }
 
-function toMap(list) {
+/** registry 数组 → path → 登记项。 */
+function toRegistryMap(list) {
   const map = new Map();
   for (const item of list || []) {
-    map.set(item.path.replace(/\\/g, '/'), item.reason || '');
+    map.set(String(item.path).replace(/\\/g, '/'), item);
   }
   return map;
 }
@@ -46,24 +43,22 @@ function toMap(list) {
 const SCHEMA = {
   type: 'object',
   properties: {
-    warn: { type: 'integer' },
-    approve: { type: 'integer' },
-    hard: { type: 'integer' },
-    approved: {
+    warn: { type: 'integer', minimum: 1 },
+    approve: { type: 'integer', minimum: 1 },
+    hard: { type: 'integer', minimum: 1 },
+    registry: {
       type: 'array',
       items: {
         type: 'object',
-        properties: { path: { type: 'string' }, reason: { type: 'string' } },
-        required: ['path', 'reason'],
-        additionalProperties: false,
-      },
-    },
-    deferred: {
-      type: 'array',
-      items: {
-        type: 'object',
-        properties: { path: { type: 'string' }, reason: { type: 'string' } },
-        required: ['path', 'reason'],
+        properties: {
+          path: { type: 'string' },
+          lines: { type: 'integer', minimum: 1 },
+          max: { type: 'integer', minimum: 1 },
+          reason: { type: 'string' },
+          by: { type: 'string' },
+          at: { type: 'string' },
+        },
+        required: ['path', 'lines', 'max', 'reason', 'by', 'at'],
         additionalProperties: false,
       },
     },
@@ -72,95 +67,126 @@ const SCHEMA = {
 };
 
 const MESSAGES = {
-  overWarn: '文件有 {{count}} 行（> {{warn}} 提醒档）。这是提醒，考虑拆分。',
+  overWarn: '文件有 {{count}} 行（>= {{warn}} 提醒档）。这是提醒：考虑按职责拆分。',
   overApprove:
-    '文件有 {{count}} 行（> {{approve}} 要审批档，未达硬上限 {{hard}}）。'
-    + '需在 eslint-line-budget.json 的 approved 里登记理由才能通过。',
+    '文件有 {{count}} 行（>= {{approve}} 登记档，未到 {{hard}} 硬禁止档）。'
+    + '需在 eslint-line-budget.json 的 registry 里登记 path/lines/max/reason/by/at 才能通过。',
+  overMax:
+    '文件有 {{count}} 行，超过登记上限 {{max}}（登记时 {{lines}} 行）。'
+    + '要么拆回去，要么调高 max 并说明理由。',
   overHard:
-    '文件有 {{count}} 行（> {{hard}} 硬上限）。硬上限只对存量过渡有豁免，'
-    + '新文件必须拆分；存量文件需在 eslint-line-budget.json 的 deferred 里登记。',
-  overHardDeferred:
-    '文件有 {{count}} 行（> {{hard}} 硬上限），已登记为过渡项：{{reason}}'
-    + '—— 拆分完成后请删掉 deferred 里的这条记录。',
+    '文件有 {{count}} 行（>= {{hard}} 硬禁止档）。硬禁止不接受登记豁免，必须拆分。',
+  hardWithEntry:
+    '该文件 {{count}} 行 >= {{hard}} 硬禁止档，登记表不接受豁免；'
+    + '请删除 registry 里的这条登记（它只会制造假的安全感）。',
+  staleEntry:
+    '文件只有 {{count}} 行，已低于需要登记的 {{approve}} 档；'
+    + 'registry 里这条登记（登记时 {{lines}} 行）已陈旧，请删除。',
 };
 
-/**
- * 造一条只管某一档的规则。
- * @param {'warn'|'approve'|'hard'|'hard-deferred'} band
- */
-function makeBandRule(band) {
+function readOptions(context) {
+  const opts = context.options[0] || {};
   return {
-    meta: {
-      type: 'suggestion',
-      docs: { description: `单文件行数预算：${band} 档` },
-      schema: [SCHEMA],
-      messages: MESSAGES,
-    },
-
-    create(context) {
-      const opts = context.options[0] || {};
-      const warn = opts.warn ?? 600;
-      const approve = opts.approve ?? 800;
-      const hard = opts.hard ?? 1000;
-      const approved = toMap(opts.approved);
-      const deferred = toMap(opts.deferred);
-
-      const count = context.sourceCode.lines.length;
-      const rel = repoRelative(context.filename);
-
-      // 本档的判定区间。相邻档互斥，一个文件只会落进一个档。
-      let inBand = false;
-      if (band === 'warn') inBand = count > warn && count <= approve;
-      else if (band === 'approve') inBand = count > approve && count <= hard;
-      else inBand = count > hard; // 'hard' 与 'hard-deferred' 都要先过这一关
-
-      if (!inBand) return {};
-
-      if (band === 'hard' || band === 'hard-deferred') {
-        const reason = deferred.get(rel);
-        const isDeferred = reason !== undefined;
-        // 'hard' 只管未登记的文件；'hard-deferred' 只管登记过的。两条互斥，不会重复报告。
-        if (band === 'hard' && isDeferred) return {};
-        if (band === 'hard-deferred' && !isDeferred) return {};
-        return {
-          Program(node) {
-            context.report({
-              node,
-              messageId: isDeferred ? 'overHardDeferred' : 'overHard',
-              data: { count, hard, reason: reason || '' },
-            });
-          },
-        };
-      }
-
-      if (band === 'approve') {
-        if (approved.has(rel)) return {}; // 已审批，放行
-        return {
-          Program(node) {
-            context.report({ node, messageId: 'overApprove', data: { count, approve, hard } });
-          },
-        };
-      }
-
-      return {
-        Program(node) {
-          context.report({ node, messageId: 'overWarn', data: { count, warn } });
-        },
-      };
-    },
+    warn: opts.warn ?? 600,
+    approve: opts.approve ?? 800,
+    hard: opts.hard ?? 1000,
+    registry: toRegistryMap(opts.registry),
   };
 }
 
-export const lineBudgetWarn = makeBandRule('warn');
-export const lineBudgetApprove = makeBandRule('approve');
-export const lineBudgetHard = makeBandRule('hard');
-export const lineBudgetHardDeferred = makeBandRule('hard-deferred');
+/** 提醒档：600~799 报提醒；已登记但回落到 800 以下报陈旧登记。 */
+export const lineBudgetWarn = {
+  meta: {
+    type: 'suggestion',
+    docs: { description: '单文件行数预算：提醒档 + 陈旧登记' },
+    schema: [SCHEMA],
+    messages: MESSAGES,
+  },
+
+  create(context) {
+    const { warn, approve, registry } = readOptions(context);
+    const count = context.sourceCode.lines.length;
+    const rel = repoRelative(context.filename);
+    const entry = registry.get(rel);
+
+    if (count >= approve) return {}; // 登记档/硬禁止档由 error 规则负责
+
+    if (entry) {
+      return {
+        Program(node) {
+          context.report({
+            node,
+            messageId: 'staleEntry',
+            data: { count, approve, lines: entry.lines },
+          });
+        },
+      };
+    }
+
+    if (count < warn) return {};
+    return {
+      Program(node) {
+        context.report({ node, messageId: 'overWarn', data: { count, warn } });
+      },
+    };
+  },
+};
+
+/** 禁止档：800~999 未登记/超上限报错；>=1000 一律报错（登记了再补一条）。 */
+export const lineBudgetError = {
+  meta: {
+    type: 'problem',
+    docs: { description: '单文件行数预算：必须登记档 + 硬禁止档' },
+    schema: [SCHEMA],
+    messages: MESSAGES,
+  },
+
+  create(context) {
+    const { approve, hard, registry } = readOptions(context);
+    const count = context.sourceCode.lines.length;
+    const rel = repoRelative(context.filename);
+    const entry = registry.get(rel);
+
+    if (count >= hard) {
+      return {
+        Program(node) {
+          context.report({ node, messageId: 'overHard', data: { count, hard } });
+          if (entry) {
+            context.report({ node, messageId: 'hardWithEntry', data: { count, hard } });
+          }
+        },
+      };
+    }
+
+    if (count < approve) return {};
+
+    if (!entry) {
+      return {
+        Program(node) {
+          context.report({ node, messageId: 'overApprove', data: { count, approve, hard } });
+        },
+      };
+    }
+
+    if (count > entry.max) {
+      return {
+        Program(node) {
+          context.report({
+            node,
+            messageId: 'overMax',
+            data: { count, max: entry.max, lines: entry.lines },
+          });
+        },
+      };
+    }
+
+    return {};
+  },
+};
 
 export default {
   rules: {
     'line-budget-warn': lineBudgetWarn,
-    'line-budget-approve': lineBudgetApprove,
-    'line-budget-hard': lineBudgetHard,
-    'line-budget-hard-deferred': lineBudgetHardDeferred,
+    'line-budget-error': lineBudgetError,
   },
 };

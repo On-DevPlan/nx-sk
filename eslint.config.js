@@ -17,7 +17,7 @@ import react from 'eslint-plugin-react';
 import reactHooks from 'eslint-plugin-react-hooks';
 import tseslint from 'typescript-eslint';
 import { readdirSync, readFileSync } from 'node:fs';
-import { lineBudgetWarn, lineBudgetApprove, lineBudgetHard, lineBudgetHardDeferred } from './eslint-rules/line-budget.js';
+import { lineBudgetWarn, lineBudgetError } from './eslint-rules/line-budget.js';
 
 // 白名单用 readFileSync 读，不用 `import ... with { type: 'json' }`——
 // 后者要 Node 20.10+，而 package.json 声明的 engines 是 >=18.17。
@@ -29,8 +29,7 @@ const lineBudgetOptions = {
   warn: lineBudgetConfig.warn,
   approve: lineBudgetConfig.approve,
   hard: lineBudgetConfig.hard,
-  approved: lineBudgetConfig.approved,
-  deferred: lineBudgetConfig.deferred,
+  registry: lineBudgetConfig.registry,
 };
 
 const SOURCE_FILES = ['**/*.{js,mjs,cjs,jsx,ts,tsx}'];
@@ -153,33 +152,29 @@ export default [
     },
   },
 
-  // 单文件行数预算——四档（提醒 / 要审批 / 硬上限 / 硬上限的存量过渡）。
+  // 单文件行数预算——三档（提醒 / 必须登记 / 硬禁止），实现见 eslint-rules/line-budget.js。
   //
   // 为什么是本地规则而不是内置 max-lines：内置那条一个文件只报一条消息、只认一个 max，
-  // 表达不了分段语义；而且 ESLint 的严重级别是按规则 ID 定的，所以「同规则不同档不同级」
-  // 必须拆成不同规则 ID（见 eslint-rules/line-budget.js）。
+  // 表达不了分段语义；而且 ESLint 的严重级别是按规则配置定的，所以提醒档与禁止档
+  // 必须拆成两个规则 ID。
   //
-  // 白名单在 eslint-line-budget.json（可 code review），不在代码里写死。
-  // 只管 src/：tests 与 scripts 本来就允许长（smoke.mjs 583 行、link-local.mjs 527 行），
-  // 卡它们只会逼人把测试拆碎，不解决任何问题。
+  // 登记表在 eslint-line-budget.json（可 code review），不在代码里写死。
+  //
+  // 生效目录：tests/**、scripts/** 先接；src/** 等三个 >1000 行的存量文件拆完再接
+  // （硬禁止档不允许登记豁免，提前接线等于从第一天起必然红灯）。拆完立刻扩到这里。
   {
-    files: ['src/**/*.{js,mjs,cjs,jsx,ts,tsx}'],
+    files: ['tests/**/*.{js,mjs,cjs,jsx,ts,tsx}', 'scripts/**/*.{js,mjs,cjs,jsx,ts,tsx}'],
     plugins: {
       local: {
         rules: {
           'line-budget-warn': lineBudgetWarn,
-          'line-budget-approve': lineBudgetApprove,
-          'line-budget-hard': lineBudgetHard,
-          'line-budget-hard-deferred': lineBudgetHardDeferred,
+          'line-budget-error': lineBudgetError,
         },
       },
     },
     rules: {
       'local/line-budget-warn': ['warn', lineBudgetOptions],
-      'local/line-budget-approve': ['error', lineBudgetOptions],
-      'local/line-budget-hard': ['error', lineBudgetOptions],
-      // 已登记 deferred 的存量文件降级为 warn；未登记的走上面那条 error。
-      'local/line-budget-hard-deferred': ['warn', lineBudgetOptions],
+      'local/line-budget-error': ['error', lineBudgetOptions],
     },
   },
 ];
