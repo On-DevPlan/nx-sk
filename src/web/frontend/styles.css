@@ -1878,19 +1878,31 @@ body.col-resizing, body.col-resizing * { cursor: col-resize !important; user-sel
 }
 .dbg-pick-item:hover { background: var(--hover); }
 .dbg-pick-name { flex: 1; min-width: 0; }
-/* 悬浮预览浮层：Notion peek 的迷你形态（标题 / 内容行 / locator 小字） */
-.dbg-hover {
-  position: fixed; z-index: 1200; width: 300px; max-width: 90vw;
-  background: var(--paper); border: 1px solid var(--line-strong); border-radius: 6px;
-  box-shadow: 0 6px 24px rgba(20, 22, 26, .12);
-  padding: 8px 10px; pointer-events: none;
-  display: flex; flex-direction: column; gap: 4px;
+/* 底部寄存框（#25）：悬浮引用格子时在视口底部加载被引用位置；
+   field 引用直接渲染整块控件（只读）。宽度够放「一块」，高度封顶可滚。 */
+.dbg-dock {
+  position: fixed; z-index: 1200; left: 50%; transform: translateX(-50%); bottom: 16px;
+  width: min(720px, calc(100vw - 32px)); max-height: 46vh;
+  display: flex; flex-direction: column;
+  background: var(--paper); border: 1px solid var(--line-strong); border-radius: 8px;
+  box-shadow: 0 10px 32px rgba(20, 22, 26, .16);
 }
-.dbg-hover-head { display: flex; align-items: center; gap: 6px; }
-.dbg-hover-body { display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
-.dbg-hover-body .dbg-preview-value {
+.dbg-dock-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 10px; border-bottom: var(--border); font-size: 12px;
+}
+.dbg-dock-loc { color: var(--mid); font-size: 10px; max-width: 300px; overflow: hidden; text-overflow: ellipsis; }
+.dbg-dock-body { padding: 10px; overflow: auto; }
+.dbg-dock-lines { display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
+.dbg-dock-lines .dbg-preview-value {
   font-family: ui-monospace, Consolas, monospace; font-size: 11px;
   background: var(--soft); border-radius: 4px; padding: 3px 6px;
   white-space: pre-wrap; word-break: break-all;
 }
-.dbg-hover-loc { color: var(--mid); font-size: 10px; word-break: break-all; }
+.dbg-dock-block { display: flex; flex-direction: column; gap: 6px; }
+.dbg-dock-blocklabel { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--mid); }
+/* 只读预览：控件保持真实形态（尺寸/格式化一致），但不接收输入。
+   secret 之外的控制件不看 disabled 属性，所以靠 fieldset + pointer-events 兜住。 */
+.dbg-dock-frame { border: 0; margin: 0; padding: 0; min-width: 0; }
+.dbg-dock-frame :is(input, textarea, select, button) { pointer-events: none; }
+.dbg-dock-pre { margin: 0; max-height: 300px; }
