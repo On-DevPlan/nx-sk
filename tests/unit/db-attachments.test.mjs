@@ -38,24 +38,38 @@ test('身份规则：url 大小写不敏感、内部指针 id 确定性、前缀
   assert.throws(() => identity.pointerIdentity('file', {}), /只认内部种类/);
 });
 
-test('v1.sql 的 type CHECK 与 FIELD_TYPES 同一份清单（漂移当场红）', () => {
+test('v1.sql 的 type CHECK 钉住 v1 时代清单（历史快照永不改）；v4 起新表不再有 type CHECK', () => {
   const sql = readMigrationSql('v1.sql');
   const m = /type\s+TEXT NOT NULL CHECK \(type IN \(([^)]*)\)\)/is.exec(sql.replace(/\s+/g, ' '));
   assert.ok(m, 'v1.sql 里找不到 fields.type 的 CHECK 清单');
   const listed = m[1].split(',').map((x) => x.trim().replace(/^'|'$/g, ''));
-  assert.deepEqual(listed.sort(), [...FIELD_TYPES].sort());
-  // kinds 清单同理
+  // v4 裁决：类型清单的唯一权威是 shared/fields/types.ts 的 FIELD_TYPES（运行时判），
+  // v1.sql 里的 CHECK 只是**历史快照**——它必须等于 v1 时代的 15 种，且不含后加的类型。
+  assert.ok(listed.length === 15 && !listed.includes('debug'), `v1 清单应钉在 15 种（实际 ${listed.length}）`);
+  assert.deepEqual(listed, [...listed].sort((a, b) => FIELD_TYPES.indexOf(a) - FIELD_TYPES.indexOf(b)), 'v1 清单必须是 FIELD_TYPES 的前缀');
+  for (const f of ['v4.sql']) {
+    const v4 = readMigrationSql(f);
+    assert.ok(!/CHECK\s*\(\s*type\s+IN/i.test(v4), `${f} 不该再抄 type 枚举`);
+  }
+  // kinds 清单同理（附件 kind 仍被 CHECK 钉着——它不是这次裁决的对象）
   const k = /kind\s+TEXT NOT NULL CHECK \(kind IN \(([^)]*)\)\)/is.exec(sql.replace(/\s+/g, ' '));
   const kinds = k[1].split(',').map((x) => x.trim().replace(/^'|'$/g, ''));
   assert.deepEqual(kinds, [...identity.ATTACHMENT_KINDS]);
 });
 
-test('非法字段类型被 CHECK 拒绝', () => {
+test('v4：未知类型不再被 DB 拒绝，但运行时 validateFieldDef 在写入点当场报错', async () => {
+  const { validateFieldDef } = await import('../../src/modules/sections/service.ts');
+  // DB 层：v4 起 fields/entry_fields 没有 type CHECK，裸 SQL 写未知类型能落进去
+  //（这正是「加类型不改库」的含义；清理掉，别毒化后面的用例）
   withDb((db) => {
-    assert.throws(() => db.run(
-      "INSERT INTO fields (section_id, key, type, spec) VALUES ('demo', 'bad', 'no_such_type', '{}')",
-    ), /CHECK constraint failed|type/);
+    db.run("INSERT INTO fields (section_id, key, type, spec) VALUES ('demo', 'bad', 'no_such_type', '{}')");
+    db.run("DELETE FROM fields WHERE section_id = 'demo' AND key = 'bad'");
   });
+  // 运行时层：唯一清单 FIELD_TYPES 仍是关卡——未知类型在写入点报错，不静默
+  assert.throws(() => validateFieldDef({ key: 'bad', type: 'no_such_type' }), /type 非法/);
+  // debug 是新加的第一种类型：定义合法、行为分派到位（不再需要 schema 迁移）
+  const def = validateFieldDef({ key: 'refs', type: 'debug', label: '引用' });
+  assert.equal(def.type, 'debug');
 });
 
 test('删除钩子：删栏目/条目后，指向它们的内部指针行被软删（deleted_at），行还在', async () => {

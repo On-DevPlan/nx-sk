@@ -416,6 +416,12 @@ const DEMO_FIELDS = [
   f('keys', '快捷键', 'shortcut', 'rich', { hint: '快捷键：按组整理（组 → 条目 → 按键）。折叠条只报组数/条数，点「详细」打开键位面板；录入时直接按组合键，键位图会点亮' }),
   f('docs', '附件', 'file', 'rich', { kind: 'doc', hint: '附件字段：值是附件 id 的列表（不是路径）。在这里直接上传，或从附件库选' }),
   f('apikey', '密钥', 'secret', 'rich', { hint: '密文字段：值以 AES-256-GCM 落盘，读出来默认原文，--mask 才打码' }),
+  // —— 引用型（值 = 内部资源定位符）——
+  f('refs', '资源引用', 'debug', 'combo', {
+    fill: 'optional',
+    hint: '引用型字段：值 = 内部资源定位符（nx-sk://栏目|条目|字段|附件）。面板里每个格子悬浮即可预览被引用内容；'
+      + '检索用 nx-sk resource search --q <关键字>，看内容用 nx-sk resource resolve <定位符>',
+  }),
 ];
 
 const DEMO_GROUPS = [
@@ -725,6 +731,9 @@ export function seedEntries(at: string): StoreEntry[] {
         ],
       },
     ],
+    // 资源引用（debug）：示例指向「本栏目」与「本栏目的名称字段」。
+    // 故意不给条目级 locator——播种时条目 id 还没生成，section/模板字段 locator 是稳定文本。
+    refs: { v: 1, refs: ['nx-sk://section/demo', 'nx-sk://field/demo/name'] },
   };
   return [{
     id: newId('e'),

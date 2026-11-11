@@ -70,6 +70,7 @@ const REF_PROBES: unknown[] = [
   'f_probe', // file：单值 id（也涵盖 "f_x,f_y" 形态）
   '![x](f_probe)', // md：正文里的图片引用
   [{ kind: 'file', fileId: 'f_probe' }, { kind: 'text', text: '![x](f_probe)' }], // source：资料袋
+  { v: 1, refs: ['nx-sk://file/f_probe'] }, // debug：引用字段的 file locator（载体识别规则只此一份）
 ];
 const mayReferenceFiles = (f: { type: string }) =>
   REF_PROBES.some((probe) => behaviorOf(f.type).refs(f, probe).length > 0);

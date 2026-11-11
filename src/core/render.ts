@@ -72,9 +72,15 @@ export interface EntryLike {
   values: Record<string, unknown>;
 }
 
-/** 值 → 人读字符串（bool / tags / 数组 / 标量 / entrylist 行）。 */
+/** 值 → 人读字符串（bool / tags / 数组 / 标量 / entrylist 行 / 引用文档）。 */
 export function formatValue(value: unknown): string {
   if (isBlank(value)) return '';
+  // 引用文档（debug）：计数 + locator 列表，**不展开被引用内容**（台账不刷屏）
+  const refDoc = value as { refs?: unknown };
+  if (typeof value === 'object' && Array.isArray(refDoc.refs)) {
+    const refs = refDoc.refs as unknown[];
+    return refs.length ? `引用 ${refs.length} 个：${refs.map(String).join('、')}` : '';
+  }
   // 表格文档：按「列名=值 · 列名=值；下一行」压成一行（section dump 的表格放不下多行版）
   const doc = value as { rows?: unknown; columns?: unknown };
   if (typeof value === 'object' && Array.isArray(doc.rows)) {

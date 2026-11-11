@@ -16,6 +16,7 @@ import { readFileSync } from 'node:fs';
 import { CURRENT_SCHEMA_VERSION } from '../version.ts';
 import type { Conn } from '../driver.ts';
 import { applyV3 } from './v3-apply.ts';
+import { applyV4 } from './v4-apply.ts';
 
 /** 每条直接边 = 一次版本跃迁。`apply` 与 DDL 在同一个事务里执行（纯 SQL 表达不了的数据迁移用）。 */
 export interface MigrationStep {
@@ -30,6 +31,7 @@ export const DIRECT_EDGES: MigrationStep[] = [
   { from: 0, to: 1, file: 'v1.sql', title: '初始 schema（sections/groups/fields/entries/attachments/…）' },
   { from: 1, to: 2, file: 'v2.sql', title: '挂载收敛到条目字段：重建 entry_attach（去 role=source）、删 section_attach/field_attach' },
   { from: 2, to: 3, file: 'v3.sql', title: '动态结构/写时复制：entry_fields + field_data 拆行，values 列退役，边挂 entry_field_id', apply: applyV3 },
+  { from: 3, to: 4, file: 'v4.sql', title: '字段类型去 DB CHECK：加新类型不再需要 schema 迁移（合法性由运行时 validateFieldDef/behaviorOf 保证）', apply: applyV4 },
 ];
 
 const keyOf = (from: number, to: number) => `${from}->${to}`;

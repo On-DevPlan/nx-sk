@@ -13,6 +13,7 @@
 //   field   → att_field_<sha1(entry_field id)[0:16]>（v3：target_key = 条目结构行 id；
 //             行 id 本身是 ef_<sha1(entry_id + ':' + key)[0:16]>，确定性派生）
 import { createHash } from 'node:crypto';
+import { formatFieldComposite } from '../../shared/locator.ts';
 
 /** 资源种类（封闭枚举，与 v1.sql 的 CHECK 同一份清单，由单测钉住漂移）。 */
 export const ATTACHMENT_KINDS = ['file', 'url', 'section', 'entry', 'field'] as const;
@@ -29,9 +30,13 @@ function sha1_16(s: string): string {
   return createHash('sha1').update(String(s)).digest('hex').slice(0, 16);
 }
 
-/** field 的复合定位串（v3 里 = entry_fields.template_field_id 的取值口径）。 */
+/**
+ * field 的复合定位串（v3 里 = entry_fields.template_field_id 的取值口径）。
+ * 构造规则的唯一实现下沉到 shared/locator.ts（formatFieldComposite）——
+ * 落盘格式一字不改，这里只是转发，保证「locator ↔ 复合串」永远同一口径。
+ */
 export function fieldTargetKey(sectionId: unknown, key: unknown): string {
-  return `${String(sectionId)}:${String(key)}`;
+  return formatFieldComposite(sectionId, key);
 }
 
 /**
