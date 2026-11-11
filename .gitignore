@@ -6,9 +6,16 @@ dist/
 
 # 本机数据目录的镜像（真实数据在 ~/nx-sk/，绝不入库）
 # `store.json.*` 不能省：`store.json` 只匹配这一个名字，而备份/迁移副本叫
-# store.json.pre-kv-backup 这种——漏了它，一份整库 PII 就可能被 add 进来。
+# store.json.pre-kv-backup / store.json.imported-<ts> 这种——漏了它，一份整库 PII 就可能被 add 进来。
 store.json
 store.json.*
+# 0.36 起主存储是 SQLite：库本体 + WAL 附属 + stale/imported 留证副本，全套挡掉。
+nxsk.db
+nxsk.db-wal
+nxsk.db-shm
+nxsk.db-journal
+nxsk.db.*
+migration-failed-*.log
 *.vaultkey
 *.vaultsalt
 

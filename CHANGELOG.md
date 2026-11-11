@@ -2,6 +2,31 @@
 
 本文件格式参考 [Keep a Changelog](https://keepachangelog.com/)，中文正文。
 
+## [Unreleased]
+
+**底层存储从 store.json 重构为 SQLite（node:sqlite），采用「存储版本号 + 组合式迁移脚本」机制，运行时不做旧结构兼容。**
+
+### Changed
+
+- **存储换心**：主库 `~/nx-sk/nxsk.db`（`NX_SK_STORE_DB` 覆盖；WAL + busy_timeout）。`core/store.ts` facade 的导出 API 与 Store 对象形状**一字未动**，所有后端模块照常只通过它碰磁盘。`loadStore` = SELECT 组装（过 normalize 收口类型，不再做旧版本兼容）；`saveStore` / `mutateStore` = 单事务全量重写（代码结构留好按表增量写的缝）。
+- **迁移框架**（详细参考 nx-kv 的存储版本号设计）：`meta.schema_version` 为版本判据，`db/migrations/v1.sql` 起按版本号**单向组合**执行，每支一个事务、失败回滚并中止启动；后续升级只提供新脚本（在 `migrations/index.js` 登记直接边 + 改 `CURRENT_SCHEMA_VERSION`），**绝不改已发布的 vN.sql**。缺边/降级都明确报错，不静默跳过。
+- **乐观并发（rev）**：`meta.rev` 全局写计数。载入记 rev，提交时 rev 不匹配抛 BLOCKED（提示重试）——修掉 serve + CLI 双进程的 lost-update（旧版整份覆盖，后写的静默抹掉先写的）。
+- **首启导入**：db 不存在且 store.json 存在 → 读 json（**有 version 没 version 都接受**，过 normalize 升到当前形状）→ 建库跑迁移 → 全量写入 → store.json 改名留证 `store.json.imported-<ts>`（不删除，沿用 corrupt 留证纪律）；损坏文件挪 `.corrupt-` 后播种；导入失败整体回滚、JSON 一字节不动并写失败日志。孤儿条目（指向不存在的栏目）在预检就报明细，不给外键撞半套现场。
+- **表结构**：sections / groups（含 `declared`：0=syncSectionGroups 自愈出的未声明分组）/ fields（type CHECK 与 FIELD_TYPES 同一份清单，单测钉住）/ entries / settings（k/v，JSON value）/ ui_state（预留，面板选择现状仍在浏览器 localStorage，不硬塞）/ meta。JSON 列（fields.spec、attachments.meta）是**保真源**，标量列是查询与约束的镜像——往返深比较不漂键存在性。
+- **attachments 对齐 nx-kv v2**：kind ∈ (file/url/section/entry/field)；file 行 id = FileRecord.id **原样**（values 里嵌的引用一字不改）；url/section/entry/field 用确定性派生 id（`att_*_<sha1[0:16]>`），身份规则收敛到 `db/identity.ts` 唯一实现；dedupe_key 唯一部分索引（软删后可重新登记）；边表 entry_attach / section_attach / field_attach，**role 是边的语义不是资源属性**（inline=从 values 用现有 fileReferences 重算、attach/source=显式边跨重写保留）；删除钩子对指向已删条目/栏目/字段的内部指针行软删（UPDATE deleted_at，行不物理删），`findDriftedPointers` 可检漂移。
+- `engines.node` 升到 `>=22.13.0`（node:sqlite 免 `--experimental-sqlite` 的下限，与 nx-kv 同口径；`db/version.ts` 运行时先检查再 import，报错指得出真因）。`--store` 全局 flag 改指 DB 路径；`setting set` 返回值与面板存储页展示的 `path` 从 store.json 换成 nxsk.db。
+- build 链路新增 `scripts/copy-migrations.mjs`（tsc 不拷 .sql，迁移脚本随 dist 发布）。
+
+### Added
+
+- 新单测 24 项（`tests/unit/db-*.test.mjs`）：迁移 runner（空库→v1、幂等、坏脚本回滚、缺边/降级、async 事务体堵死）、导入器（带/不带 version、无 json、corrupt、失败回滚 + 留证改名）、rev 冲突（并发提交第二个报 BLOCKED 且不动库）、往返保真（json→db→loadStore 与 normalize(json) 深比较；inline 边 = fileReferences 重算结果）、attachments 身份/删除钩子/漂移/dedupe 索引。
+- `core/store-shape.ts`：Store 形状与 normalize 从 store.ts 拆出（形状层零依赖 facade，避免 store.ts ⇄ db/* 运行时循环 import）。
+
+### 验证
+
+- `pnpm lint` / `pnpm typecheck` / `pnpm build` / `pnpm test:unit`（395/395）/ `pnpm test:smoke`（137/137）全绿（Node 24.18.0，Windows）。
+- 冒烟里「CLI 与 HTTP 写进的是同一份数据」原样保留——serve 与 CLI 两个进程现在写的是同一个 nxsk.db，rev 校验在跨进程路径上被真实覆盖。
+
 ## 0.35.0 (2026-11-11)
 
 **栏目属性管理从弹窗升级为整页编辑器：块式分组面板 + 字段拖拽，复用条目正文那套拖拽/块基础设施。**

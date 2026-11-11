@@ -179,16 +179,19 @@ test('renderSettings 仍然列出 defaultSection（带校验器但不是「结�
   assert.match(settings.renderSettings(d), /defaultSection/);
 });
 
-test('store 文件不存在：首次读取即落盘，重复读取 id 稳定（否则每次请求都重播种 → 保存 404）', async () => {
+test('store 不存在：首次读取即落盘，重复读取 id 稳定（否则每次请求都重播种 → 保存 404）', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'nx-sk-seed-'));
-  const p = join(dir, 'store.json');
+  process.env.NX_SK_HOME = dir;
+  process.env.NX_SK_STORE = join(dir, 'store.json');
+  process.env.NX_SK_STORE_DB = join(dir, 'nxsk.db');
+  const { dbFile } = await import('../../src/core/paths.ts');
 
-  const first = await loadStore(p);
-  const second = await loadStore(p);
-  assert.equal(first.entries[0].id, second.entries[0].id, '同一文件两次读取不应换 id');
-  assert.ok((await stat(p)).isFile(), '首次读取应把种子写进 store.json');
+  const first = await loadStore();
+  const second = await loadStore();
+  assert.equal(first.entries[0].id, second.entries[0].id, '同一库两次读取不应换 id');
+  assert.ok((await stat(dbFile())).isFile(), '首次读取应把种子写进 nxsk.db');
 
-  const third = await loadStore(p);
+  const third = await loadStore();
   assert.equal(third.entries[0].id, first.entries[0].id, '落盘后再读仍是同一套 id');
 });
 

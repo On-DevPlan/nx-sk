@@ -1,7 +1,7 @@
 // system 是聚合模块：它读各处的状态拼上下文，不产生业务实体，所以没有视图。
 import fsp from 'node:fs/promises';
 import { constants } from 'node:fs';
-import { APP_LABEL, APP_NAME, ENV_HOME, ENV_PASSPHRASE, ENV_STORE, VERSION, appHome, displayPath, storeFile } from '../../core/paths.ts';
+import { APP_LABEL, APP_NAME, ENV_HOME, ENV_PASSPHRASE, ENV_STORE, ENV_STORE_DB, VERSION, appHome, dbFile, displayPath } from '../../core/paths.ts';
 import { loadStore, corruptNote, migrationNote, storePathInUse } from '../../core/store.ts';
 import { vaultStatus } from '../../core/vault.ts';
 import { FIELD_TYPES, FIELD_TYPE_LABELS, SOURCE_FIELD, SOURCE_GROUP, templateSummaries } from '../../core/fields.ts';
@@ -32,6 +32,7 @@ export async function bootstrapInfo() {
     envOverrides: {
       [ENV_HOME]: process.env[ENV_HOME] || null,
       [ENV_STORE]: process.env[ENV_STORE] || null,
+      [ENV_STORE_DB]: process.env[ENV_STORE_DB] || null,
       [ENV_PASSPHRASE]: process.env[ENV_PASSPHRASE] ? '已设置（口令模式）' : null,
     },
     settings: store.settings,
@@ -87,7 +88,7 @@ export async function healthInfo() {
     storeOk = false;
     storeDetail = String((e as Error)?.message ?? e);
   }
-  checks.push({ name: 'store', path: displayPath(storeFile()), ok: storeOk, detail: storeDetail });
+  checks.push({ name: 'store', path: displayPath(dbFile()), ok: storeOk, detail: storeDetail });
 
   let vault = null;
   try {

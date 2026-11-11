@@ -133,11 +133,18 @@ test('seedSections：只播「字段样例」，且把**每种**字段类型都�
   assert.ok(t.totals.length >= 1, '表尾要有统计');
 });
 
-test('v1 → v3 迁移：密钥栏目缩成 KV 表，旧值不删，且先留原始快照', async () => {
+test('v1 → v3 迁移：密钥栏目缩成 KV 表，旧值不删，且留迁移前的原始文件', async () => {
+  // 0.36 起旧 JSON 兼容只发生在**首启导入**：切一个全新 home（db 还不存在），
+  // 写一份 v1 的 store.json → loadStore 触发导入 + 迁移 + 改名留证。
   const fsp = await import('node:fs/promises');
+  const { mkdtemp } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
   const { join } = await import('node:path');
-  const dir = process.env.NX_SK_HOME;
-  const p = join(dir, 'store.json');
+  const dir = await mkdtemp(join(tmpdir(), 'nx-sk-v13-'));
+  process.env.NX_SK_HOME = dir;
+  process.env.NX_SK_STORE = join(dir, 'store.json');
+  process.env.NX_SK_STORE_DB = join(dir, 'nxsk.db');
+  const p = process.env.NX_SK_STORE;
 
   const v1 = {
     version: 1,
@@ -159,9 +166,9 @@ test('v1 → v3 迁移：密钥栏目缩成 KV 表，旧值不删，且先留原
   };
   await fsp.writeFile(p, JSON.stringify(v1, null, 2), 'utf8');
 
-  const migrated = await loadStore(p);
+  const migrated = await loadStore();
   const sec = migrated.sections.find((x) => x.id === 'secret');
-  assert.equal(migrated.version, 3, '迁移后版本号必须落到当前版本，否则每次读盘都会重跑');
+  assert.equal(migrated.version, 3, '迁移后版本号必须落到当前版本，否则每次读都会重跑');
   assert.deepEqual(sec.fields.map((f) => f.key), ['value'], '字典缩成单字段 KV');
   assert.equal(sec.kv, true, 'v3：栏目标上 kv 标记（面板据此渲染表格）');
   assert.equal(sec.titleField, null);
@@ -172,16 +179,18 @@ test('v1 → v3 迁移：密钥栏目缩成 KV 表，旧值不删，且先留原
   const note = migrationNote();
   assert.ok(note && note.from === 1 && note.to === 3, '迁移要留可展示的记录（from → to 都要有）');
   const snap = await fsp.readFile(note.snapshotRaw, 'utf8');
-  assert.equal(JSON.parse(snap).version, 1, '快照必须是**迁移前**的原始文件，否则退回也没用');
+  assert.equal(JSON.parse(snap).version, 1, '留证文件必须是**迁移前**的原始文件，否则退回也没用');
 
-  const onDisk = JSON.parse(await fsp.readFile(p, 'utf8'));
-  assert.equal(onDisk.version, 3, '迁移要就地落盘（幂等靠这个）');
+  // 导入成功后 store.json 改名留证（不删除）；DB 成为唯一真相
+  const files = await fsp.readdir(dir);
+  assert.ok(!files.includes('store.json'), 'store.json 应从原位置挪走');
+  assert.ok(files.some((f) => f.startsWith('store.json.imported-')), `应留 imported 证据：${files.join(', ')}`);
+  assert.ok(files.includes('nxsk.db'), '迁移结果必须落库（幂等靠这个）');
 
-  // 迁移副本目录从 backup 改名为 migrate（本地备份功能已删，这里只有迁移那一次性副本）
-  const before = (await fsp.readdir(join(dir, 'migrate'))).length;
-  await loadStore(p);
-  const after = (await fsp.readdir(join(dir, 'migrate'))).length;
-  assert.equal(after, before, '第二次读盘不该再迁移、再留副本');
+  const before = files.filter((f) => f.startsWith('store.json.imported-')).length;
+  await loadStore();
+  const after = (await fsp.readdir(dir)).filter((f) => f.startsWith('store.json.imported-')).length;
+  assert.equal(after, before, '第二次读不该再迁移、再多留一份副本');
 });
 
 test('没有栏目可迁时不会瞎迁，版本号照常落到当前', () => {

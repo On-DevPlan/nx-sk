@@ -205,7 +205,7 @@ export default function SettingsView() {
           {active === 'storage' ? (
             <>
               <InfoRow label="数据目录" value={boot?.home} copy={boot?.home} />
-              <InfoRow label="store.json" value={boot?.storePath} copy={boot?.storePathRaw} />
+              <InfoRow label="nxsk.db" value={boot?.storePath} copy={boot?.storePathRaw} />
               <InfoRow label="栏目 / 条目" value={boot ? `${boot.counts.sections} / ${boot.counts.entries}` : ''} />
               <InfoRow label="命令条数" value={boot ? String(boot.counts.commands) : ''} />
               <InfoRow label="app / node" value={boot ? `v${boot.app.version} · node ${boot.app.node} · ${boot.app.platform}` : ''} />

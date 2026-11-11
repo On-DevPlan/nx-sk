@@ -41,6 +41,7 @@ export const DEV_VITE_PORT = Number(pkg.nxSk?.vitePort ?? 5180);
  */
 export const ENV_HOME = 'NX_SK_HOME';
 export const ENV_STORE = 'NX_SK_STORE';
+export const ENV_STORE_DB = 'NX_SK_STORE_DB';
 export const ENV_PASSPHRASE = 'NX_SK_PASSPHRASE';
 
 const DEFAULT_HOME = join(homedir(), APP_NAME);
@@ -50,6 +51,22 @@ export function appHome(): string {
   return fromEnv ? resolve(fromEnv) : DEFAULT_HOME;
 }
 
+/**
+ * SQLite 主库路径：`~/nx-sk/nxsk.db`（`NX_SK_STORE_DB` 覆盖）。
+ *
+ * 0.36 起存储从 store.json 换成 SQLite，这里就是**唯一真相**的落点。
+ * 环境变量覆盖不是可选项：没有它，测试会写脏用户的真实库。
+ */
+export function dbFile(): string {
+  const fromEnv = process.env[ENV_STORE_DB];
+  return fromEnv ? resolve(fromEnv) : join(appHome(), 'nxsk.db');
+}
+
+/**
+ * 旧版 store.json 的路径（`NX_SK_STORE` 覆盖）。
+ * 现在只作为**首启导入的来源**：导入成功后改名留证 `store.json.imported-<ts>`，
+ * 运行时不再读写它。
+ */
 export function storeFile(): string {
   const fromEnv = process.env[ENV_STORE];
   return fromEnv ? resolve(fromEnv) : join(appHome(), 'store.json');
