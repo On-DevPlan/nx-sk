@@ -21,7 +21,7 @@ export type AttachmentKind = (typeof ATTACHMENT_KINDS)[number];
 export const POINTER_KINDS = ['section', 'entry', 'field'] as const;
 
 /** 边的语义（role 在边上，不在资源上——照抄 nx-kv 的纪律）。 */
-export const EDGE_ROLES = ['inline', 'attach', 'source'] as const;
+export const EDGE_ROLES = ['inline', 'attach'] as const;
 export type EdgeRole = (typeof EDGE_ROLES)[number];
 
 function sha1_16(s: string): string {

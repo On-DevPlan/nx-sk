@@ -2,6 +2,22 @@
 
 本文件格式参考 [Keep a Changelog](https://keepachangelog.com/)，中文正文。
 
+## 0.37.0 (2026-11-11)
+
+**schema v2：挂载位置收敛到「具体栏目的具体条目的具体字段」——source 只是普通字段，附件不挂结构。**
+
+### Changed
+
+- 用户裁决落地：栏目 / 条目 / 字段定义是结构定位信息，不是挂载对象——**删除 section_attach / field_attach 两张结构级边表**；`role='source'` 从 entry_attach 退役（原始资料袋里的值引用走 inline，显式挂载走 attach）。EDGE_ROLES 收敛为 `inline | attach`。
+- 迁移走刚建好的版本机制：新增 `migrations/v2.sql`（重建 entry_attach：SQLite 改不了 CHECK → 建新表、整表搬运、历史 source 边落为 attach、改名补索引、DROP 两张结构表）+ `DIRECT_EDGES` 追加 1→2 + `CURRENT_SCHEMA_VERSION=2`；v1.sql 一字未动。
+- `repo.ts` 全量重写只捕获/放回 entry 级显式边；测试同步：迁移器断言 9 张表、`role='source'` 必须被 CHECK 拒绝、attach 角色可插入。
+
+### 验证
+
+- lint / typecheck / unit 398/398 / build / smoke 137/137 全绿。
+- **live 库真实升级实录**：v1→v2 由 CLI 首启触发，升级前自动快照 `migrate/20261111-162758-pre-v1-to-v2.db`（备份机制首次实战）；升级后 schema_version=2、9 表、51 条 inline 边 / 57 条目 / 55 附件记录逐项对账不变；serve(7866) API 与 CLI 双通道读取正常。
+- 顺带清障：昨日遗留的旧 JSON 代码 serve（7867，store.json 已改名、再写会分叉）经授权停止。
+
 ## 0.36.0 (2026-11-11)
 
 **底层存储从 store.json 重构为 SQLite（node:sqlite），采用「存储版本号 + 组合式迁移脚本」机制，运行时不做旧结构兼容。**

@@ -9,8 +9,10 @@
  * v1（2026-11-11）：存储从 store.json 换成 SQLite —— sections / groups / fields /
  * entries / attachments（对齐 nx-kv v2 的统一资源表）+ 三张资源边表 +
  * settings / ui_state / meta。store.json 只在首启被导入一次，运行时不再读写。
+ * v2（2026-11-11）：挂载收敛到「具体条目的具体字段」——entry_attach 去 role='source'
+ * （source 只是普通字段），删结构级边表 section_attach / field_attach（附件挂在结构上没价值）。
  */
-export const CURRENT_SCHEMA_VERSION = 1;
+export const CURRENT_SCHEMA_VERSION = 2;
 
 /**
  * 运行时最低 Node 版本。

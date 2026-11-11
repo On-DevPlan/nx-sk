@@ -141,12 +141,11 @@ export function writeStore(db: Conn, store: Store, { expectedRev = null, declare
       );
     }
 
-    // ── 1. 捕获要跨重写存活的三类东西 ──
-    // 显式边（role ≠ inline）：全量重写只重算 inline；attach/source 是用户
+    // ── 1. 捕获要跨重写存活的东西 ──
+    // 显式边（role ≠ inline）：全量重写只重算 inline；attach 是用户
     // 未来的显式挂载，删了就丢，先捞出来、父行还在就原样放回去。
+    // （v2 起挂载位置只有「条目 × 字段」一处：结构级边表 section_attach/field_attach 已删。）
     const explicitEntryEdges = conn.all("SELECT * FROM entry_attach WHERE role <> 'inline'");
-    const explicitSectionEdges = conn.all("SELECT * FROM section_attach WHERE role <> 'inline'");
-    const explicitFieldEdges = conn.all("SELECT * FROM field_attach WHERE role <> 'inline'");
     // 分组 declared：原地保留（新出现的分组才算「声明」；自愈行由导入 hint 或读路径决定）。
     const declaredBefore = new Map<string, number>();
     for (const g of conn.all('SELECT section_id, id, declared FROM groups')) {
@@ -158,7 +157,7 @@ export function writeStore(db: Conn, store: Store, { expectedRev = null, declare
       `SELECT id, kind, target_key FROM attachments WHERE kind IN ('section','entry','field') AND deleted_at IS NULL`,
     );
 
-    // ── 2. 清空投影（CASCADE 带走 groups/fields/entries/三张边表）──
+    // ── 2. 清空投影（CASCADE 带走 groups/fields/entries/边表）──
     // file/url 资源行由 store.files 重建；内部指针行**不删**（它们是软删语义的对象）。
     conn.exec('DELETE FROM sections');
     conn.run('DELETE FROM attachments WHERE kind IN (\'file\', \'url\')');
@@ -242,9 +241,7 @@ export function writeStore(db: Conn, store: Store, { expectedRev = null, declare
     }
 
     // ── 5. 放回显式边 + 删除钩子（软删指向已消失目标的内部指针）──
-    const sectionIds = new Set(store.sections.map((s) => s.id));
     const entryIds = new Set(store.entries.map((e) => e.id));
-    const fieldKeys = new Set(store.sections.flatMap((s) => (s.fields || []).map((f) => `${s.id}\u0000${String((f as unknown as Record<string, unknown>).key)}`)));
     // 边的另一端：file 行刚重建、内部指针行从不物理删——统一问**当前事务里的表**
     // （deleted_at IS NULL 的活行才算存在；指向已软删指针的显式边随父行一起消失）。
     const liveAttachment = (id: unknown) =>
@@ -253,19 +250,6 @@ export function writeStore(db: Conn, store: Store, { expectedRev = null, declare
       if (!entryIds.has(String(r.entry_id)) || !liveAttachment(r.attachment_id)) continue;
       conn.run('INSERT INTO entry_attach (entry_id, attachment_id, field_key, role, position, note, created_at) VALUES (:a,:b,:c,:d,:e,:f,:g)', {
         a: r.entry_id, b: r.attachment_id, c: r.field_key, d: r.role, e: r.position, f: r.note, g: r.created_at,
-      });
-    }
-    for (const r of explicitSectionEdges) {
-      if (!sectionIds.has(String(r.section_id)) || !liveAttachment(r.attachment_id)) continue;
-      conn.run('INSERT INTO section_attach (section_id, attachment_id, role, position, note, created_at) VALUES (:a,:b,:c,:d,:e,:f)', {
-        a: r.section_id, b: r.attachment_id, c: r.role, d: r.position, e: r.note, f: r.created_at,
-      });
-    }
-    for (const r of explicitFieldEdges) {
-      const sid = String(r.section_id);
-      if (!fieldKeys.has(`${sid}\u0000${String(r.field_key)}`) || !liveAttachment(r.attachment_id)) continue;
-      conn.run('INSERT INTO field_attach (section_id, field_key, attachment_id, role, position, note, created_at) VALUES (:a,:b,:c,:d,:e,:f,:g)', {
-        a: sid, b: r.field_key, c: r.attachment_id, d: r.role, e: r.position, f: r.note, g: r.created_at,
       });
     }
     // 删除钩子：条目/栏目/字段被删 → 指向它的内部指针行软删（UPDATE deleted_at）。

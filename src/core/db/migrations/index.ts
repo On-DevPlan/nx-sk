@@ -26,6 +26,7 @@ export interface MigrationStep {
 
 export const DIRECT_EDGES: MigrationStep[] = [
   { from: 0, to: 1, file: 'v1.sql', title: '初始 schema（sections/groups/fields/entries/attachments/…）' },
+  { from: 1, to: 2, file: 'v2.sql', title: '挂载收敛到条目字段：重建 entry_attach（去 role=source）、删 section_attach/field_attach' },
 ];
 
 const keyOf = (from: number, to: number) => `${from}->${to}`;
