@@ -15,8 +15,9 @@
 //      块体（输入区）仍然不能拖——否则选词会变成搬块。
 //   4. **版式与字段值两条保存链**：拖块只写 section.layout（防抖自动存），
 //      填字段仍然走「N 处改动 → 保存」。否则拖一下版式会把没填完的值一起提交。
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { DragEvent as ReactDragEvent, HTMLAttributes } from 'react';
+import { createPortal } from 'react-dom';
 import { Responsive, useContainerWidth } from 'react-grid-layout';
 import 'react-grid-layout/css/styles.css';
 import {
@@ -44,6 +45,16 @@ export type BoardContext = {
   entryId?: string;
 };
 
+/** 块头「⋯」菜单的三个动作（任务 #24 验收反馈：不再只给一个 ×）。 */
+export interface FieldActions {
+  /** 查看这个字段：定义 + 当前值 + 定位符（只读）。 */
+  view: (key: string, def: FieldDef) => void;
+  /** 编辑这个字段的属性（显示名 / 描述）——只作用于本条目。 */
+  edit: (key: string, def: FieldDef) => void;
+  /** 删除 / 从本条目移除（语义由调用方按 template 判定）。 */
+  remove: (key: string, def: FieldDef) => void;
+}
+
 interface BlockProps {
   def: FieldDef;
   value: any;
@@ -52,8 +63,75 @@ interface BlockProps {
   onMeasure: (key: string, px: number) => void;
   dragProps: HTMLAttributes<HTMLDivElement>;
   className?: string;
-  /** 任务 #20：块头的移除入口（未传则不渲染 ×，kvTable 等其它调用点零影响）。 */
-  onRemoveField?: (key: string, def: FieldDef) => void;
+  /** 任务 #24：块头「⋯」菜单（未传则不渲染，其它调用点零影响）。 */
+  fieldActions?: FieldActions;
+}
+
+/**
+ * 块头右上角的「⋯」菜单。
+ *
+ * 不用 `<details>`（栏目「更多」那套）：块的根节点是 `overflow: hidden`（高度由网格锁着），
+ * 绝对定位的下拉会被裁掉。所以浮层 portal 到 body、fixed 定位，位置按按钮实测。
+ * 打开期间：点任意处 / Esc / 滚动 / 改窗口尺寸都关——菜单不该在页面上「漂着」。
+ */
+function BlockMenu({ def, actions }: { def: FieldDef; actions: FieldActions }) {
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const [at, setAt] = useState<{ x: number; y: number } | null>(null);
+
+  useEffect(() => {
+    if (!at) return undefined;
+    const close = () => setAt(null);
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
+    window.addEventListener('scroll', close, true);
+    window.addEventListener('resize', close);
+    window.addEventListener('keydown', onKey);
+    document.addEventListener('click', close);
+    return () => {
+      window.removeEventListener('scroll', close, true);
+      window.removeEventListener('resize', close);
+      window.removeEventListener('keydown', onKey);
+      document.removeEventListener('click', close);
+    };
+  }, [at]);
+
+  const toggle = () => {
+    if (at) { setAt(null); return; }
+    const b = btnRef.current?.getBoundingClientRect();
+    if (!b) return;
+    // 菜单宽 168：右缘对齐按钮；下方放不下就翻到按钮上方
+    const left = Math.max(8, Math.min(b.right - 168, window.innerWidth - 176));
+    const top = b.bottom + 120 > window.innerHeight ? Math.max(8, b.top - 112) : b.bottom + 4;
+    setAt({ x: left, y: top });
+  };
+
+  const pick = (fn: () => void) => { setAt(null); fn(); };
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        type="button"
+        className="blk-menu-btn"
+        title="字段操作：查看 / 编辑 / 删除"
+        aria-label={`字段操作 ${def.label}`}
+        aria-haspopup="menu"
+        onClick={(e) => { e.stopPropagation(); toggle(); }}
+      >⋯</button>
+      {at ? createPortal(
+        <div className="blk-menu" style={{ left: at.x, top: at.y }} role="menu" aria-label={`字段操作 ${def.label}`}>
+          <button type="button" role="menuitem" onClick={() => pick(() => actions.view(def.key, def))}>查看字段</button>
+          <button type="button" role="menuitem" onClick={() => pick(() => actions.edit(def.key, def))}>编辑字段属性…</button>
+          <button
+            type="button"
+            role="menuitem"
+            className="danger-item"
+            onClick={() => pick(() => actions.remove(def.key, def))}
+          >{def.template === false ? '删除扩展字段' : '从本条目移除'}</button>
+        </div>,
+        document.body,
+      ) : null}
+    </>
+  );
 }
 
 /**
@@ -63,7 +141,7 @@ interface BlockProps {
  * ResizeObserver 盯它的盒子——输入多行字、贴图加载完、清单加一行，都会触发重报。
  * 报上去的是「块头 + 块体」需要多少像素，高度换算与是否落盘由面板统一决定。
  */
-function Block({ def, value, onPatch, ctx, onMeasure, dragProps, onRemoveField, ...rest }: BlockProps) {
+function Block({ def, value, onPatch, ctx, onMeasure, dragProps, fieldActions, ...rest }: BlockProps) {
   const bodyRef = useRef<HTMLDivElement>(null);
 
   useLayoutEffect(() => {
@@ -103,9 +181,9 @@ function Block({ def, value, onPatch, ctx, onMeasure, dragProps, onRemoveField, 
       <div
         className="blk-head"
         {...dragProps}
-        // 任务 #20：从 × 上起拖不算拖块（与 panel-head 对按钮的同一守卫口径）
+        // 任务 #20/#24：从块头按钮起拖不算拖块（与 panel-head 对按钮的同一守卫口径）
         onDragStart={(e) => {
-          if ((e.target as HTMLElement).closest('.blk-remove')) { e.preventDefault(); return; }
+          if ((e.target as HTMLElement).closest('button')) { e.preventDefault(); return; }
           dragProps.onDragStart?.(e);
         }}
         title="按住这一行拖动：插到别的块上方 / 下方"
@@ -115,15 +193,7 @@ function Block({ def, value, onPatch, ctx, onMeasure, dragProps, onRemoveField, 
         {def.sensitive ? <span className="tag bad">密文</span> : null}
         {def.fill && def.fill !== 'normal' ? <span className="tag">{def.fillLabel || def.fill}</span> : null}
         <span className="blk-key mono nowrap">{def.key}</span>
-        {onRemoveField ? (
-          <button
-            type="button"
-            className="blk-remove"
-            title={def.template === false ? `删除扩展字段「${def.label}」（值一并删除，不可恢复）` : `从本条目移除「${def.label}」（不影响栏目模板与其他条目）`}
-            aria-label={`移除字段 ${def.label}`}
-            onClick={(e) => { e.stopPropagation(); onRemoveField(def.key, def); }}
-          >×</button>
-        ) : null}
+        {fieldActions ? <BlockMenu def={def} actions={fieldActions} /> : null}
       </div>
       <div className="blk-body" ref={bodyRef}>
         <FieldControl def={def} value={value} onChange={(v) => onPatch(def.key, v)} ctx={ctx} />
@@ -145,15 +215,15 @@ interface PanelProps {
   onLayouts: (gid: string, layouts: Record<string, GridItem[]>) => void;
   onCollapse: (gid: string, collapsed: boolean) => void;
   onReset: (gid: string) => void;
-  /** 任务 #20：块头移除入口，原样透传给每个 Block。 */
-  onRemoveField?: (key: string, def: FieldDef) => void;
+  /** 任务 #24：块头「⋯」菜单，原样透传给每个 Block。 */
+  fieldActions?: FieldActions;
 }
 
 /**
  * 一块面板（= 一个分组）。网格宽度由 useContainerWidth 实测（引擎要按像素算位置）；
  * 父容器变宽（拉左栏、窗口缩放）时它自己会重算。
  */
-function Panel({ group, layoutGroup, index, drag, draft, onPatch, ctx, onLayouts, onCollapse, onReset, onRemoveField }: PanelProps) {
+function Panel({ group, layoutGroup, index, drag, draft, onPatch, ctx, onLayouts, onCollapse, onReset, fieldActions }: PanelProps) {
   const { width, containerRef, mounted } = useContainerWidth();
   const layouts = useMemo<Record<string, GridItem[]>>(() => layoutGroup?.layouts || {}, [layoutGroup]);
   const collapsed = layoutGroup?.collapsed === true;
@@ -268,7 +338,7 @@ function Panel({ group, layoutGroup, index, drag, draft, onPatch, ctx, onLayouts
                     ctx={ctx}
                     onMeasure={onMeasure}
                     dragProps={fieldDrag.dragStartProps(i)}
-                    onRemoveField={onRemoveField}
+                    fieldActions={fieldActions}
                   />
                 </div>
               ))}
@@ -291,8 +361,8 @@ export interface BlockBoardProps {
   /** 透传给 source / shortcut 的 peek 头部：「新标签页」深链。 */
   sectionId?: string;
   entryId?: string;
-  /** 任务 #20：块头 × 的回调（模板字段=脱离、扩展字段=硬删，由调用方分文案）。未传则不渲染。 */
-  onRemoveField?: (key: string, def: FieldDef) => void;
+  /** 任务 #24：块头「⋯」菜单的三个动作（查看 / 编辑 / 删除）。未传则不渲染。 */
+  fieldActions?: FieldActions;
 }
 
 /**
@@ -301,7 +371,7 @@ export interface BlockBoardProps {
  * 所以这里可以假定「每个字段在版式里都有一块」。
  */
 export default function BlockBoard({
-  groups, board, onBoard, draft, onPatch, sectionTitle, entryTitle, sectionId, entryId, onRemoveField,
+  groups, board, onBoard, draft, onPatch, sectionTitle, entryTitle, sectionId, entryId, fieldActions,
 }: BlockBoardProps) {
   const mode = board?.mode === 'flow' ? 'flow' : 'grid';
   const ctx = useMemo<BoardContext>(
@@ -392,7 +462,7 @@ export default function BlockBoard({
           onLayouts={setLayouts}
           onCollapse={setCollapsed}
           onReset={resetGroup}
-          onRemoveField={onRemoveField}
+          fieldActions={fieldActions}
         />
       ))}
       {!groups.length ? <div className="hint pad">这个栏目还没有可显示的字段。</div> : null}

@@ -510,6 +510,36 @@ export function setEntryFieldDetached(db: Conn, entryId: string, rowId: string, 
   }, { db, mode: 'IMMEDIATE' });
 }
 
+/**
+ * 条目结构行的**属性**更新（任务 #24 验收反馈：块头「⋯ → 编辑字段」）。
+ *
+ * 只改这一条的显示名与描述：`label` / `hint` 两个镜像列 + `spec` 里的同名字段
+ * （spec 是 FieldDef 的保真源，资源定位与面板读的都是它——不同步就会出现
+ * 「块头显示新名、引用浮层显示旧名」）。**不动栏目字典**（写时复制纪律），
+ * 值（field_data）也不碰。行不存在返回 false，调用方据此报 NOT_FOUND。
+ */
+export function updateEntryFieldDef(
+  db: Conn,
+  entryId: string,
+  rowId: string,
+  patch: { label?: string; hint?: string },
+): boolean {
+  return tx((conn) => {
+    const r = conn.get('SELECT label, hint, spec FROM entry_fields WHERE id = :id AND entry_id = :entryId', { id: rowId, entryId });
+    if (!r) return false;
+    const spec = parseJson(r.spec, {}) as Record<string, unknown>;
+    const label = patch.label !== undefined ? patch.label : String(r.label ?? spec.label ?? '');
+    const hint = patch.hint !== undefined ? patch.hint : String(r.hint ?? spec.hint ?? '');
+    spec.label = label;
+    spec.hint = hint;
+    conn.run('UPDATE entry_fields SET label = :label, hint = :hint, spec = :spec WHERE id = :id', {
+      label, hint, spec: JSON.stringify(spec), id: rowId,
+    });
+    setRev(conn, getRev(conn) + 1, nowIso());
+    return true;
+  }, { db, mode: 'IMMEDIATE' });
+}
+
 /** 扩展行硬删：field_data / entry_attach 随 CASCADE 走；kind='field' 的内部指针按删除钩子口径软删。 */
 export function deleteEntryFieldRow(db: Conn, entryId: string, rowId: string): boolean {
   return tx((conn) => {

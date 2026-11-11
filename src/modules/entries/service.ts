@@ -9,7 +9,7 @@
 // schema v3（写时复制）：字段解析顺序 = 条目自身结构行 → 栏目字典 → quickAdd 推断。
 // quickAdd **不再登记进字典**——推断出的 def 只用于封装本次值，
 // 写后由 upsertEntryFields 把条目自身的占位行归正（type/label/spec）。
-import { loadStore, mutateStore, entryStructures, upsertEntryFields, detachEntryField, removeEntryFieldRow, isDetachedField, type EntryFieldView, type Store, type StoreEntry, type StoreSection } from '../../core/store.ts';
+import { loadStore, mutateStore, entryStructures, upsertEntryFields, detachEntryField, removeEntryFieldRow, updateEntryFieldRow, isDetachedField, type EntryFieldView, type Store, type StoreEntry, type StoreSection } from '../../core/store.ts';
 import { assertFieldKey } from '../../core/paths.ts';
 import { badInput, conflict, notFound } from '../../core/errors.ts';
 import { SCALAR_FIELD_TYPES, SOURCE_FIELD, SOURCE_GROUP, findKvSection, findSection, inferFieldType, instantiateTemplate, isSensitiveField, looksSecretish, sectionNames } from '../../core/fields.ts';
@@ -1269,6 +1269,71 @@ export function renderEntryRemoveField(d: Awaited<ReturnType<typeof removeEntryF
       ? `已删除扩展字段「${x.field?.label}」(${x.field?.key})——行与值一并删除，不可恢复`
       : `已从本条目移除模板字段「${x.field?.label}」(${x.field?.key})——值仍保留，用 nx-sk entry remove-field ${x.id} --key ${x.field?.key} --restore 找回`;
   return `${head}\n${renderEntryGet(d as unknown as Awaited<ReturnType<typeof getEntry>>)}`;
+}
+
+/**
+ * entry.field-update：改条目结构行的**属性**（任务 #24 验收反馈，块头「⋯ → 编辑字段」）。
+ *
+ * 只改这一条的显示名与描述（label / hint），**不动栏目字典、不动值**——
+ * 与 add-field / remove-field 同一条写时复制纪律：条目是独立的一页，
+ * 模板只在创建时初始化它。要改整栏目的字典请用 `section update --set-field`。
+ */
+export async function updateEntryFieldDef(ref: unknown, ctx: {
+  key?: unknown; label?: unknown; hint?: unknown; section?: string; 'dry-run'?: boolean;
+} = {}) {
+  const label = ctx.label === undefined ? undefined : String(ctx.label).trim();
+  const hint = ctx.hint === undefined ? undefined : String(ctx.hint);
+  if (label === undefined && hint === undefined) {
+    throw badInput('没有要改的属性：给 --label（显示名）或 --hint（描述）');
+  }
+  if (label !== undefined && !label) throw badInput('--label 不能为空（要恢复成 key 请显式传 key）');
+  const store = await loadStore();
+  const target = resolveEntry(store, ref, ctx.section);
+  const sec = mustFindSection(store, target.section);
+  const rows = entryStructures(store).get(target.id) || [];
+  const row = findOwnRow(rows, ctx.key);
+  if (!row) {
+    throw notFound(`条目「${target.title || target.id}」没有字段: ${String(ctx.key ?? '').trim()}`);
+  }
+  if (row.key === SOURCE_FIELD.key) {
+    throw badInput(`「${SOURCE_FIELD.label}」是每个条目自带的内置字段（与栏目字典同一条纪律），不给改属性。`);
+  }
+  if (isDetachedField(row)) {
+    throw conflict(`字段「${row.label || row.key}」已从本条目移除——先恢复（entry remove-field --restore）再改属性`);
+  }
+  const before = { key: row.key, label: row.label || row.key, hint: row.hint || '' };
+  const after = { key: row.key, label: label ?? before.label, hint: hint ?? before.hint };
+  if (before.label === after.label && before.hint === after.hint) {
+    return { status: 'skipped', reason: 'unchanged', entry: target.id, field: after };
+  }
+  if (ctx['dry-run']) {
+    return { status: 'skipped', dryRun: true, entry: target.id, before, wouldUpdate: after };
+  }
+  const changed = await updateEntryFieldRow(target.id, row.id, {
+    label: label !== undefined ? label : undefined,
+    hint: hint !== undefined ? hint : undefined,
+  });
+  if (!changed) throw notFound(`找不到条目结构行: ${row.id}`);
+  const got = await getEntry(target.id, { section: sec.id });
+  return { ...got, updated: true, field: after, before };
+}
+
+export function renderEntryUpdateField(d: Awaited<ReturnType<typeof updateEntryFieldDef>>) {
+  const x = d as unknown as {
+    status?: string; reason?: string; dryRun?: boolean; entry?: string;
+    field?: { key: string; label: string; hint: string };
+    before?: { key: string; label: string; hint: string };
+    wouldUpdate?: { key: string; label: string; hint: string };
+  };
+  if (x.status === 'skipped' && x.reason === 'unchanged') {
+    return `没有改动：字段「${x.field?.label}」(${x.field?.key}) 的属性已经是这样`;
+  }
+  if (x.status === 'skipped') {
+    return `试运行（未落盘）：将把条目 ${String(x.entry)} 的字段「${x.before?.label}」改为「${x.wouldUpdate?.label}」`
+      + (x.wouldUpdate?.hint !== x.before?.hint ? ` · 描述一并更新` : '');
+  }
+  return `已更新字段「${x.field?.label}」(${x.field?.key}) 的属性（仅本条目，栏目字典与其他条目不受影响）`
+    + `\n${renderEntryGet(d as unknown as Awaited<ReturnType<typeof getEntry>>)}`;
 }
 
 // —— 表格字段（table）的现值 ——

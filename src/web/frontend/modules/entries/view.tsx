@@ -6,6 +6,7 @@ import { useStore } from '../../store.tsx';
 import { CliHints, Empty, Modal, Tag } from '../../components/ui.tsx';
 import BlockBoard from '../../components/blockBoard.tsx';
 import type { BoardGroup } from '../../components/blockBoard.tsx';
+import { FieldEditModal, FieldInfoModal } from '../../components/fieldInfo.tsx';
 import { reconcileLayout, sameLayout } from '../../../../shared/blockLayout.ts';
 import type { BlockLayout } from '../../../../shared/blockLayout.ts';
 import type { FieldDef } from '../../../../shared/fields/types.ts';
@@ -130,6 +131,9 @@ export default function SectionView({ sectionId: rawId, listHidden = false }: Vi
   // （CLI/agent 的 --set 未知键自动登记通路不受影响，退役的只是这块 UI。）
   const [af, setAf] = useState<{ key: string; label: string; type: string; group: string; value: string } | null>(null);
   const [afBusy, setAfBusy] = useState(false);
+  // 任务 #24：块头「⋯」菜单的两个弹窗——查看（只读详情）/ 编辑（改本条的显示名与描述）
+  const [fieldView, setFieldView] = useState<{ def: FieldDef } | null>(null);
+  const [fieldEdit, setFieldEdit] = useState<{ def: FieldDef } | null>(null);
   // 栏目 ZIP：zip = { fileName, buffer, preview }（buffer 用于确认时再 POST 一次，服务端不存状态）
   const [zip, setZip] = useState<ZipState | null>(null);
   // 加密包先问口令：ask = { fileName, buffer }
@@ -368,6 +372,13 @@ export default function SectionView({ sectionId: rawId, listHidden = false }: Vi
     await load(draft.id);
     await reload();
   });
+
+  // 任务 #24：块头「⋯」三件事。查看/编辑只是开弹窗（不发请求）；删除沿用 removeField 的确认与语义。
+  const fieldActions = {
+    view: (_key: string, def: FieldDef) => setFieldView({ def }),
+    edit: (_key: string, def: FieldDef) => setFieldEdit({ def }),
+    remove: (key: string, def: FieldDef) => { void removeField(key, def); },
+  };
 
   const restoreField = guard(async (key: string, label: string) => {
     if (!draft) return;
@@ -727,7 +738,7 @@ export default function SectionView({ sectionId: rawId, listHidden = false }: Vi
                 entryTitle={current?.title || draft.title}
                 sectionId={sectionId}
                 entryId={draft.id}
-                onRemoveField={removeField}
+                fieldActions={fieldActions}
               />
 
               <div className="rowgap pad">
@@ -841,6 +852,26 @@ export default function SectionView({ sectionId: rawId, listHidden = false }: Vi
             );
           })()}
         </Modal>
+      ) : null}
+
+      {fieldView && draft ? (
+        <FieldInfoModal
+          entryId={draft.id}
+          def={fieldView.def}
+          value={draft.values?.[fieldView.def.key]}
+          sectionTitle={data?.section.title}
+          entryTitle={current?.title || draft.title}
+          onClose={() => setFieldView(null)}
+        />
+      ) : null}
+
+      {fieldEdit && draft ? (
+        <FieldEditModal
+          entryId={draft.id}
+          def={fieldEdit.def}
+          onClose={() => setFieldEdit(null)}
+          onSaved={async () => { await load(draft.id); await reload(); }}
+        />
       ) : null}
 
       {af ? (

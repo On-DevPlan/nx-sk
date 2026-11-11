@@ -11,7 +11,7 @@
 // 导出 API 与 Store 对象形状保持不变（这是全后端的磁盘纪律边界，见各模块文件头注释）。
 import { dbFile, storeFile } from './paths.ts';
 import { openAndBootstrap } from './db/bootstrap.ts';
-import { readStore, writeStore, upsertEntryFieldRows, propagateSectionTemplate, setEntryFieldDetached, deleteEntryFieldRow } from './db/repo.ts';
+import { readStore, writeStore, upsertEntryFieldRows, propagateSectionTemplate, setEntryFieldDetached, deleteEntryFieldRow, updateEntryFieldDef } from './db/repo.ts';
 import { fileHasContent } from './db/migrator.ts';
 import { setDefaultDb, tx } from './db/tx.ts';
 import { normalize, type Store, type EntryFieldView } from './store-shape.ts';
@@ -161,6 +161,17 @@ export async function upsertEntryFields(entryId: string, defs: FieldDef[]): Prom
 export async function detachEntryField(entryId: string, rowId: string, detached: boolean): Promise<boolean> {
   const conn = ensureDb();
   return tx((db) => setEntryFieldDetached(db, entryId, rowId, detached), { db: conn });
+}
+
+/**
+ * 条目结构行的属性更新（任务 #24：块头「⋯ → 编辑字段」）。
+ * 与 detach/remove 同一口径：只写结构、rev 前进；调用方要新形状就重新 getEntry。
+ */
+export async function updateEntryFieldRow(
+  entryId: string, rowId: string, patch: { label?: string; hint?: string },
+): Promise<boolean> {
+  const conn = ensureDb();
+  return tx((db) => updateEntryFieldDef(db, entryId, rowId, patch), { db: conn });
 }
 
 /** 扩展行硬删（field_data/边随 CASCADE）；行不存在返回 false。 */
