@@ -1,0 +1,5 @@
+{
+  "enabledPlugins": {
+    "ts-lsp@local": true
+  }
+}

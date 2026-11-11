@@ -16,7 +16,22 @@
 import react from 'eslint-plugin-react';
 import reactHooks from 'eslint-plugin-react-hooks';
 import tseslint from 'typescript-eslint';
-import { readdirSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
+import { lineBudgetWarn, lineBudgetApprove, lineBudgetHard, lineBudgetHardDeferred } from './eslint-rules/line-budget.js';
+
+// 白名单用 readFileSync 读，不用 `import ... with { type: 'json' }`——
+// 后者要 Node 20.10+，而 package.json 声明的 engines 是 >=18.17。
+// `_comment` 只给人看，不进规则 options（schema 是 additionalProperties: false）。
+const lineBudgetConfig = JSON.parse(
+  readFileSync(new URL('./eslint-line-budget.json', import.meta.url), 'utf8'),
+);
+const lineBudgetOptions = {
+  warn: lineBudgetConfig.warn,
+  approve: lineBudgetConfig.approve,
+  hard: lineBudgetConfig.hard,
+  approved: lineBudgetConfig.approved,
+  deferred: lineBudgetConfig.deferred,
+};
 
 const SOURCE_FILES = ['**/*.{js,mjs,cjs,jsx,ts,tsx}'];
 
@@ -135,6 +150,36 @@ export default [
           message: '前端只能 import web/frontend 下的组件与 api 客户端，以及 src/shared 的纯函数；后端模块属于另一个运行时。',
         },
       ] }],
+    },
+  },
+
+  // 单文件行数预算——四档（提醒 / 要审批 / 硬上限 / 硬上限的存量过渡）。
+  //
+  // 为什么是本地规则而不是内置 max-lines：内置那条一个文件只报一条消息、只认一个 max，
+  // 表达不了分段语义；而且 ESLint 的严重级别是按规则 ID 定的，所以「同规则不同档不同级」
+  // 必须拆成不同规则 ID（见 eslint-rules/line-budget.js）。
+  //
+  // 白名单在 eslint-line-budget.json（可 code review），不在代码里写死。
+  // 只管 src/：tests 与 scripts 本来就允许长（smoke.mjs 583 行、link-local.mjs 527 行），
+  // 卡它们只会逼人把测试拆碎，不解决任何问题。
+  {
+    files: ['src/**/*.{js,mjs,cjs,jsx,ts,tsx}'],
+    plugins: {
+      local: {
+        rules: {
+          'line-budget-warn': lineBudgetWarn,
+          'line-budget-approve': lineBudgetApprove,
+          'line-budget-hard': lineBudgetHard,
+          'line-budget-hard-deferred': lineBudgetHardDeferred,
+        },
+      },
+    },
+    rules: {
+      'local/line-budget-warn': ['warn', lineBudgetOptions],
+      'local/line-budget-approve': ['error', lineBudgetOptions],
+      'local/line-budget-hard': ['error', lineBudgetOptions],
+      // 已登记 deferred 的存量文件降级为 warn；未登记的走上面那条 error。
+      'local/line-budget-hard-deferred': ['warn', lineBudgetOptions],
     },
   },
 ];

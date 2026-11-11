@@ -1,0 +1,53 @@
+{
+  "_comment": [
+    "文件行数预算的白名单。eslint-rules/line-budget.js 按这个文件放行/降级。",
+    "三档口径（行数含注释与空行，与编辑器行号一致）：",
+    "  601~800  warn    —— 提醒档，不需要登记",
+    "  801~1000 error   —— 需要 approved 登记理由",
+    "  >1000    error   —— 硬上限；存量过渡走 deferred 登记，新文件不许进名单",
+    "",
+    "approved：801~1000 档的放行凭证。文件拆到 800 行以内后请删掉对应记录。",
+    "deferred：>1000 档的**存量过渡**豁免。降级为 warn，但 reason 必须写明拆分计划。",
+    "        拆分完成后必须删掉这条记录，否则豁免会永久化。",
+    "",
+    "两份名单都要走 code review —— 这是「白名单」而不是「免死金牌」。",
+    "",
+    "tests/unit/line-budget.test.mjs 会对本文件做陈旧性断言：",
+    "指向不存在的文件、给已合规文件登记豁免、档位写反，都会让单测变红。"
+  ],
+  "warn": 600,
+  "approve": 800,
+  "hard": 1000,
+  "approved": [
+    {
+      "path": "src/shared/table.ts",
+      "reason": "表格公式引擎（编译/求值/统计/渲染）。docs/refactor-plan.md「明确不动」清单已列它；拆分会动公式语义，单独排期。"
+    },
+    {
+      "path": "src/modules/sections/service.ts",
+      "reason": "栏目 CRUD + 字段定义校验 + 分组管理。校验逻辑与 CRUD 可分离，拆分后降到 800 以下。"
+    },
+    {
+      "path": "src/web/frontend/modules/entries/view.tsx",
+      "reason": "条目面板视图：列表 + 详情 + 扩展字段表单。可拆出详情面板组件，拆分后降到 800 以下。"
+    },
+    {
+      "path": "src/web/frontend/components/fields/shortcutLibrary/ShortcutLibrary.tsx",
+      "reason": "快捷键库面板（0.41 新增）。键位展示与录制逻辑可分离，拆分后降到 800 以下。"
+    }
+  ],
+  "deferred": [
+    {
+      "path": "src/core/fields.ts",
+      "reason": "字段字典：填写策略函数 + 字段模板数据（TEMPLATES/JOB_FIELDS/DEMO_FIELDS）。模板数据外移到 core/fields/templates.ts 后即可降到 800 以下 —— 拆分后删掉本条。"
+    },
+    {
+      "path": "src/modules/entries/service.ts",
+      "reason": "条目服务里混着三个子域：条目 CRUD、键值账本（key*/keysLedger）、资料袋（*Source*）。前两个可拆成 modules/entries/ledger.ts 与 source.ts；拆分后删掉本条。"
+    },
+    {
+      "path": "src/modules/transfer/service.ts",
+      "reason": "导入导出编排。buildSectionZip / previewImport+applyImport / buildBundleZip 三段可分离；拆分后删掉本条。"
+    }
+  ]
+}

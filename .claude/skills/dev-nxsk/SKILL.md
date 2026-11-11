@@ -56,17 +56,23 @@ node --test && node tests/smoke.mjs           # 单测 + 端到端冒烟（都�
 npx eslint . && npx vite build && node --test && node tests/smoke.mjs
 ```
 
-## 四条硬约束（违反必红）
+## 五条硬约束（违反必红）
 
 1. **能力只写在 action 里**：`src/modules/<id>/index.js` 的 `actions[]` 同时声明 `cli` 与 `http`，
    CLI 与面板共用同一份 `run`/`render`。**不许在 `view.jsx` 里另写一套 `/api` 调用去干 action 没做的事**——
    `tests/unit/consistency.test.mjs` 会核对视图里出现的 `/api` 字面量都能反查到 action。
 2. **结构是数据**：分组、字段字典、版式都是 store 里的数据，改它们一律走 `section update` 那批 action；
    前端不许硬编码「某个栏目有某个字段」。
-3. **归一化收口在 `src/core/store.js`**：任何新字段/新结构都要在这里被读时修正（老 store 必须能读），
+3. **归一化收口在 `src/core/store.js`**：任何新字段/新结构都要在这里被读时修正（老数据必须能读），
    而不是让各页面各自兜底。
 4. **测试门禁**：`consistency.test.mjs` 钉死「模块目录 ↔ 后端注册表 ↔ 前端 VIEWS ↔ 视图里的 /api」四张表，
    并禁止面板源码里出现 emoji（注释里也不行）。
+5. **单文件行数预算**：`eslint-rules/line-budget.js` 按三档卡（600 提醒 / 800 要审批 / 1000 硬上限），
+   白名单在 `eslint-line-budget.json`。
+   - 新文件**超过 600 行**就会出 warning，超过 800 行**直接报错**（除非在 `approved` 里登记理由）。
+   - `deferred` 是给 >1000 的**存量**文件的过渡豁免，拆完必须删掉那条记录。
+   - `tests/unit/line-budget.test.mjs` 会断言名单没过期（文件改名/已合规却还登记着 → 单测变红）。
+   - **不要为了过 lint 机械拆文件**——按职责边界拆（子域 / 子组件），别按行数切。
 
 ## 检查清单（收尾自查）
 
@@ -76,6 +82,7 @@ npx eslint . && npx vite build && node --test && node tests/smoke.mjs
 - [ ] `npx eslint . && npx vite build && node --test && node tests/smoke.mjs` 全绿
 - [ ] 用户可见行为变了 → 同步 `CHANGELOG.md` 与 `assets/nx-sk/references/*.md`（后者是用户向文档）
 - [ ] 新增/修改的模块没有跨模块 `import`（只能依赖 `core/`、`shared/`、`../settings/service.js`）
+- [ ] 新文件没超 600 行；超了先问「能不能按职责拆」，别直接登记白名单
 
 ## pitfalls（真实踩过的坑）
 
