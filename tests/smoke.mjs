@@ -24,9 +24,9 @@ const step = (name, ok, extra = '') => {
   if (!ok) throw new Error(`断言失败: ${name}`);
 };
 
-function cli(args, { expectFail = false } = {}) {
+function cli(args, { expectFail = false, extraEnv = null } = {}) {
   return new Promise((resolve) => {
-    const child = spawn(NODE, [BIN, ...args], { env, cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(NODE, [BIN, ...args], { env: extraEnv ? { ...env, ...extraEnv } : env, cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'] });
     let out = '';
     let err = '';
     child.stdout.on('data', (c) => { out += c; });
@@ -461,6 +461,19 @@ const first = await new Promise((resolve, reject) => {
 const info = JSON.parse(first);
 step('serve --json 打出地址', /^http:\/\/127\.0\.0\.1:\d+$/.test(info.url), info.url);
 
+// ── #22：serve 在跑 → CLI 走面板代理（portfile 指路，本进程不碰库） ──
+const PROXY_DEBUG = { NX_SK_CLI_PROXY_DEBUG: '1' };
+const proxied = await cli(['section', 'list', '--json'], { extraEnv: PROXY_DEBUG });
+step('serve 在跑：CLI 经面板代理执行（stderr 观测行带真实端口）',
+  proxied.err.includes('经面板代理') && proxied.err.includes(`:${info.port}`), proxied.err);
+const proxiedJson = JSON.parse(proxied.out);
+const directRun = await cli(['section', 'list', '--json', '--direct'], { extraEnv: PROXY_DEBUG });
+step('--direct 跳过代理（本进程直跑）', !directRun.err.includes('经面板代理'));
+step('代理与直跑输出等价（同库同数据）',
+  JSON.stringify(proxiedJson.sections.map((s) => s.id).sort()) === JSON.stringify(JSON.parse(directRun.out).sections.map((s) => s.id).sort()));
+const portfile = JSON.parse(await readFile(join(home, 'serve.json'), 'utf8'));
+step('serve 写了端口档案（port + pid）', portfile.port === info.port && portfile.pid > 0, JSON.stringify(portfile));
+
 const j = async (path, opts = {}) => {
   const res = await fetch(info.url + path, {
     method: opts.method || 'GET',
@@ -580,6 +593,11 @@ step('SPA 回退到 index.html 或提示', [200, 503].includes(spa.status));
 
 serve.kill('SIGTERM');
 await new Promise((r) => setTimeout(r, 300));
+
+// #22 反向路径：面板没了（Windows 硬杀留下的陈旧 portfile 由 pid 校验兜底）→ CLI 直跑
+const afterKill = await cli(['section', 'list', '--json'], { extraEnv: PROXY_DEBUG });
+step('serve 不在跑：CLI 直跑（无代理观测行，结果照常）',
+  !afterKill.err.includes('经面板代理') && JSON.parse(afterKill.out).sections.length > 0);
 
 // ── 3. 收尾：真删（只删测试自己造的那条） ───────────────────
 process.stdout.write('\n[3] 真删\n');
