@@ -28,6 +28,8 @@ export const FIELD_SEAL: Record<FieldType, SealHook | null> = {
   secret: sealScalar,
   file: null,
   md: null,
+  // debug 引用本身不敏感（被引用内容才敏感，那条边界在 resource resolve 出口执行）
+  debug: null,
 };
 
 /** 取某类型的写入封装；没有类型级逻辑时返回 null（调用方再走敏感标量分支）。 */

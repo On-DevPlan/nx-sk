@@ -14,8 +14,12 @@
  * v3（2026-11-11）：动态结构/写时复制——栏目字段字典降级成模板，每个条目自带 entry_fields
  * 行（结构）+ field_data 行（值）；entries 的 "values" JSON 列退役；entry_attach 改挂
  * entry_field_id；quickAdd 不再污染字典；sync 第二阶段把字典缺行补进存量条目（只增不改）。
+ * v4（2026-11-11）：字段类型去 DB CHECK——fields.type / entry_fields.type 不再被 CHECK IN
+ * 枚举约束（加新字段类型不再需要 schema 迁移）；类型合法性由运行时保证：
+ * validateFieldDef 在定义写入点拒绝未知类型，behaviorOf 按 FIELD_TYPES 分派行为，
+ * shared/fields/types.ts 仍是类型清单的唯一权威。
  */
-export const CURRENT_SCHEMA_VERSION = 3;
+export const CURRENT_SCHEMA_VERSION = 4;
 
 /**
  * 运行时最低 Node 版本。

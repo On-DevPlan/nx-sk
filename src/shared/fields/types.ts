@@ -11,7 +11,7 @@
 /** 字段类型清单。**顺序是可见行为的一部分**（bootstrap 原样下发，面板下拉框照此排序）。 */
 export const FIELD_TYPES = [
   'text', 'textarea', 'number', 'date', 'month', 'bool', 'select', 'tags',
-  'entrylist', 'table', 'source', 'secret', 'file', 'md', 'shortcut',
+  'entrylist', 'table', 'source', 'secret', 'file', 'md', 'shortcut', 'debug',
 ] as const;
 
 export type FieldType = (typeof FIELD_TYPES)[number];
@@ -38,6 +38,7 @@ export const FIELD_TYPE_LABELS: Record<FieldType, string> = {
   secret: '密文',
   file: '附件',
   md: '图文（可贴图）',
+  debug: '资源引用（可检索）',
 };
 
 export type FillPolicy = 'normal' | 'optional' | 'avoid';
@@ -172,7 +173,24 @@ export interface TableFieldDef extends FieldDefBase {
   maxRows?: number;
 }
 
-export type FieldDef = ScalarFieldDef | EntryListFieldDef | TableFieldDef;
+/**
+ * debug（资源引用）：值 = 内部资源定位符（locator）数组，见 shared/locator.ts。
+ * 引用型字段——格子指向栏目/条目/字段/附件，悬浮可预览被引用内容。
+ * 引用本身不敏感（sensitive=false），被引用的内容才可能敏感。
+ */
+export interface DebugFieldDef extends FieldDefBase {
+  type: 'debug';
+}
+
+/** 引用字段的存储形状（自描述文档，与 table 的 TableDoc 同一条纪律）。 */
+export interface RefDoc {
+  v: number;
+  refs: string[];
+  /** coerce 时被丢弃的非法引用（原文），只在这次写入产生；空数组时不落这个键。 */
+  warnings?: string[];
+}
+
+export type FieldDef = ScalarFieldDef | EntryListFieldDef | TableFieldDef | DebugFieldDef;
 
 /** 字段值的宽松联合：历史数据与导入包可能带各种形态，读取侧必须照单全收。 */
 export type FieldValue =
@@ -184,6 +202,7 @@ export type FieldValue =
   | string[]
   | Record<string, unknown>[]
   | TableDoc
+  | RefDoc
   | ShortcutGroup[]
   | SourceItem[];
 

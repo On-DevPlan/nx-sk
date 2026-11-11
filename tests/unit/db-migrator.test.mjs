@@ -12,11 +12,11 @@ const { planMigrationPath, DIRECT_EDGES } = await import('../../src/core/db/migr
 const { CURRENT_SCHEMA_VERSION } = await import('../../src/core/db/version.ts');
 const { tx } = await import('../../src/core/db/tx.ts');
 
-test('空库 → 当前版本：建齐表并走完 v1+v2+v3，版本写进 meta.schema_version 与 PRAGMA user_version', () => {
+test('空库 → 当前版本：建齐表并走完 v1+v2+v3+v4，版本写进 meta.schema_version 与 PRAGMA user_version', () => {
   const db = openRaw(':memory:');
   assert.equal(countTables(db), 0);
   const applied = migrate(db, { from: 0 });
-  assert.deepEqual(applied, [1, 2, 3]);
+  assert.deepEqual(applied, [1, 2, 3, 4]);
   assert.equal(schemaVersion(db), CURRENT_SCHEMA_VERSION);
   assert.equal(userVersion(db), CURRENT_SCHEMA_VERSION);
   assert.equal(getMeta(db, 'schema_version'), String(CURRENT_SCHEMA_VERSION));
@@ -34,6 +34,11 @@ test('空库 → 当前版本：建齐表并走完 v1+v2+v3，版本写进 meta.
   assert.ok(!entryCols.includes('values'), 'v3 的 entries 不该再有 values 列');
   const edgeCols = db.all("SELECT name FROM pragma_table_info('entry_attach')").map((r) => r.name);
   assert.ok(!edgeCols.includes('field_key') && edgeCols.includes('entry_field_id'), '边表应改挂 entry_field_id');
+  // v4 裁决：字段类型不再被 DB CHECK 约束（加新类型不需要 schema 迁移）
+  for (const t of ['fields', 'entry_fields']) {
+    const sql = String(db.get("SELECT sql FROM sqlite_master WHERE name = :t", { t }).sql);
+    assert.ok(!/CHECK\s*\(\s*type\s+IN/i.test(sql), `${t} 不该再有 type 的 CHECK IN 枚举`);
+  }
   db.exec("INSERT INTO sections (id, title, description, \"order\", kv, title_label, created_at, updated_at) VALUES ('s','S','',50,0,'名称','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z')");
   db.exec("INSERT INTO entries (id, section_id, title, tags, created_at, updated_at) VALUES ('e1','s','t','[]','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z')");
   db.exec("INSERT INTO entry_fields (id, entry_id, key, label, type, spec, position) VALUES ('ef_x','e1','x','X','text','{\"key\":\"x\"}',0)");

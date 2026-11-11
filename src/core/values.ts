@@ -10,10 +10,18 @@ export function isBlank(v: unknown): boolean {
   if (Array.isArray(v)) return v.length === 0;
   // 表格文档：一行都没有就算没填（有列没数据不算填了内容）。
   // 密文对象没有 rows，不受这条影响。
-  if (typeof v === 'object' && Array.isArray((v as { rows?: unknown }).rows)) {
-    return (v as { rows: unknown[] }).rows.length === 0;
+  if (typeof v === 'object' && !isRefDoc(v)) {
+    const rows = (v as { rows?: unknown }).rows;
+    if (Array.isArray(rows)) return rows.length === 0;
   }
+  // 引用文档（debug）：一个引用都没有 = 没填（与空表同一判据）。
+  if (isRefDoc(v)) return (v as { refs: unknown[] }).refs.length === 0;
   return String(v).trim() === '';
+}
+
+/** 文档型引用值（debug 字段）的形状判据：{ v, refs: [] }。 */
+function isRefDoc(v: unknown): v is { refs: unknown[] } {
+  return !!v && typeof v === 'object' && Array.isArray((v as { refs?: unknown }).refs);
 }
 
 /**
@@ -27,6 +35,8 @@ export function isStoredEmpty(v: unknown): boolean {
   if (v === null || v === undefined) return true;
   if (Array.isArray(v)) return v.length === 0;
   if (typeof v === 'object') {
+    // 引用文档（debug）：refs 空 = 真没东西可带（引用没有「骨架」可言，与空表不同）。
+    if (isRefDoc(v)) return (v as { refs: unknown[] }).refs.length === 0;
     const rows = (v as { rows?: unknown }).rows;
     if (Array.isArray(rows)) {
       const cols = (v as { columns?: unknown }).columns;
