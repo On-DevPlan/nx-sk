@@ -45,19 +45,19 @@ function loadCollapsed(): boolean {
   }
 }
 
-/** antd 主题对齐本面板的单色系：主色即墨色，边线用同一套 rgba。 */
+/** antd 主题对齐本面板的 Notion 口径单色系：主色即墨色，弱字色与边线用同一套 token。 */
 const ANTD_THEME: ThemeConfig = {
   token: {
     colorPrimary: '#14161a',
     colorInfo: '#14161a',
     colorText: '#14161a',
-    colorTextSecondary: '#8b9096',
+    colorTextSecondary: '#7d7a75',
     borderRadius: 6,
     fontSize: 13,
     controlHeight: 28,
-    colorBorder: 'rgba(20, 22, 26, .14)',
-    colorBorderSecondary: 'rgba(20, 22, 26, .085)',
-    colorBgContainer: '#fff',
+    colorBorder: 'rgba(55, 53, 47, .16)',
+    colorBorderSecondary: 'rgba(55, 53, 47, .09)',
+    colorBgContainer: '#ffffff',
   },
 };
 
