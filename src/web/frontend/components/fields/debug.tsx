@@ -22,6 +22,7 @@ import { createPortal } from 'react-dom';
 import { api } from '../../api/client.ts';
 import { useStore } from '../../store.tsx';
 import { copyText } from '../../entryRef.ts';
+import { controlOf } from './index.ts';
 import type { ControlProps } from './types.ts';
 
 /** resolve 出口返回的摘要（面板只读这些键）。 */
@@ -41,6 +42,24 @@ interface SearchHit {
 }
 
 const KIND_LABEL: Record<string, string> = { section: '栏目', entry: '条目', field: '字段', file: '附件' };
+
+/**
+ * 悬浮预览里**直接渲染整块**的类型（任务 #25 验收反馈：悬浮要「加载对应的块的整体 field 进行显示」）。
+ *
+ * 只收轻量控件：它们挂载即渲染、无外部拉取、无监听器。md / table / file / source / debug
+ * 要么会拉附件或起编辑器，要么会递归（debug 里再渲染 debug），所以退回文本预览——
+ * 那几类本来也不是「一个输入框」的形态，文本反而更清楚。
+ */
+const PREVIEW_CONTROL_TYPES = new Set([
+  'text', 'textarea', 'number', 'date', 'month', 'bool', 'select', 'tags', 'secret', 'entrylist', 'shortcut',
+]);
+
+/** 值的文本形态（对象走 JSON，空值给一句人话）。 */
+function valueText(v: unknown): string {
+  if (v === null || v === undefined || v === '') return '（空）';
+  const text = typeof v === 'object' ? JSON.stringify(v, null, 2) : String(v);
+  return text.length > 4000 ? `${text.slice(0, 4000)}…` : text;
+}
 
 /**
  * 内联数据板（#21 + #24 验收反馈「内联值要具体内容，不要字段标签」）：
@@ -114,7 +133,10 @@ export function DebugControl({ value, onChange }: ControlProps) {
   const warnings: string[] = Array.isArray((value as any)?.warnings) ? (value as any).warnings : [];
   /** locator → resolve 摘要；`false` = 解析失败（引用已失效）。 */
   const [resolved, setResolved] = useState<Record<string, ResolveInfo | false>>({});
-  const [hover, setHover] = useState<{ locator: string; x: number; y: number } | null>(null);
+  // 悬浮预览 = 底部寄存框（#25）：`locator` 决定加载谁，位置固定在视口底部——
+  // 不再跟着鼠标飘（块体被网格锁着，飘窗既容易出视口，也放不下「整块」）。
+  const [dock, setDock] = useState<{ locator: string } | null>(null);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickQ, setPickQ] = useState('');
   const [pickHits, setPickHits] = useState<SearchHit[]>([]);
@@ -160,25 +182,46 @@ export function DebugControl({ value, onChange }: ControlProps) {
     return () => { el.removeEventListener('click', on); };
   }, [refreshAll]);
 
-  // 悬浮浮层跟着当前 hover 的格子实时定位（滚动/改宽都对）。
-  useEffect(() => {
-    if (!hover) return undefined;
-    const onScroll = () => setHover(null);
-    window.addEventListener('scroll', onScroll, true);
-    return () => window.removeEventListener('scroll', onScroll, true);
-  }, [hover]);
+  // 寄存框的关闭规则：Esc / 页面滚动（框内滚动除外）/ 指针离开格子与框（延迟 260ms，
+  // 留出「从格子移到框里」的那段路——否则想看长内容时一移就灭）。
+  const cancelClose = useCallback(() => {
+    if (closeTimer.current) { clearTimeout(closeTimer.current); closeTimer.current = null; }
+  }, []);
+  const scheduleClose = useCallback(() => {
+    cancelClose();
+    closeTimer.current = setTimeout(() => setDock(null), 260);
+  }, [cancelClose]);
 
-  const showHover = (loc: string, el: HTMLElement | null) => {
-    if (!el) return;
-    const b = el.getBoundingClientRect();
-    setHover({ locator: loc, x: b.left, y: b.bottom + 6 });
-    void refreshOne(loc); // #23：悬浮即实时查值（浮层与格子内联值随结果更新）
+  useEffect(() => {
+    if (!dock) return undefined;
+    const onScroll = (e: Event) => {
+      const t = e.target as HTMLElement | null;
+      if (t && typeof t.closest === 'function' && t.closest('.dbg-dock')) return;
+      setDock(null);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setDock(null); };
+    window.addEventListener('scroll', onScroll, true);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('scroll', onScroll, true);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [dock]);
+
+  useEffect(() => () => { if (closeTimer.current) clearTimeout(closeTimer.current); }, []);
+
+  // #25：**每次进入格子都重新查一次**（同一个格子重复悬浮也算）——用户要的是
+  // 「鼠标一停就是此刻的值」，不是「第一次打开时的值」。
+  const openDock = (loc: string) => {
+    cancelClose();
+    setDock({ locator: loc });
+    void refreshOne(loc);
   };
 
   const removeRef = (loc: string) => {
     const next = refs.filter((r) => r !== loc);
     onChange(next.length ? { v: 1, refs: next } : { v: 1, refs: [] });
-    if (hover?.locator === loc) setHover(null);
+    if (dock?.locator === loc) setDock(null);
   };
 
   const copyLoc = useCallback(async (loc: string) => {
@@ -220,7 +263,7 @@ export function DebugControl({ value, onChange }: ControlProps) {
     return () => window.removeEventListener('keydown', onKey);
   }, [pickerOpen]);
 
-  const hoverInfo = hover ? resolved[hover.locator] : null;
+  const dockInfo = dock ? resolved[dock.locator] : null;
 
   return (
     <div className="dbg-field" ref={rootRef}>
@@ -238,8 +281,8 @@ export function DebugControl({ value, onChange }: ControlProps) {
                 className={`dbg-chip${dead ? ' dead' : ''}`}
                 data-locator={loc}
                 title={dead ? `引用已失效：${loc}` : `${loc}\n（点击复制定位符）`}
-                onMouseEnter={() => showHover(loc, chipRefs.current[loc])}
-                onMouseLeave={() => setHover((h) => (h?.locator === loc ? null : h))}
+                onMouseEnter={() => openDock(loc)}
+                onMouseLeave={scheduleClose}
                 onClick={() => copyLoc(loc)}
               >
                 <span className="dbg-chip-main nowrap">{main}</span>
@@ -260,7 +303,7 @@ export function DebugControl({ value, onChange }: ControlProps) {
 
       <div className="dbg-add-row">
         <button type="button" className="btn small" onClick={() => setPickerOpen((v) => !v)}>＋ 引用资源</button>
-        <span className="hint">格子内联显示内容 · 悬浮看详情 · 点格子复制定位符</span>
+        <span className="hint">格子内联显示内容 · 悬浮在底部预览整块 · 点格子复制定位符</span>
       </div>
 
       {pickerOpen ? (
@@ -294,23 +337,84 @@ export function DebugControl({ value, onChange }: ControlProps) {
         </div>
       ) : null}
 
-      {/* 悬浮预览浮层：portal 到 body（块体被网格锁着，绝对定位会被裁） */}
-      {hover && hoverInfo ? createPortal(
+      {/* 底部寄存框（#25）：portal 到 body；悬浮格子即加载被引用位置，
+          field 引用**直接渲染那一块的控制件**（只读），其余种类给文本摘要 */}
+      {dock ? createPortal(
         <div
-          className="dbg-hover"
-          style={{ left: Math.min(hover.x, window.innerWidth - 320), top: hover.y }}
-          role="tooltip"
+          className="dbg-dock"
+          role="dialog"
           aria-label="引用预览"
+          onMouseEnter={cancelClose}
+          onMouseLeave={scheduleClose}
         >
-          <div className="dbg-hover-head">
-            <span className="tag">{KIND_LABEL[String(hoverInfo.kind)] || String(hoverInfo.kind)}</span>
-            <strong className="nowrap">{String(hoverInfo.title || hover.locator)}</strong>
+          <div className="dbg-dock-head">
+            {dockInfo && typeof dockInfo === 'object' ? (
+              <>
+                <span className="tag">{KIND_LABEL[String(dockInfo.kind)] || String(dockInfo.kind)}</span>
+                <strong className="nowrap">{String(dockInfo.title || dock.locator)}</strong>
+                <span className="dbg-dock-loc mono nowrap" title={dock.locator}>{dock.locator}</span>
+              </>
+            ) : (
+              <>
+                <strong className="nowrap">{dockInfo === false ? '引用已失效' : '加载中…'}</strong>
+                <span className="dbg-dock-loc mono nowrap">{dock.locator}</span>
+              </>
+            )}
+            <span className="right rowgap">
+              <button type="button" className="btn small ghost" onClick={() => copyLoc(dock.locator)}>复制定位符</button>
+              <button type="button" className="btn small ghost" onClick={() => setDock(null)}>关闭</button>
+            </span>
           </div>
-          <div className="dbg-hover-body">{previewLines(hoverInfo)}</div>
-          <div className="dbg-hover-loc mono">{hover.locator}</div>
+          <div className="dbg-dock-body">
+            {dockInfo === false ? (
+              <div className="hint">这个定位符解不到资源（可能已被删除，或引用的条目字段已移除）。</div>
+            ) : dockInfo ? (
+              <DockContent info={dockInfo} />
+            ) : <div className="hint">正在取当前值…</div>}
+          </div>
         </div>,
         document.body,
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * 寄存框正文：field 引用渲染**整块**（标签 + 该类型的真实控件，disabled 只读），
+ * 其它种类沿用文本摘要。被引用位置的当前值由 resolve 的实时结果提供。
+ */
+function DockContent({ info }: { info: ResolveInfo }) {
+  if (info.kind !== 'field') {
+    return <div className="dbg-dock-lines">{previewLines(info)}</div>;
+  }
+  const def = (info.def || {}) as { type?: string; label?: string; key?: string; [k: string]: unknown };
+  const type = String(def.type || 'text');
+  const label = String(def.label || def.key || info.key || '');
+  if (!PREVIEW_CONTROL_TYPES.has(type)) {
+    return (
+      <div className="dbg-dock-block">
+        <div className="dbg-dock-blocklabel">
+          <span>{label}</span>
+          <span className="tag">{type}</span>
+        </div>
+        <pre className="block dbg-dock-pre">{valueText(info.value)}</pre>
+        {info.masked ? <div className="hint">（密文已打码）</div> : null}
+      </div>
+    );
+  }
+  const Control = controlOf(type);
+  return (
+    <div className="dbg-dock-block">
+      <div className="dbg-dock-blocklabel">
+        <span>{label}</span>
+        <span className="tag">{type}</span>
+        {info.masked ? <span className="tag bad">密文</span> : null}
+      </div>
+      {/* fieldset disabled：只读预览——控件仍是真实形态（尺寸/排版/格式化一致），
+          但不接收输入（secret 之外的控件不看 disabled 属性，靠 fieldset 兜住） */}
+      <fieldset className="dbg-dock-frame" disabled>
+        <Control def={def} value={info.value === null || info.value === undefined ? '' : info.value} onChange={() => {}} />
+      </fieldset>
     </div>
   );
 }

@@ -294,10 +294,14 @@ export default function SectionView({ sectionId: rawId, listHidden = false }: Vi
 
   const patchField = (key: string, value: unknown) => setDraft((d) => (d ? { ...d, values: { ...d.values, [key]: value } } : d));
 
+  // 脏值判定的字段集合 = **本条目的结构行**（含条目内自建的扩展字段），
+  // 不是栏目字典。任务 #25 的真根因：只遍历 data.fields 时，扩展字段的改动
+  // 永远不进 dirty → 保存按钮不出现、值也存不下去（debug 引用因此看着「不更新」）。
   const dirty = useMemo(() => {
     if (!draft || !current) return { set: {} as Record<string, unknown>, titleChanged: false, count: 0 };
     const set: Record<string, unknown> = {};
-    for (const f of data?.fields || []) {
+    const defs = current.entryFields?.length ? current.entryFields : (data?.fields || []);
+    for (const f of defs) {
       if (norm(current.values[f.key]) !== norm(draft.values[f.key])) set[f.key] = draft.values[f.key];
     }
     return { set, titleChanged: draft.title !== current.title, count: Object.keys(set).length + (draft.title !== current.title ? 1 : 0) };
