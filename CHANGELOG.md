@@ -2,7 +2,7 @@
 
 本文件格式参考 [Keep a Changelog](https://keepachangelog.com/)，中文正文。
 
-## [Unreleased]
+## 0.40.0 (2026-11-11)
 
 **任务 #16：全局视觉改造——彻底无边框、Notion 配色令牌化。**
 
