@@ -98,8 +98,14 @@ test('导入防丢：栏目/分组/字段/条目/版式/设置逐项在库里一
   assert.deepEqual(JSON.parse(one("SELECT layout FROM sections WHERE id='demo'").layout), wantLayout, 'layout 必须原样（sanitize 后）');
 
   // ③ 密文 blob 逐字节保真（导入层只搬运，不重新加密）
-  assert.deepEqual(JSON.parse(one("SELECT \"values\" v FROM entries WHERE id='e1'").v).pass, CIPHER_1);
-  assert.deepEqual(JSON.parse(one("SELECT \"values\" v FROM entries WHERE id='e2'").v).value, CIPHER_2);
+  //    v3：values 列退役——值逐键在 field_data（JOIN entry_fields 定位键）
+  const dataOf = (entryId, key) => one(
+    `SELECT fd.value v FROM entries e
+     JOIN entry_fields ef ON ef.entry_id = e.id
+     JOIN field_data fd ON fd.entry_field_id = ef.id
+     WHERE e.id = ? AND ef.key = ?`, entryId, key);
+  assert.deepEqual(JSON.parse(dataOf('e1', 'pass').v), CIPHER_1);
+  assert.deepEqual(JSON.parse(dataOf('e2', 'value').v), CIPHER_2);
 
   // ④ 附件上 db：FileRecord → attachments kind='file'，id 原样（values 一字不改）
   assert.equal(one("SELECT COUNT(*) c FROM attachments WHERE kind='file'").c, 2);
@@ -109,7 +115,12 @@ test('导入防丢：栏目/分组/字段/条目/版式/设置逐项在库里一
   assert.equal(fAaa.size, 222);
 
   // ⑤ inline 边从 values 自动重建：file 字段 + md 内联两种载体都要认
-  const edges = all("SELECT entry_id, attachment_id, field_key FROM entry_attach WHERE role='inline' ORDER BY entry_id, field_key");
+  //    （v3：边挂 entry_field_id，entry_id/键 JOIN 回来）
+  const edges = all(`SELECT e.id AS entry_id, ef.key AS field_key, ea.attachment_id
+    FROM entry_attach ea
+    JOIN entry_fields ef ON ef.id = ea.entry_field_id
+    JOIN entries e ON e.id = ef.entry_id
+    WHERE ea.role='inline' ORDER BY e.id, ef.key`);
   assert.deepEqual(edges.map((e) => `${e.entry_id}:${e.field_key}->${e.attachment_id}`),
     ['e1:docs->f_aaa', 'e1:note->f_bbb'], '两条 inline 引用边必须建出来');
 

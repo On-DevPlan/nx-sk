@@ -220,6 +220,12 @@ export function openRaw(dbPath: string, { readOnly = false, busyTimeoutMs = 5000
       exec(sql) {
         try {
           raw.exec(sql);
+          // exec 是 DDL / 事务控制 / PRAGMA 的通道——schema 可能已经变了。
+          // node:sqlite 的已缓存语句**不会刷新列元数据**：实测 v3 迁移里
+          // `SELECT * FROM entries ORDER BY rowid`（apply 搬运）在 DROP+RENAME 之后
+          // 被运行时 readStore 复用，报 "Cannot get name of column 6"（旧 7 列形状）。
+          // 语句缓存只是性能优化，exec 之后整体清空最稳。
+          stmts.clear();
         } catch (err) {
           throw mapSqliteError(err);
         }

@@ -25,39 +25,46 @@ async function copyDb(src, dst) {
   }
 }
 
-test('版本落后升级：migrate/ 里先留 pre-vX-to-vY 快照，数据完好', async () => {
-  // ① homeA：正常首启（建库 + 播种）
-  const homeA = await freshHome('nx-sk-upg-a-');
-  const s1 = await loadStore();
-  assert.equal(s1.sections.length, 1, '播种应有 demo 栏目');
-
-  // ② checkpoint 后把库搬到 homeB，并把 schema_version 改回 0（模拟旧版库）
+test('版本落后升级：真 v2 库升到 v3，migrate/ 里先留 pre-v2-to-v3 快照，数据完好', async () => {
+  // v3 起 entries 没有 values 列、边表挂 entry_field_id——「把 v3 库的版本号改回 0」
+  // 不再等于「模拟旧版库」（v3.sql 的 ALTER/CREATE 会在已升级的库上炸）。
+  // 所以这里用裸 SQL 造一份**真正的 v2 库**（migrate to:2 + 手写 v2 形状的行），
+  // 再交给 facade 升级——钉的就是升级链本身。
+  const { openRaw } = await import('../../src/core/db/driver.ts');
+  const { migrate, setMeta } = await import('../../src/core/db/migrator.ts');
+  const homeB = await mkdtemp(join(tmpdir(), 'nx-sk-upg-v3-'));
+  const dbPath = join(homeB, 'nxsk.db');
   {
-    const ck = new DatabaseSync(join(homeA, 'nxsk.db'));
-    ck.exec('PRAGMA wal_checkpoint(TRUNCATE)');
-    ck.close();
-  }
-  const homeB = await mkdtemp(join(tmpdir(), 'nx-sk-upg-b-'));
-  await copyDb(join(homeA, 'nxsk.db'), join(homeB, 'nxsk.db'));
-  {
-    const tweak = new DatabaseSync(join(homeB, 'nxsk.db'));
-    tweak.prepare("UPDATE meta SET value='0' WHERE key='schema_version'").run();
-    tweak.close();
+    const db = openRaw(dbPath);
+    migrate(db, { to: 2 });
+    setMeta(db, 'store_kind', 'sqlite');
+    setMeta(db, 'schema_version', '2');
+    setMeta(db, 'created_by', 'nx-sk/test-v2');
+    db.run('INSERT INTO sections (id, title, description, "order", kv, title_label, layout, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      ['s', 'S', '', 50, 0, '名称', '{}', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z']);
+    db.run("INSERT INTO fields (section_id, key, label, type, sort, spec) VALUES ('s', 'a', 'A', 'text', 0, '{\"key\":\"a\",\"label\":\"A\",\"type\":\"text\"}')");
+    db.run("INSERT INTO fields (section_id, key, label, type, sort, spec) VALUES ('s', 'b', 'B', 'text', 1, '{\"key\":\"b\",\"label\":\"B\",\"type\":\"text\"}')");
+    db.run(`INSERT INTO entries (id, section_id, title, tags, "values", created_at, updated_at)
+      VALUES ('e1', 's', 'T', '[]', '{"a":"1","ghost":"2"}', '2026-02-01T00:00:00.000Z', '2026-02-02T00:00:00.000Z')`);
+    db.close();
   }
   process.env.NX_SK_HOME = homeB;
   process.env.NX_SK_STORE = join(homeB, 'store.json');
   process.env.NX_SK_STORE_DB = join(homeB, 'nxsk.db');
 
-  // ③ 打开：v0 < CURRENT → 必须先快照再升级；升级后数据原样
+  // 打开：v2 < CURRENT → 必须先快照再升级；升级后数据原样（含字典外的 ghost 键）
   const s2 = await loadStore();
   assert.equal(s2.sections.length, 1, '升级后数据仍在');
-  const snaps = (await fsp.readdir(join(homeB, 'migrate'))).filter((f) => /-pre-v0-to-v\d+\.db$/.test(f));
+  assert.equal(s2.entries[0].values.a, '1');
+  assert.equal(s2.entries[0].values.ghost, '2', '不在字典的键要落成扩展行并原样读回');
+  const snaps = (await fsp.readdir(join(homeB, 'migrate'))).filter((f) => /-pre-v2-to-v3\.db$/.test(f));
   assert.equal(snaps.length, 1, `migrate/ 应有一份升级前快照：${snaps.join(', ')}`);
 
-  // ④ 快照本身是可退回的完整库
+  // 快照本身是可退回的完整 v2 库（values 列还在）
   const probe = new DatabaseSync(join(homeB, 'migrate', snaps[0]), { readOnly: true });
   assert.equal(probe.prepare('SELECT COUNT(*) c FROM sections').get().c, 1, '快照里应有升级前的 sections');
-  assert.equal(probe.prepare("SELECT value FROM meta WHERE key='schema_version'").get().value, '0', '快照停在升级前版本');
+  assert.deepEqual(JSON.parse(probe.prepare(`SELECT "values" v FROM entries WHERE id='e1'`).get().v), { a: '1', ghost: '2' }, '快照停在升级前的 v2 形状');
+  assert.equal(probe.prepare("SELECT value FROM meta WHERE key='schema_version'").get().value, '2', '快照停在升级前版本');
   probe.close();
 });
 

@@ -303,14 +303,18 @@ test('兼容历史单值：字符串仍是单元素列表（读命令不炸、�
   assert.ok((await loadStore()).entries.some((x) => x.id === created.id));
 });
 
-test('未知键写 f_ 形态的值 → 登记成附件字段（不是 tags/text）', async () => {
+test('未知键写 f_ 形态的值 → 落条目自身的附件扩展行（v3：字典不被污染）', async () => {
   const a = await svc.addFile({ path: await makeSource('infer', '推断.pdf', 'infer-bytes') });
   const r = await entries.updateEntry('多附件条目', { section: 'job', set: { 备用附件: `${a.id}` } });
   assert.equal(r.status, 'ok');
   const store = await loadStoreSafe();
   const job = store.sections.find((s) => s.id === 'job');
-  const def = job.fields.find((f) => f.key === '备用附件');
-  assert.equal(def.type, 'file', '按 f_ 前缀推断成附件字段');
+  assert.equal(job.fields.some((f) => f.key === '备用附件'), false, 'quickAdd 不再登记进字典');
+  const { entryStructures } = await import('../../src/core/store.ts');
+  const row = (entryStructures(store).get(r.id) || []).find((x) => x.key === '备用附件');
+  assert.ok(row, '条目应有自己的扩展行');
+  assert.equal(row.templateFieldId, null, '扩展行出身 NULL');
+  assert.equal(row.spec.type, 'file', '按 f_ 前缀推断成附件字段');
   const got = await entries.getEntry('多附件条目', { section: 'job' });
   assert.deepEqual(got.values['备用附件'], [a.id]);
 });

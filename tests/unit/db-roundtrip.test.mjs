@@ -124,7 +124,12 @@ test('inline 边由 fileReferences 重算：三种引用载体都落成 entry_at
   const { openRaw } = await import('../../src/core/db/driver.ts');
   const db = openRaw(process.env.NX_SK_STORE_DB, { readOnly: true });
   try {
-    const edges = db.all("SELECT entry_id, attachment_id, field_key, role FROM entry_attach WHERE role = 'inline' ORDER BY attachment_id, field_key");
+    // v3：边表挂 entry_field_id，entry_id/键要 JOIN 回来（field_key 列已退役）
+    const edges = db.all(`SELECT e.id AS entry_id, ea.attachment_id, ef.key AS field_key
+      FROM entry_attach ea
+      JOIN entry_fields ef ON ef.id = ea.entry_field_id
+      JOIN entries e ON e.id = ef.entry_id
+      WHERE ea.role = 'inline' ORDER BY ea.attachment_id, ef.key`);
     const key = (r) => `${r.entry_id}|${r.attachment_id}|${r.field_key}`;
     const set = new Set(edges.map(key));
     // file 字段两个 id、md 正文一张图、source 袋的 file item 与正文内嵌图——

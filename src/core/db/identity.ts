@@ -10,7 +10,8 @@
 //   url     → att_url_<sha1(小写 url)[0:16]>
 //   section → att_section_<sha1(id)[0:16]>
 //   entry   → att_entry_<sha1(id)[0:16]>
-//   field   → att_field_<sha1(section + ':' + key)[0:16]>（target_key = "<section>:<key>" 复合串）
+//   field   → att_field_<sha1(entry_field id)[0:16]>（v3：target_key = 条目结构行 id；
+//             行 id 本身是 ef_<sha1(entry_id + ':' + key)[0:16]>，确定性派生）
 import { createHash } from 'node:crypto';
 
 /** 资源种类（封闭枚举，与 v1.sql 的 CHECK 同一份清单，由单测钉住漂移）。 */
@@ -28,9 +29,22 @@ function sha1_16(s: string): string {
   return createHash('sha1').update(String(s)).digest('hex').slice(0, 16);
 }
 
-/** field 的复合定位串。 */
+/** field 的复合定位串（v3 里 = entry_fields.template_field_id 的取值口径）。 */
 export function fieldTargetKey(sectionId: unknown, key: unknown): string {
   return `${String(sectionId)}:${String(key)}`;
+}
+
+/**
+ * 条目结构行 id（v3 entry_fields.id）：同一 (条目, 键) 永远算出同一行——
+ * 迁移搬运与运行时写入共用这一个公式，不可能分叉。
+ */
+export function entryFieldId(entryId: unknown, key: unknown): string {
+  return 'ef_' + sha1_16(`${String(entryId)}:${String(key)}`);
+}
+
+/** 条目字段值行 id（v3 field_data.id）：一行结构最多一份值。 */
+export function fieldDataId(entryField: unknown): string {
+  return 'd_' + sha1_16(String(entryField));
 }
 
 export function attIdForUrl(url: unknown): string {
@@ -45,12 +59,13 @@ export function attIdForEntry(entryId: unknown): string {
   return 'att_entry_' + sha1_16(String(entryId));
 }
 
-export function attIdForField(sectionId: unknown, key: unknown): string {
-  return 'att_field_' + sha1_16(fieldTargetKey(sectionId, key));
+/** v3：field 指针挂在**条目结构行**上，入参是 entry_fields.id（entryFieldId 算出来的）。 */
+export function attIdForField(entryField: unknown): string {
+  return 'att_field_' + sha1_16(String(entryField));
 }
 
 /** 按种类算内部指针的 (id, target_kind, target_key)；file/url 不走这里（id 自带）。 */
-export function pointerIdentity(kind: AttachmentKind, ref: { sectionId?: string; key?: string; entryId?: string }): { id: string; targetKind: string; targetKey: string } {
+export function pointerIdentity(kind: AttachmentKind, ref: { sectionId?: string; key?: string; entryId?: string; entryFieldId?: string }): { id: string; targetKind: string; targetKey: string } {
   if (kind === 'section') {
     const id = String(ref.sectionId || '');
     return { id: attIdForSection(id), targetKind: 'section', targetKey: id };
@@ -60,8 +75,8 @@ export function pointerIdentity(kind: AttachmentKind, ref: { sectionId?: string;
     return { id: attIdForEntry(id), targetKind: 'entry', targetKey: id };
   }
   if (kind === 'field') {
-    const tk = fieldTargetKey(ref.sectionId, ref.key);
-    return { id: attIdForField(ref.sectionId, ref.key), targetKind: 'field', targetKey: tk };
+    const tk = String(ref.entryFieldId || '');
+    return { id: attIdForField(tk), targetKind: 'field', targetKey: tk };
   }
   throw new Error(`pointerIdentity 只认内部种类（section/entry/field），收到 ${kind}`);
 }

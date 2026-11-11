@@ -12,28 +12,34 @@ const { planMigrationPath, DIRECT_EDGES } = await import('../../src/core/db/migr
 const { CURRENT_SCHEMA_VERSION } = await import('../../src/core/db/version.ts');
 const { tx } = await import('../../src/core/db/tx.ts');
 
-test('空库 → 当前版本：建齐表并走完 v1+v2，版本写进 meta.schema_version 与 PRAGMA user_version', () => {
+test('空库 → 当前版本：建齐表并走完 v1+v2+v3，版本写进 meta.schema_version 与 PRAGMA user_version', () => {
   const db = openRaw(':memory:');
   assert.equal(countTables(db), 0);
   const applied = migrate(db, { from: 0 });
-  assert.deepEqual(applied, [1, 2]);
+  assert.deepEqual(applied, [1, 2, 3]);
   assert.equal(schemaVersion(db), CURRENT_SCHEMA_VERSION);
   assert.equal(userVersion(db), CURRENT_SCHEMA_VERSION);
   assert.equal(getMeta(db, 'schema_version'), String(CURRENT_SCHEMA_VERSION));
   const names = db.all("SELECT name FROM sqlite_master WHERE type = 'table'").map((r) => r.name);
   for (const t of ['meta', 'settings', 'ui_state', 'sections', 'groups', 'fields', 'entries',
-    'attachments', 'entry_attach']) {
+    'attachments', 'entry_fields', 'field_data', 'entry_attach']) {
     assert.ok(names.includes(t), `缺表 ${t}`);
   }
   // v2 裁决：结构级边表必须已退役，role=source 必须被 CHECK 拒绝
   for (const gone of ['section_attach', 'field_attach']) {
     assert.ok(!names.includes(gone), `${gone} 应已被 v2 删除`);
   }
+  // v3 裁决：values 列退役（entries 不再带它），边表挂 entry_field_id（不再有 field_key）
+  const entryCols = db.all("SELECT name FROM pragma_table_info('entries')").map((r) => r.name);
+  assert.ok(!entryCols.includes('values'), 'v3 的 entries 不该再有 values 列');
+  const edgeCols = db.all("SELECT name FROM pragma_table_info('entry_attach')").map((r) => r.name);
+  assert.ok(!edgeCols.includes('field_key') && edgeCols.includes('entry_field_id'), '边表应改挂 entry_field_id');
   db.exec("INSERT INTO sections (id, title, description, \"order\", kv, title_label, created_at, updated_at) VALUES ('s','S','',50,0,'名称','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z')");
-  db.exec("INSERT INTO entries (id, section_id, title, tags, \"values\", created_at, updated_at) VALUES ('e1','s','t','[]','{}','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z')");
+  db.exec("INSERT INTO entries (id, section_id, title, tags, created_at, updated_at) VALUES ('e1','s','t','[]','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z')");
+  db.exec("INSERT INTO entry_fields (id, entry_id, key, label, type, spec, position) VALUES ('ef_x','e1','x','X','text','{\"key\":\"x\"}',0)");
   db.exec("INSERT INTO attachments (id, kind, name, created_at, updated_at) VALUES ('f_x','file','x','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z')");
-  assert.throws(() => db.exec("INSERT INTO entry_attach (entry_id, attachment_id, field_key, role, position, note, created_at) VALUES ('e1','f_x','x','source',0,'','2026-01-01T00:00:00.000Z')"), /CHECK/, 'role=source 必须被 CHECK 拒绝');
-  db.exec("INSERT INTO entry_attach (entry_id, attachment_id, field_key, role, position, note, created_at) VALUES ('e1','f_x','x','attach',0,'','2026-01-01T00:00:00.000Z')");
+  assert.throws(() => db.exec("INSERT INTO entry_attach (entry_field_id, attachment_id, role, position, note, created_at) VALUES ('ef_x','f_x','source',0,'','2026-01-01T00:00:00.000Z')"), /CHECK/, 'role=source 必须被 CHECK 拒绝');
+  db.exec("INSERT INTO entry_attach (entry_field_id, attachment_id, role, position, note, created_at) VALUES ('ef_x','f_x','attach',0,'','2026-01-01T00:00:00.000Z')");
   db.close();
 });
 
@@ -42,7 +48,7 @@ test('migrate 幂等：已到当前版本的库重跑等于空转', () => {
   migrate(db, { from: 0 });
   assert.deepEqual(migrate(db), [], '第二次不该再执行任何步骤');
   assert.equal(schemaVersion(db), CURRENT_SCHEMA_VERSION);
-  assert.equal(countTables(db), 9);
+  assert.equal(countTables(db), 11);
   db.close();
 });
 

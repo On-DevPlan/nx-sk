@@ -11,15 +11,16 @@
 // 导出 API 与 Store 对象形状保持不变（这是全后端的磁盘纪律边界，见各模块文件头注释）。
 import { dbFile, storeFile } from './paths.ts';
 import { openAndBootstrap } from './db/bootstrap.ts';
-import { readStore, writeStore } from './db/repo.ts';
+import { readStore, writeStore, upsertEntryFieldRows, propagateSectionTemplate } from './db/repo.ts';
 import { fileHasContent } from './db/migrator.ts';
-import { setDefaultDb } from './db/tx.ts';
-import { normalize, type Store } from './store-shape.ts';
+import { setDefaultDb, tx } from './db/tx.ts';
+import { normalize, type Store, type EntryFieldView } from './store-shape.ts';
 import type { Conn } from './db/driver.ts';
+import type { FieldDef } from '../shared/fields/types.ts';
 
 // P6：栏目/条目/设置的形状下沉到 shared，面板与后端共用同一份声明。
 export type { StoreEntry, StoreSection, StoreSettings, SectionGroup } from './store-shape.ts';
-export type { Store } from './store-shape.ts';
+export type { Store, EntryFieldView } from './store-shape.ts';
 export { STORE_VERSION, defaultSettings, normalize } from './store-shape.ts';
 
 // —— 进程级连接 ——
@@ -34,6 +35,18 @@ let cacheMigrationNote: Record<string, unknown> | null = null;
  * 由 mutateStore 显式传 rev，而不是靠对象身份猜。
  */
 const revOf = new WeakMap<object, number>();
+
+/**
+ * 每个**载入出来的 Store 对象**对应的条目自身结构行（schema v3 写时复制）。
+ * 与 revOf 同一条纪律：loadStore 记账，写路径写后重读刷新；
+ * structuredClone 出来的草稿不带——调用方永远拿 loadStore/saveStore 的返回值查。
+ */
+const structuresOf = new WeakMap<object, Map<string, EntryFieldView[]>>();
+
+/** 取某个 Store 对象的条目结构行（entryId → 按 position 排序的行）。没有记账返回空表。 */
+export function entryStructures(store: Store): Map<string, EntryFieldView[]> {
+  return structuresOf.get(store) || new Map<string, EntryFieldView[]>();
+}
 
 /**
  * 打开库（必要时建库 + 导入 store.json / 播种 + 升级）。
@@ -77,10 +90,11 @@ export function migrationNote() {
 export async function loadStore(explicitPath?: string): Promise<Store> {
   void explicitPath;
   const conn = ensureDb();
-  const { raw, rev } = readStore(conn);
+  const { raw, rev, structures } = readStore(conn);
   const store = normalize(raw);
   delete store._migration;
   revOf.set(store, rev);
+  structuresOf.set(store, structures);
   return store;
 }
 
@@ -99,6 +113,10 @@ export async function saveStore(next: Store, explicitPath?: string): Promise<Sto
   const newRev = writeStore(conn, data, { expectedRev: expectedRev ?? null });
   revOf.set(data, newRev);
   revOf.set(next, newRev);
+  // 结构行是 writeStore 物化的产物，不在 Store 对象里——写后重读刷新记账。
+  const { structures } = readStore(conn);
+  structuresOf.set(data, structures);
+  structuresOf.set(next, structures);
   return data;
 }
 
@@ -119,7 +137,28 @@ export async function mutateStore<T>(fn: (draft: Store) => T, explicitPath?: str
   delete data._migration;
   const newRev = writeStore(conn, data, { expectedRev: rev });
   revOf.set(data, newRev);
+  // 写后重读刷新结构行记账（与 saveStore 同一口径）。
+  structuresOf.set(data, readStore(conn).structures);
   return result === undefined ? data : result;
+}
+
+/**
+ * 修正条目自身结构行（quickAdd 之后）：把 writeStore 落的占位行按推断出的
+ * FieldDef 归正（type/label/spec）。独立事务、不动 rev——它写的是「结构」，
+ * 值与形状仍由 Store 对象经 writeStore 收口。
+ */
+export async function upsertEntryFields(entryId: string, defs: FieldDef[]): Promise<void> {
+  const conn = ensureDb();
+  tx((db) => upsertEntryFieldRows(db, entryId, defs), { db: conn });
+}
+
+/**
+ * sync 第二阶段：把栏目字典传播到存量条目的结构行（只增不改）。
+ * 返回 {entries, fieldsAdded, defaultsFilled}（entries = 真的补了东西的条目数）。
+ */
+export async function syncEntryStructures(sectionId: string): Promise<{ entries: number; fieldsAdded: number; defaultsFilled: number }> {
+  const conn = ensureDb();
+  return tx((db) => propagateSectionTemplate(db, sectionId), { db: conn });
 }
 
 /** 存储存在吗：DB 有内容，或旧 store.json 还在等着被导入。 */

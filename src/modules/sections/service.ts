@@ -1,6 +1,7 @@
 // 栏目（section）：一组同构条目的容器 + 一份字段字典。
 // 字典是**数据**不是代码分支，所以 agent 与面板看到的字段永远一致。
-import { loadStore, mutateStore, type Store, type StoreSection } from '../../core/store.ts';
+// v3：字典降级成「模板」——存量条目按自身结构行读写，sync 负责把缺口补进去。
+import { loadStore, mutateStore, entryStructures, syncEntryStructures, type Store, type StoreSection } from '../../core/store.ts';
 import { assertFieldKey, assertSafeId } from '../../core/paths.ts';
 import { badInput, blocked, conflict, notFound } from '../../core/errors.ts';
 import { FILL_POLICIES, FIELD_TYPES, SOURCE_GROUP, ensureSourceBuiltin, findSection, getTemplate, groupFields, instantiateTemplate, mergeTemplate, sectionNames, syncSectionGroups, templateSummaries } from '../../core/fields.ts';
@@ -76,6 +77,10 @@ export function validateFieldDef(raw: any, { allowGroup }: { allowGroup?: string
   if (Array.isArray(raw.options) && raw.options.length) (def as { options?: string[] }).options = raw.options.map(String);
   if (raw.sensitive === true) def.sensitive = true;
   if (Number.isFinite(raw.maxItems)) def.maxItems = raw.maxItems;
+  // v3 模板默认值：sync 补行 / 新建条目没给值时落这个。
+  // null / undefined 都算「没有默认值」（落盘 NULL）——「默认成空」与「没填」在存储上等价，
+  // 没必要区分两种写法。
+  if (raw.defaultValue !== undefined && raw.defaultValue !== null) def.defaultValue = raw.defaultValue;
   // 填写策略：**必须显式放行**。这个函数是白名单，没写在这里的键会被静默丢掉，
   // 而「静默丢掉」在这里的后果是「用户设了不填、完整度照旧算它」——很难查。
   if (raw.fill !== undefined) {
@@ -487,44 +492,76 @@ export async function updateSection(ref: unknown, patch: Record<string, any> = {
 }
 
 /**
- * 按模板补齐栏目字段：把模板里新增、而本栏目还缺的分组与字段补进来（只增不改不删）。
+ * 同步栏目结构（v3 两阶段，都**只增不改不删**）：
  *
- * 用途：栏目字段字典是持久化数据，模板演进不会回溯。用户在模板里加了字段
- * （例如给求职加了 `file` 类型的「附件资料」组），但**已经建好的栏目**看不到——
- * 跑一次 `section sync` 就能把缺口补上，且不动用户已有的定义与数据。
+ *   阶段 1（代码模板 → 栏目字典）：模板里新增、而本栏目还缺的分组与字段补进字典。
+ *     栏目字段字典是持久化数据，模板演进不会回溯——跑一次 sync 把缺口补上。
+ *   阶段 2（栏目字典 → 存量条目结构行）：字典里条目还缺的行补进每个条目
+ *     （写时复制的跟进通道；新行若字典带 defaultValue 则落默认值）。
+ *
+ * 非模板栏目不再报错：阶段 1 跳过，阶段 2 照做（用栏目自己的字典）——
+ * 「add-field 之后让存量条目长出新行」正是这条命令在 v3 的主要用途。
  */
 export async function syncSection(ref: unknown, { 'dry-run': dryRun }: { 'dry-run'?: boolean } = {}) {
   const store = await loadStore();
   const target = mustFind(store, ref);
-  if (!target.template) {
-    throw badInput(`栏目「${target.title}」不是由模板创建的（template 为空），没有可同步的模板；加字段请用 section update --add-field。`);
-  }
-  const tpl = getTemplate(target.template);
-  if (!tpl) throw badInput(`栏目记录了模板 ${target.template}，但该模板已不存在（可能被重命名或移除）。`);
 
-  const { groups, fields, addedGroups, addedFields, changedFields } = mergeTemplate(target, tpl);
+  // ── 阶段 1：代码模板 → 栏目字典 ──
+  let groups = target.groups;
+  let fields = target.fields;
+  let addedGroups: string[] = [];
+  let addedFields: string[] = [];
+  let changedFields: Array<{ key: string; diff: string[] }> = [];
+  if (target.template) {
+    const tpl = getTemplate(target.template);
+    if (!tpl) throw badInput(`栏目记录了模板 ${target.template}，但该模板已不存在（可能被重命名或移除）。`);
+    ({ groups, fields, addedGroups, addedFields, changedFields } = mergeTemplate(target, tpl));
+  }
+
+  // ── 阶段 2：栏目字典 → 存量条目结构行 ──
+  const structures = entryStructures(store);
+  const dictKeys = new Set(fields.map((f) => f.key));
+  const mine = store.entries.filter((e) => e.section === target.id);
+  let entryFieldsToAdd = 0;
+  const gapEntries = new Set<string>();
+  for (const e of mine) {
+    const rowKeys = new Set((structures.get(e.id) || []).map((r) => r.key));
+    for (const k of dictKeys) {
+      if (!rowKeys.has(k)) { entryFieldsToAdd += 1; gapEntries.add(e.id); }
+    }
+  }
+
   // 漂移只是**提示**：定义归栏目，sync 绝不覆盖用户改过的 label/hint/fill。
-  // upToDate 仍只看「有没有可补的」——否则用户改过一个标签，就会永远报「不是最新」。
-  if (!addedGroups.length && !addedFields.length) {
+  // upToDate 看「两阶段都没有可补的」——否则用户改过一个标签，就会永远报「不是最新」。
+  if (!addedGroups.length && !addedFields.length && !entryFieldsToAdd) {
     return {
       status: 'ok', upToDate: true, id: target.id,
       addedGroups: [], addedFields: [], changedFields,
+      entriesSynced: 0, fieldsAdded: 0, defaultsFilled: 0,
       section: summarize(store, target),
     };
   }
   if (dryRun) {
-    return { status: 'skipped', dryRun: true, wouldSync: { groups: addedGroups, fields: addedFields }, changedFields };
+    return {
+      status: 'skipped', dryRun: true,
+      wouldSync: { groups: addedGroups, fields: addedFields, entries: gapEntries.size, entryFields: entryFieldsToAdd },
+      changedFields,
+    };
   }
 
-  await mutateStore((s) => {
-    const t = mustFind(s, ref);
-    t.groups = groups;
-    t.fields = fields;
-    t.updatedAt = nowIso();
-  });
+  if (addedGroups.length || addedFields.length) {
+    await mutateStore((s) => {
+      const t = mustFind(s, ref);
+      t.groups = groups;
+      t.fields = fields;
+      t.updatedAt = nowIso();
+    });
+  }
+  const synced = await syncEntryStructures(target.id);
   const after = await loadStore();
   return {
-    status: 'ok', id: target.id, addedGroups, addedFields, changedFields,
+    status: 'ok', upToDate: false, id: target.id, addedGroups, addedFields, changedFields,
+    entriesSynced: synced.entries, fieldsAdded: synced.fieldsAdded, defaultsFilled: synced.defaultsFilled,
     section: summarize(after, mustFind(after, target.id)),
   };
 }
@@ -557,15 +594,19 @@ export async function dump(ref: unknown, { mask }: { mask?: boolean } = {}) {
   const store = await loadStore();
   const s = mustFind(store, ref);
   const mine = store.entries.filter((e) => e.section === s.id);
-  const decrypt = await sensitiveViewer(s, mine);
+  const structures = entryStructures(store);
+  const decrypt = await sensitiveViewer(s, mine, structures);
   // StoreSection / StoreEntry 与读取侧 SectionLike / EntryLike 是同一份归一化数据，
   // 类型收紧后直接传，不再需要 as unknown as。
-  const data = dumpSection(s, store.entries, { mask: !!mask, decrypt });
+  // v3：条目按**自身结构行**序列化（扩展行的值也带得出去）。
+  const data = dumpSection(s, store.entries, { mask: !!mask, decrypt, structures });
   // 表格字段的**现值**：计算列与统计行都在读的时候现算（不落盘），
   // 所以 `section dump --json` 拿到的合计与面板上看到的合计是同一个数。
   for (const e of data.entries) {
+    const ownRows = structures.get(e.id) || null;
+    const defs = ownRows ? ownRows.map((r) => r.spec as unknown as FieldDef) : s.fields;
     const tables: Record<string, unknown> = {};
-    for (const f of s.fields) {
+    for (const f of defs) {
       if (f.type === 'table') tables[f.key] = computeTable(f, e.values?.[f.key]);
     }
     if (Object.keys(tables).length) e.tables = tables;
@@ -659,6 +700,7 @@ function driftNote(changed: Array<{ key: string; diff: string[] }> | null | unde
  */
 export async function tree() {
   const store = await loadStore();
+  const structures = entryStructures(store);
   return {
     count: store.sections.length,
     totalEntries: store.entries.length,
@@ -669,7 +711,7 @@ export async function tree() {
         // entryList 而不是 entries：summarize 里的 entries 已经是**数量**，
         // 两个字段同名会让「3 条」和「三条记录」在某处悄悄互换。
         entryList: mine.map((e) => {
-          const c = completeness(s, e);
+          const c = completeness(s, e, structures.get(e.id));
           return {
             id: e.id,
             title: e.title,
@@ -788,6 +830,10 @@ interface SectionChangeView {
   section?: { id: string; title: string; fields: number };
   addedFields?: string[];
   addedGroups?: string[];
+  // v3 sync 第二阶段（条目结构行）
+  fieldsAdded?: number;
+  entriesSynced?: number;
+  defaultsFilled?: number;
 }
 
 export function renderSectionChange(d: SectionChangeView) {
@@ -807,13 +853,14 @@ export function renderSectionChange(d: SectionChangeView) {
     return `栏目 ${d.id} 已是最新：模板里没有需要补的分组或字段。${driftNote(d.changedFields)}`;
   }
   if (d.created) return `已创建栏目 ${d.section!.id} · ${d.section!.title}（${d.section!.fields} 字段）`;
-  // sync：只增不改——把模板新增、栏目还缺的分组/字段补进来
-  if (d.addedFields || d.addedGroups) {
+  // sync：只增不改——阶段 1 补字典（模板新增的分组/字段），阶段 2 补存量条目的结构行
+  if (d.addedFields || d.addedGroups || d.fieldsAdded || d.entriesSynced) {
     const bits = [
       d.addedGroups?.length ? `新增分组 ${d.addedGroups.join(', ')}` : '',
       d.addedFields?.length ? `新增字段 ${d.addedFields.join(', ')}` : '',
+      d.fieldsAdded ? `补条目结构行 ${d.fieldsAdded}（${d.entriesSynced || 0} 条目${d.defaultsFilled ? `，默认值 ${d.defaultsFilled} 项` : ''}）` : '',
     ].filter(Boolean).join('；');
-    return `已同步栏目 ${d.id} 的模板字段：${bits}${driftNote(d.changedFields)}`;
+    return `已同步栏目 ${d.id}：${bits}${driftNote(d.changedFields)}`;
   }
   const extra = [
     d.added?.length ? `新增字段 ${d.added.join(', ')}` : '',

@@ -12,6 +12,7 @@ import { displaySensitive } from './sensitive.ts';
 import { behaviorOf } from './fields/registry.ts';
 import type { TableColumnDef } from '../shared/fields/types.ts';
 import type { SerializedEntry } from '../shared/model.ts';
+import type { EntryFieldView } from './store-shape.ts';
 // 版式（块布局）的对齐规则也只有一份：读出去之前先按当前字段自愈一遍，
 // 面板与 CLI 才看到同一份「现在实际怎么摆」。
 import { groupsForLayout, reconcileLayout } from '../shared/blockLayout.ts';
@@ -104,15 +105,19 @@ export type { SerializedEntry };
 /**
  * 条目的**唯一序列化出口**（面板、`entry list`、`section dump` 共用一份）。
  * 两个出口各写一遍序列化，迟早会分叉成「CLI 看得到、面板看不到」。
+ *
+ * v3：传 `ownRows`（条目自身结构行）时按**行**序列化——扩展行里的值也带得出去，
+ * 字典改了 label 也不回刷存量条目；不传则退回栏目字典（旧行为，纯函数调用方不受影响）。
  */
 export function serializeEntry(
   section: SectionLike,
   entry: EntryLike,
-  { mask = false, decrypt }: { mask?: boolean; decrypt?: (blob: unknown) => string } = {},
+  { mask = false, decrypt, ownRows }: { mask?: boolean; decrypt?: (blob: unknown) => string; ownRows?: EntryFieldView[] | null } = {},
 ): SerializedEntry {
-  const c = completeness(section, entry);
+  const defs: ReadField[] = ownRows ? ownRows.map((r) => r.spec as unknown as ReadField) : section.fields;
+  const c = completeness(section, entry, ownRows);
   const values: Record<string, unknown> = {};
-  for (const def of section.fields) {
+  for (const def of defs) {
     const raw = entry.values?.[def.key];
     // 这里用 isStoredEmpty 而不是 isBlank：空表（有列没行）要带出去，否则骨架丢失
     if (isStoredEmpty(raw)) { values[def.key] = null; continue; }
@@ -159,12 +164,18 @@ export function serializeEntry(
  * 否则「还缺 N 项」会永远挂着一批用户主动决定不填的字段，导航就失效了。
  * 它们不会凭空消失：`excluded` 单独列出来，`excludedFilled` 记录其中已填了几个
  * （用户可能没改策略却还是填了值，这个数能提示策略该更新了）。
+ *
+ * v3：传 `ownRows` 时只统计条目**出身模板**的行（templateFieldId 非 NULL）——
+ * 扩展字段是「大胆写」写出来的，不该反过来欠用户一个「未填」。
  */
 export function completeness(
   section: SectionLike | null | undefined,
   entry: { values?: Record<string, unknown> } | null | undefined,
+  ownRows?: EntryFieldView[] | null,
 ) {
-  const fields = section?.fields || [];
+  const fields: ReadField[] = ownRows
+    ? ownRows.filter((r) => r.templateFieldId != null).map((r) => r.spec as unknown as ReadField)
+    : section?.fields || [];
   const counted = fields.filter((d) => !isExcludedField(d));
   const excluded = fields.filter((d) => isExcludedField(d));
   const missing: ReadField[] = [];
@@ -188,7 +199,7 @@ export function completeness(
 export function dumpSection(
   section: SectionLike,
   entries: EntryLike[],
-  { mask = false, decrypt }: { mask?: boolean; decrypt?: (blob: unknown) => string } = {},
+  { mask = false, decrypt, structures }: { mask?: boolean; decrypt?: (blob: unknown) => string; structures?: Map<string, EntryFieldView[]> } = {},
 ) {
   const mine = entries.filter((e) => e.section === section.id);
   return {
@@ -228,6 +239,6 @@ export function dumpSection(
       fillLabel: FILL_LABELS[fillPolicy(x) as keyof typeof FILL_LABELS],
     })),
     count: mine.length,
-    entries: mine.map((e) => serializeEntry(section, e, { mask, decrypt })),
+    entries: mine.map((e) => serializeEntry(section, e, { mask, decrypt, ownRows: structures?.get(e.id) })),
   };
 }

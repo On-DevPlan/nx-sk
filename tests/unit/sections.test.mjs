@@ -131,9 +131,32 @@ test('section sync 把模板新增的 file 字段/分组补给老栏目，且可
   assert.deepEqual(again.addedFields, []);
 });
 
-test('section sync 对非模板栏目报错（没有模板可同步）', async () => {
+// v3：sync 对非模板栏目不再报错——阶段 1 跳过、阶段 2 照做（字典 → 存量条目结构行）。
+// 「add-field 之后跑 sync 把新行补进条目」正是这条命令在写时复制下的主要用途。
+test('section sync 非模板栏目：把字典里条目缺的行补进存量条目（只增不改）', async () => {
+  const entries = await import('../../src/modules/entries/service.ts');
   await service.addSection({ id: 'customsec', title: '自定义', fields: [{ key: 'a', label: 'A', type: 'text' }] });
-  await assert.rejects(service.syncSection('customsec'), /模板/);
+  const e = await entries.addEntry({ section: 'customsec', title: '一条', set: { a: '1' } });
+  assert.equal(e.status, 'ok');
+
+  // 字典加字段：条目**不会自动**长出新行（模板只初始化）
+  await service.updateSection('customsec', { 'add-field': { key: 'b', label: 'B', type: 'text' } });
+  let got = await entries.getEntry('一条', { section: 'customsec' });
+  assert.equal('b' in got.values, false, 'add-field 之后存量条目不该立刻看到 b');
+
+  // sync 第二阶段：把缺的行补进去
+  const r = await service.syncSection('customsec');
+  assert.equal(r.status, 'ok');
+  assert.equal(r.upToDate, false);
+  assert.ok(r.fieldsAdded >= 1, JSON.stringify(r));
+
+  got = await entries.getEntry('一条', { section: 'customsec' });
+  assert.equal(got.values.b, null, 'sync 之后条目长出 b 行（值为空）');
+  assert.ok(got.missing.some((m) => m.key === 'b'), 'b 进入未填清单');
+
+  // 幂等：再跑一次没有可补的
+  const again = await service.syncSection('customsec');
+  assert.equal(again.upToDate, true);
 });
 
 test('renderSectionChange 覆盖 sync / upToDate 分支', () => {

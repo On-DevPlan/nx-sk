@@ -4,6 +4,7 @@
 // type 取值：text | textarea | number | date | month | bool | select | tags | entrylist | table | source | secret | file | md
 
 import { newId } from './ids.ts';
+import { looksLikeSourceList } from './source.ts';
 import type { FieldDef, FieldType } from '../shared/fields/types.ts';
 import type { Store, StoreSection, StoreEntry, SectionGroup } from './store.ts';
 
@@ -933,6 +934,47 @@ export function looksSecretish(key: unknown): boolean {
   if (!s) return false;
   if (SECRETISH_EXACT.has(s.toLowerCase())) return true;
   return SECRETISH_RE.test(s);
+}
+
+// —— 新键的类型推断（quickAdd / 导入包的回退）——
+//
+// 原实现在 entries/service.ts；v3 里 transfer 也要用它（包 values 里不在字典的键
+// 要推断成伪 def 才能做 file 形态的 remap），所以收进 core——规则只此一份。
+
+// 值像不像附件 id（`f_xxxx`）。用来推断「写了一个没登记过的键」该登记成什么类型：
+// `--set 简历附件=f_abc` / `--set 简历附件=f_a,f_b` 应当登记成**附件字段**，
+// 而不是一个普通文本字段或 tags。
+const looksLikeFileId = (x: unknown) => typeof x === 'string' && /^f_[0-9a-z]+$/i.test(x.trim());
+const looksLikeRow = (x: unknown) => !!x && typeof x === 'object' && !Array.isArray(x);
+
+// 标量类型：值就是一个字符串/数字/布尔。能安全地改成密文字段（type: 'secret'）。
+// 数组类（file / entrylist / source / tags）有自己的形状，不在自动改型的范围里。
+export const SCALAR_FIELD_TYPES = new Set(['text', 'textarea', 'number', 'date', 'month', 'bool']);
+
+/**
+ * 新字段的类型推断。**刻意不推 number**：
+ * 18 位的身份证号 / 长数字 ID 超过 2^53，推成数字会**静默丢精度**。
+ * 值仍是字符串，所以「直接存 kv」不会因为类型推断损坏数据。
+ */
+export function inferFieldType(raw: unknown): string {
+  if (Array.isArray(raw)) {
+    if (raw.length && raw.every(looksLikeFileId)) return 'file';
+    // 一袋 source（带 kind 且有内容）→ 登记成原始资料袋；判断比 entrylist 严，
+    // 因为 entrylist 的列也可能叫 kind —— 宁可登记成 entrylist 也不要错认成 source
+    if (looksLikeSourceList(raw)) return 'source';
+    // 行对象数组登记成结构清单——`--data '{"账号清单":[{…},{…}]}'` 自动建出能渲染的字段
+    if (raw.length && raw.every(looksLikeRow)) return 'entrylist';
+    return 'tags';
+  }
+  if (looksLikeFileId(raw)) return 'file';
+  if (typeof raw === 'string') {
+    const parts = raw.split(/[,，、;；]+/).map((x) => x.trim()).filter(Boolean);
+    if (parts.length && parts.every(looksLikeFileId)) return 'file';
+  }
+  if (typeof raw === 'boolean') return 'bool';
+  const s = String(raw).trim().toLowerCase();
+  if (BOOL_TRUE.includes(s) || BOOL_FALSE.includes(s)) return 'bool';
+  return 'text';
 }
 
 /**

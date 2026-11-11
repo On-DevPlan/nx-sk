@@ -36,6 +36,27 @@ export interface Store {
   _migration?: Record<string, unknown> | null;
 }
 
+/**
+ * 条目自身结构行（schema v3 entry_fields）的读取侧形状。
+ *
+ * 这是「写时复制」的载体：每个条目带自己的字段行，栏目字典只是模板。
+ * templateFieldId 非 NULL = 出身模板（复合串 "<sectionId>:<key>"），NULL = 扩展字段。
+ * Store 对象形状不含它（values 仍是逐键的 JSON 形状）——它由 readStore 组装、
+ * facade 用 WeakMap 记账，经 entryStructures(store) 取用。
+ */
+export interface EntryFieldView {
+  id: string;
+  key: string;
+  label: string;
+  type: string;
+  hint: string;
+  fill: string | null;
+  position: number;
+  templateFieldId: string | null;
+  spec: Record<string, unknown>;
+  meta: Record<string, unknown>;
+}
+
 /** 归一前的宽松输入（历史脏数据）。 */
 interface RawSection {
   id?: unknown;
