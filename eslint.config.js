@@ -160,10 +160,15 @@ export default [
   //
   // 登记表在 eslint-line-budget.json（可 code review），不在代码里写死。
   //
-  // 生效目录：tests/**、scripts/** 先接；src/** 等三个 >1000 行的存量文件拆完再接
-  // （硬禁止档不允许登记豁免，提前接线等于从第一天起必然红灯）。拆完立刻扩到这里。
+  // 生效目录：src/**、tests/**、scripts/**。三个 >1000 行的存量文件已经拆完，
+  // 现在 src 一起接上；800~999 的存量文件在 eslint-line-budget.json 的 registry 里登记，
+  // 拆完一个删一条。
   {
-    files: ['tests/**/*.{js,mjs,cjs,jsx,ts,tsx}', 'scripts/**/*.{js,mjs,cjs,jsx,ts,tsx}'],
+    files: [
+      'src/**/*.{js,mjs,cjs,jsx,ts,tsx}',
+      'tests/**/*.{js,mjs,cjs,jsx,ts,tsx}',
+      'scripts/**/*.{js,mjs,cjs,jsx,ts,tsx}',
+    ],
     plugins: {
       local: {
         rules: {
