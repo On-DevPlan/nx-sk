@@ -462,23 +462,9 @@ label.inline { display: inline-flex; align-items: center; gap: 6px; }
 .entry-title-input:hover { background: var(--hover); }
 .entry-title-input:focus { background: var(--paper); border-color: var(--line-strong); }
 
-/* 快捷加字段：熟手的旁路，默认收起——正文优先，别让一行表单常驻顶部 */
-.quick-add { padding: 0 14px 8px; font-size: 11px; color: var(--mid); }
-/* v3：条目内字段扩展条——「＋ 添加字段」正门 + 快填旁路并排 */
+/* 条目内字段扩展条（#19：快填旁路按验收反馈撤除，只剩正门） */
 .add-field-bar { display: flex; align-items: flex-start; gap: 4px; }
 .add-field-bar > .btn { margin: 0 14px 8px; }
-.add-field-bar .quick-add { padding-left: 0; }
-.quick-add > summary {
-  list-style: none;
-  width: fit-content;
-  padding: 2px 4px;
-  border-radius: 6px;
-  cursor: pointer;
-}
-.quick-add > summary::-webkit-details-marker { display: none; }
-.quick-add > summary:hover { color: var(--ink); background: var(--hover); }
-.quick-add[open] > summary { margin-bottom: 6px; }
-
 /* ── CLI 提示：文案通顺，命令之间用间隔点分开 ── */
 .cli-hint {
   display: flex;

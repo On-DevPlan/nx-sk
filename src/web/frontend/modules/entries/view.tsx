@@ -126,8 +126,8 @@ export default function SectionView({ sectionId: rawId, listHidden = false }: Vi
   const [busy, setBusy] = useState(false);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [modal, setModal] = useState<ModalState | null>(null);
-  const [quick, setQuick] = useState('');
-  // v3：条目内字段扩展表单（指定类型/分组）；null = 关闭
+  // #19 验收反馈：「字段=值 快填」旁路撤除——条目内加字段只留「＋ 添加字段」正门。
+  // （CLI/agent 的 --set 未知键自动登记通路不受影响，退役的只是这块 UI。）
   const [af, setAf] = useState<{ key: string; label: string; type: string; group: string; value: string } | null>(null);
   const [afBusy, setAfBusy] = useState(false);
   // 栏目 ZIP：zip = { fileName, buffer, preview }（buffer 用于确认时再 POST 一次，服务端不存状态）
@@ -323,23 +323,7 @@ export default function SectionView({ sectionId: rawId, listHidden = false }: Vi
     return () => window.removeEventListener('beforeunload', onBeforeUnload);
   }, [dirty.count]);
 
-  // 「直接存 kv」的入口：敲一行 字段=值 回车即写入，字典里没有的键会自动登记
-  const quickAdd = guard(async () => {
-    if (!draft) { toast('先新建一条条目', 'bad'); return; }
-    const i = quick.indexOf('=');
-    if (i <= 0) { toast('用 字段=值 的格式，例如 微信=zhangsan', 'bad'); return; }
-    const k = quick.slice(0, i).trim();
-    const v = quick.slice(i + 1);
-    const r = await api<{ newFields?: unknown[] }>(`/api/entries/${encodeURIComponent(draft.id)}`, { method: 'PATCH', body: { set: { [k]: v } } });
-    setQuick('');
-    toast(`已写入 ${k}${r.newFields?.length ? '（新字段已登记）' : ''}`);
-    await load(draft.id);
-    await reload();
-  });
-
   // v3：条目内添加扩展字段（显式类型/分组）——POST 到 entry.add-field 路由。
-  // 与 quickAdd 的分工：这里是正门（表单给全 key/标签/类型/分组），
-  // quickAdd 保留为熟手旁路（一行 字段=值，类型按值推断）。
   const submitAddField = guard(async () => {
     if (!af || !draft) return;
     const key = af.key.trim();
@@ -680,28 +664,13 @@ export default function SectionView({ sectionId: rawId, listHidden = false }: Vi
                 />
               </div>
 
-              {/* v3：条目内字段扩展——「＋ 添加字段」是正门（类型/分组可选），
-                  「字段=值」快填保留为熟手旁路（平时收起，正文优先） */}
+              {/* 条目内字段扩展正门（类型/分组可选）。#19：「字段=值 快填」旁路按验收反馈撤除 */}
               <div className="add-field-bar">
                 <button
                   type="button"
                   className="btn small ghost"
                   onClick={() => setAf({ key: '', label: '', type: 'text', group: groups[0]?.id || '', value: '' })}
                 >＋ 添加字段</button>
-                <details className="quick-add">
-                  <summary>字段=值 快填</summary>
-                  <div className="rowgap">
-                    <input
-                      className="grow"
-                      style={{ minWidth: 220 }}
-                      placeholder="字段=值　（回车写入；没见过的键按值推断类型，只落本条目）"
-                      value={quick}
-                      onChange={(e) => setQuick(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === 'Enter') quickAdd(); }}
-                    />
-                    <button className="btn small" onClick={quickAdd} disabled={!quick.includes('=')}>写入</button>
-                  </div>
-                </details>
               </div>
 
               <BlockBoard
