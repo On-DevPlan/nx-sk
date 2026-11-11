@@ -35,8 +35,13 @@ export function isStoredEmpty(v: unknown): boolean {
   if (v === null || v === undefined) return true;
   if (Array.isArray(v)) return v.length === 0;
   if (typeof v === 'object') {
-    // 引用文档（debug）：refs 空 = 真没东西可带（引用没有「骨架」可言，与空表不同）。
-    if (isRefDoc(v)) return (v as { refs: unknown[] }).refs.length === 0;
+    // 引用文档（debug）：refs 空**且没有 warnings** 才是真没东西可带。
+    // 带 warnings 的空引用文档要留档（#21：结构引用在写入点被拒，
+    // 「为什么我的引用没了」的台账不能跟着值一起被清空）。
+    if (isRefDoc(v)) {
+      const warns = (v as { warnings?: unknown[] }).warnings;
+      return !(v as { refs: unknown[] }).refs.length && !(Array.isArray(warns) && warns.length);
+    }
     const rows = (v as { rows?: unknown }).rows;
     if (Array.isArray(rows)) {
       const cols = (v as { columns?: unknown }).columns;

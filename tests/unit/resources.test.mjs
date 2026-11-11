@@ -106,6 +106,46 @@ test('resolve：field 三类形态——条目行值（密文默认打码）、�
   await assert.rejects(res.resolveLocator(`nx-sk://field/${e1.id}/ghostkey`), (e) => e.code === 'NOT_FOUND');
 });
 
+test('search scope=debug（#21 面板口径）：只出数据位置，字段命中带 entryId；默认口径不回归', async () => {
+  const dbg = await res.searchResources({ q: '口令', scope: 'debug' });
+  assert.ok(dbg.count >= 1, '条目上的「口令」字段行要能搜到');
+  assert.ok(dbg.items.every((x) => x.kind !== 'section'), '栏目命中不出现');
+  assert.ok(dbg.items.every((x) => !(x.kind === 'field' && !x.entryId)), '模板字段（结构）命中不出现');
+  const pwHit = dbg.items.find((x) => x.kind === 'field' && x.key === 'pw');
+  assert.equal(pwHit.entryId, e1.id, '字段命中 = 条目-字段位置');
+  assert.ok(/条目 甲条目/.test(pwHit.subtitle), `副题带条目名：${pwHit.subtitle}`);
+  const parsed = (await import('../../src/shared/locator.ts')).parseLocator(pwHit.locator);
+  assert.equal(parsed.entryId, e1.id, 'locator 是 nx-sk://field/<条目id>/<key>');
+
+  const plain = await res.searchResources({ q: '口令' });
+  assert.ok(plain.items.some((x) => x.kind === 'field' && !x.entryId), '默认口径仍出模板字段（侧栏三类检索不回归）');
+  const all = await res.searchResources({ scope: 'debug' });
+  assert.ok(all.items.every((x) => x.kind !== 'section'), '无关键字时同样只出数据位置');
+});
+
+test('resolve-batch：一次拿回全部，坏链不抛（每项自带 ok/error），空项跳过，值一律打码口径', async () => {
+  const d = await res.resolveBatch({ refs: [
+    `nx-sk://field/${e1.id}/pw`,
+    'nx-sk://entry/e_ghost',
+    'nx-sk://section/ressec',
+    '',
+  ] });
+  assert.equal(d.count, 3, '空项跳过');
+  const [pw, ghost, sec] = d.items;
+  assert.equal(pw.locator, `nx-sk://field/${e1.id}/pw`);
+  assert.equal(pw.ok, true);
+  assert.equal(pw.info.masked, true, '批量出口永远打码（reveal 不开这个口子）');
+  assert.equal(ghost.ok, false);
+  assert.ok(String(ghost.error).includes('条目不存在'), ghost.error);
+  assert.equal(sec.ok, true);
+  assert.equal(sec.info.entryCount, 2);
+
+  const empty = await res.resolveBatch({});
+  assert.equal(empty.count, 0);
+  const notArray = await res.resolveBatch({ refs: 'nx-sk://section/ressec' });
+  assert.equal(notArray.count, 0, 'refs 不是数组就按空处理');
+});
+
 test('CLI 渲染不炸且带 locator', async () => {
   const s = await res.searchResources({ q: '甲' });
   const text = res.renderResourceSearch(s);

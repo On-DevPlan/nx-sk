@@ -1,14 +1,16 @@
 // debug（资源引用）字段控件：值 = locator 数组的文档 `{v, refs}`。
 //
-// 三块职责（任务 #18 用户裁决原文：「在下面生成小格子，鼠标悬浮在上面就支持
-// 直接预览出这个字段引用的内容」）：
-//   1. **格子（chip）**：每个引用一格，显示被引用资源的标题（resolve 拿）；
-//      resolve 不到 = 引用失效 → 显示 locator 原文并标灰「已失效」。
+// 三块职责（任务 #18 用户裁决 + #21 验收反馈「内联数据板、实时响应绑定的位置的结果」）：
+//   1. **格子（chip）= 内联数据板**：每个引用一格，显示被引用资源的标题 +
+//      **绑定位置的实时值**（字段值 / 条目完整度 / 附件字节——resolve-batch 一次取回，
+//      任何一次 reload 都会刷新）；resolve 不到 = 引用失效 → 显示 locator 原文并标灰。
 //      点格子 = 复制 locator（粘给 agent 即可定位）；× = 移除该引用。
+//      引用只允许**数据位置**（条目/条目-字段/附件）：结构引用在写入点就被拒（#21）。
 //   2. **悬浮预览**：鼠标停在格子上 → 浮层直接预览被引用内容（形态沿用 peek 外壳
 //      的头部三件套：标题 / 副题 / 类型；密文值在 resolve 出口就已打码）。
-//   3. **＋ 引用资源**：打开检索面板（与侧栏共用 `resource.search`），
-//      选中即把 locator 追加进 refs——值仍走「N 处改动 → 保存」的既有通路。
+//   3. **＋ 引用资源**：打开检索面板（与侧栏共用 `resource.search`，但只呈现
+//      条目/条目-字段/附件——结构类命中被过滤），选中即把 locator 追加进 refs——
+//      值仍走「N 处改动 → 保存」的既有通路。
 //
 // 配色纪律：无边框 Notion——格子静止无底色、hover 才现 --hover 色块；浮层用 --paper + 弱线。
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -32,9 +34,26 @@ interface SearchHit {
   kind: string;
   title: string;
   subtitle: string;
+  entryId?: string;
 }
 
 const KIND_LABEL: Record<string, string> = { section: '栏目', entry: '条目', field: '字段', file: '附件' };
+
+/** 内联数据板（#21）：格子上直接显示绑定位置的实时值（截断，全文看悬浮预览）。 */
+function chipValue(r: ResolveInfo): string {
+  if (r.kind === 'field') {
+    if (r.value === null || r.value === undefined || r.value === '') return '';
+    const text = typeof r.value === 'object' ? JSON.stringify(r.value) : String(r.value);
+    return text.length > 48 ? `${text.slice(0, 48)}…` : text;
+  }
+  if (r.kind === 'entry') {
+    const c = r.completeness as { ratio?: number } | null;
+    return c && typeof c.ratio === 'number' ? `完整度 ${c.ratio}%` : '';
+  }
+  if (r.kind === 'file') return `${String(r.bytes ?? 0)} 字节`;
+  if (r.kind === 'section') return `${String(r.entryCount ?? 0)} 条条目`;
+  return '';
+}
 
 function readRefs(value: any): string[] {
   const refs = value && typeof value === 'object' && Array.isArray(value.refs) ? value.refs : [];
@@ -74,7 +93,7 @@ function previewLines(r: ResolveInfo): ReactNode[] {
 }
 
 export function DebugControl({ value, onChange }: ControlProps) {
-  const { toast } = useStore() as any;
+  const { toast, boot } = useStore() as any;
   const refs = useMemo(() => readRefs(value), [value]);
   const refsKey = refs.join('\n');
   const warnings: string[] = Array.isArray((value as any)?.warnings) ? (value as any).warnings : [];
@@ -86,29 +105,24 @@ export function DebugControl({ value, onChange }: ControlProps) {
   const [pickHits, setPickHits] = useState<SearchHit[]>([]);
   const chipRefs = useRef<Record<string, HTMLElement | null>>({});
 
-  // 每个 ref 解析一次（坏链不重试——resolve 404 是常态：条目被删后引用留证）。
+  // **内联数据板**（#21）：一次批量解析全部引用；refs 变或 boot 变（任何保存后的
+  // reload）都整体重取——绑定位置的值变了，格子上的实时值跟着变。
+  // 坏链照常标灰（resolve-batch 不抛）；网络失败保留上一轮值（不误导成「全失效」）。
   useEffect(() => {
-    const todo = refs.filter((r) => resolved[r] === undefined);
-    if (!todo.length) return;
+    if (!refs.length) { setResolved({}); return undefined; }
     let dead = false;
-    void Promise.all(todo.map(async (loc) => {
-      try {
-        return [loc, await api<ResolveInfo>(`/api/resources/resolve?loc=${encodeURIComponent(loc)}`)] as const;
-      } catch {
-        return [loc, false] as const;
-      }
-    })).then((pairs) => {
+    void api<{ items: Array<{ locator: string; ok: boolean; info?: ResolveInfo }> }>(
+      '/api/resources/resolve-batch', { method: 'POST', body: { refs } },
+    ).then((d) => {
       if (dead) return;
-      setResolved((prev) => {
-        const next = { ...prev };
-        for (const [loc, info] of pairs) next[loc] = info;
-        return next;
-      });
-    });
+      const next: Record<string, ResolveInfo | false> = {};
+      for (const x of d.items) next[x.locator] = x.ok && x.info ? x.info : false;
+      for (const r of refs) if (next[r] === undefined) next[r] = false;
+      setResolved(next);
+    }).catch(() => { /* 保留上一轮 */ });
     return () => { dead = true; };
-    // resolved 不进依赖：只补「还没解析过」的 locator，避免自激循环
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refsKey]);
+  }, [refsKey, boot]);
 
   // 悬浮浮层跟着当前 hover 的格子实时定位（滚动/改宽都对）。
   useEffect(() => {
@@ -149,7 +163,11 @@ export function DebugControl({ value, onChange }: ControlProps) {
     let dead = false;
     const timer = setTimeout(async () => {
       try {
-        const d = await api<{ items: SearchHit[] }>(`/api/resources/search?q=${encodeURIComponent(term)}`);
+        // #21：scope=debug——后端只出**数据位置**（条目/条目-字段/附件），
+        // 字段命中直接是条目上的位置（模板行/扩展行都算），栏目与模板字段不出现。
+        const d = await api<{ items: SearchHit[] }>(
+          `/api/resources/search?q=${encodeURIComponent(term)}&scope=debug`,
+        );
         if (!dead) setPickHits(d.items || []);
       } catch {
         if (!dead) setPickHits([]);
@@ -189,6 +207,7 @@ export function DebugControl({ value, onChange }: ControlProps) {
               >
                 {kindLabel ? <span className="dbg-chip-kind">{kindLabel}</span> : null}
                 <span className="dbg-chip-label nowrap">{title}</span>
+                {info && !dead && chipValue(info) ? <span className="dbg-chip-value nowrap">{chipValue(info)}</span> : null}
                 {dead ? <span className="tag">已失效</span> : null}
                 <button
                   type="button"
@@ -201,11 +220,11 @@ export function DebugControl({ value, onChange }: ControlProps) {
           })}
         </div>
       ) : <span className="hint">还没有引用。</span>}
-      {warnings.length ? <div className="hint">非法引用已忽略 {warnings.length} 条：{warnings.slice(0, 3).join('　')}</div> : null}
+      {warnings.length ? <div className="hint">引用已忽略 {warnings.length} 条：{warnings.slice(0, 3).join('　')}</div> : null}
 
       <div className="dbg-add-row">
         <button type="button" className="btn small" onClick={() => setPickerOpen((v) => !v)}>＋ 引用资源</button>
-        <span className="hint">悬浮格子预览内容 · 点格子复制定位符</span>
+        <span className="hint">格子内联实时值 · 悬浮看详情 · 点格子复制定位符</span>
       </div>
 
       {pickerOpen ? (
@@ -214,7 +233,7 @@ export function DebugControl({ value, onChange }: ControlProps) {
             <input
               autoFocus
               value={pickQ}
-              placeholder="搜栏目 / 条目 / 字段 / 附件"
+              placeholder="搜条目 / 字段 / 附件（不引用结构）"
               onChange={(e) => setPickQ(e.target.value)}
             />
             <span className="hint nowrap">{pickHits.length}</span>

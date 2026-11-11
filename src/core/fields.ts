@@ -677,6 +677,7 @@ export function seedSections(at: string): StoreSection[] {
  * `normalizeSpec` / `serializeEntry` 认的一致（表格给行数组，列取字段定义里的）。
  */
 export function seedEntries(at: string): StoreEntry[] {
+  const entryId = newId('e');
   const values = {
     name: '示例条目',
     desc: '这是一条示例条目：左（或上）边选中的就是它。直接改任何一格，保存后就成了你自己的数据。',
@@ -731,12 +732,12 @@ export function seedEntries(at: string): StoreEntry[] {
         ],
       },
     ],
-    // 资源引用（debug）：示例指向「本栏目」与「本栏目的名称字段」。
-    // 故意不给条目级 locator——播种时条目 id 还没生成，section/模板字段 locator 是稳定文本。
-    refs: { v: 1, refs: ['nx-sk://section/demo', 'nx-sk://field/demo/name'] },
+    // 资源引用（debug）：#21「结果至少是条目/条目-字段」——绑到**这条示例条目自身**
+    // 与它的「名称」字段（数据位置，内联数据板解得出实时值；结构引用写入点会被拒）。
+    refs: { v: 1, refs: [`nx-sk://entry/${entryId}`, `nx-sk://field/${entryId}/name`] },
   };
   return [{
-    id: newId('e'),
+    id: entryId,
     section: DEMO_TPL.id,
     title: values.name,
     tags: ['样例'],

@@ -13,22 +13,27 @@ const entries = await import('../../src/modules/entries/service.ts');
 
 const def = { key: 'refs', label: '引用', type: 'debug', group: 'g' };
 
-test('coerce：数组 / JSON 串 / 单个 locator / 文档形状都认，非法的丢弃并计入 warnings（不炸）', () => {
-  const ok = debugBehavior.coerce(def, ['nx-sk://section/demo', 'nx-sk://entry/e_1']);
-  assert.deepEqual(ok, { v: 1, refs: ['nx-sk://section/demo', 'nx-sk://entry/e_1'] });
+test('coerce：数组 / JSON 串 / 单个 locator / 文档形状都认，非法的与结构引用丢弃并计入 warnings（不炸）', () => {
+  const ok = debugBehavior.coerce(def, ['nx-sk://entry/e_1', 'nx-sk://file/f_1']);
+  assert.deepEqual(ok, { v: 1, refs: ['nx-sk://entry/e_1', 'nx-sk://file/f_1'] });
 
   const fromJson = debugBehavior.coerce(def, '["nx-sk://file/f_1"]');
   assert.deepEqual(fromJson, { v: 1, refs: ['nx-sk://file/f_1'] });
 
-  const single = debugBehavior.coerce(def, 'nx-sk://section/demo');
-  assert.deepEqual(single, { v: 1, refs: ['nx-sk://section/demo'] });
+  const single = debugBehavior.coerce(def, 'nx-sk://entry/e_2');
+  assert.deepEqual(single, { v: 1, refs: ['nx-sk://entry/e_2'] });
 
   const doc = debugBehavior.coerce(def, { v: 1, refs: ['nx-sk://entry/e_2'] });
   assert.deepEqual(doc, { v: 1, refs: ['nx-sk://entry/e_2'] });
 
-  const dirty = debugBehavior.coerce(def, ['nx-sk://section/demo', '不是locator', 'demo:name', '']);
-  assert.deepEqual(dirty.refs, ['nx-sk://section/demo'], '只留合法 locator');
+  const dirty = debugBehavior.coerce(def, ['nx-sk://entry/e_1', '不是locator', 'demo:name', '']);
+  assert.deepEqual(dirty.refs, ['nx-sk://entry/e_1'], '只留合法的数据位置引用');
   assert.deepEqual(dirty.warnings, ['不是locator', 'demo:name'], '非法项进 warnings（含旧复合串：写入点只收规范形态）');
+
+  // #21：栏目引用 = 结构，coerce 层（不用查库）就丢弃，warnings 带原因
+  const structural = debugBehavior.coerce(def, ['nx-sk://section/demo', 'nx-sk://entry/e_1']);
+  assert.deepEqual(structural.refs, ['nx-sk://entry/e_1'], '结构引用不收：结果至少是条目/条目-字段');
+  assert.deepEqual(structural.warnings, ['nx-sk://section/demo（结构引用不支持：至少引用到条目/条目-字段/附件）']);
 
   const dup = debugBehavior.coerce(def, ['nx-sk://entry/e_1', 'nx-sk://entry/e_1']);
   assert.deepEqual(dup.refs, ['nx-sk://entry/e_1'], '去重');
@@ -38,8 +43,8 @@ test('空值：{refs:[]} 与空串都算「没填」；isStoredEmpty/isBlank 兼
   assert.deepEqual(debugBehavior.coerce(def, ''), { v: 1, refs: [] });
   assert.equal(isStoredEmpty({ v: 1, refs: [] }), true);
   assert.equal(isBlank({ v: 1, refs: [] }), true, '空引用不计完整度分子');
-  assert.equal(isBlank({ v: 1, refs: ['nx-sk://section/demo'] }), false);
-  assert.equal(isStoredEmpty({ v: 1, refs: ['nx-sk://section/demo'] }), false);
+  assert.equal(isBlank({ v: 1, refs: ['nx-sk://entry/e_1'] }), false);
+  assert.equal(isStoredEmpty({ v: 1, refs: ['nx-sk://entry/e_1'] }), false);
 });
 
 test('形状钩子：sensitive 恒 false、subFields 空、reveal 原样、refs 只认 file locator', () => {
@@ -78,7 +83,14 @@ test('全链路：add-field --type debug 建扩展字段 → --set 写 locator �
   const upd = await entries.updateEntry('宿主', {
     section: 'dbgsec',
     set: {
-      refs: JSON.stringify([`nx-sk://entry/${created.id}`, 'nx-sk://section/dbgsec', 'garbage']),
+      refs: JSON.stringify([
+        `nx-sk://entry/${created.id}`,
+        `nx-sk://field/${created.id}/name`,
+        'nx-sk://section/dbgsec',
+        'nx-sk://field/dbgsec/name',
+        'nx-sk://entry/e_ghost_9',
+        'garbage',
+      ]),
       extrefs: 'nx-sk://section/dbgsec',
     },
   });
@@ -86,19 +98,42 @@ test('全链路：add-field --type debug 建扩展字段 → --set 写 locator �
 
   const got = await entries.getEntry('宿主', { section: 'dbgsec' });
   assert.equal(got.fieldTypes.refs, 'debug');
-  assert.deepEqual(got.values.refs.refs, [`nx-sk://entry/${created.id}`, 'nx-sk://section/dbgsec']);
-  assert.deepEqual(got.values.refs.warnings, ['garbage']);
-  assert.deepEqual(got.values.extrefs.refs, ['nx-sk://section/dbgsec'], '扩展 debug 行同样可写');
+  // #21：条目/条目-字段保留、坏链保留（坏链留证）；栏目引用（coerce 层）与
+  // 模板字段引用（seal 层查库）都丢弃进 warnings，且带原因
+  assert.deepEqual(got.values.refs.refs, [
+    `nx-sk://entry/${created.id}`,
+    `nx-sk://field/${created.id}/name`,
+    'nx-sk://entry/e_ghost_9',
+  ]);
+  assert.deepEqual(got.values.refs.warnings, [
+    'nx-sk://section/dbgsec（结构引用不支持：至少引用到条目/条目-字段/附件）',
+    'garbage',
+    'nx-sk://field/dbgsec/name（模板字段是结构引用：值住在各条目上，请引用 nx-sk://field/<条目id>/name）',
+  ]);
+  assert.deepEqual(got.values.extrefs.refs, [], '扩展 debug 行同样在写入点拒结构引用');
+  assert.ok(String(got.values.extrefs.warnings[0]).includes('结构引用不支持'), 'warnings 带原因');
   // 空引用不算「已填」：refs 是 optional 字段，不进完整度分母
   assert.ok(!got.missing.some((m) => m.key === 'refs'));
 
   // CLI 台账：计数 + locator 列表（不展开内容）
   const text = entries.renderEntryGet(got);
-  assert.ok(text.includes('引用 2 个资源'), text);
+  assert.ok(text.includes('引用 3 个资源'), text);
   assert.ok(text.includes(`nx-sk://entry/${created.id}`));
 
   // section dump 的 formatValue 路径：计数 + 列表
   const d = await sections.dump('dbgsec');
   const dumpText = sections.renderSectionDump(d);
-  assert.ok(dumpText.includes('引用 2 个：'), dumpText.slice(0, 400));
+  assert.ok(dumpText.includes('引用 3 个：'), dumpText.slice(0, 400));
+});
+
+test('sealDebug：面板整体回传文档形状——模板字段引用丢弃、合法引用原样保留', async () => {
+  const upd = await entries.updateEntry('宿主', {
+    section: 'dbgsec',
+    set: { refs: { v: 1, refs: ['nx-sk://entry/e_ghost_9', 'nx-sk://field/dbgsec/name'] } },
+  });
+  assert.equal(upd.status, 'ok');
+  const got = await entries.getEntry('宿主', { section: 'dbgsec' });
+  assert.deepEqual(got.values.refs.refs, ['nx-sk://entry/e_ghost_9'], '坏链保留、模板字段丢弃');
+  assert.equal(got.values.refs.warnings.length, 1);
+  assert.ok(String(got.values.refs.warnings[0]).includes('模板字段是结构引用'));
 });
