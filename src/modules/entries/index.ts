@@ -90,6 +90,27 @@ export default {
       render: (d: Parameters<typeof service.renderEntryChange>[0]) => service.renderEntryChange(d),
     },
     {
+      id: 'entry.add-field',
+      cli: ['entry', 'add-field'],
+      http: ['POST', '/api/entries/:ref/fields'],
+      summary: '在条目内添加扩展字段（指定类型/分组；写时复制，不动栏目字典）；--value 顺手给初值',
+      args: ['ref'],
+      flags: {
+        key: { type: 'string', required: true, hint: '字段 key（英文字母开头）' },
+        label: { type: 'string', hint: '中文名（缺省同 key）' },
+        type: { type: 'string', default: 'text', hint: '字段类型（nx-sk entry fields 可看清单）' },
+        group: { type: 'string', hint: '放进哪个分组（栏目分组 id；缺省首个分组）' },
+        value: { type: 'string', hint: '初值（可留空；凭据样键落盘即密文）' },
+        section: { type: 'string', hint: '限定栏目，解决同名歧义' },
+        'dry-run': { type: 'boolean' },
+      },
+      run: (ctx: {
+        ref?: string; key?: unknown; label?: unknown; type?: unknown; group?: unknown;
+        value?: unknown; section?: string; 'dry-run'?: boolean;
+      } = {}) => service.addEntryField(ctx.ref, ctx),
+      render: (d: Parameters<typeof service.renderEntryAddField>[0]) => service.renderEntryAddField(d),
+    },
+    {
       id: 'entry.table',
       cli: ['entry', 'table'],
       http: ['GET', '/api/tables/:ref'],

@@ -2,6 +2,26 @@
 
 本文件格式参考 [Keep a Changelog](https://keepachangelog.com/)，中文正文。
 
+## 0.39.0 (2026-11-11)
+
+**任务 #15：条目内字段扩展正门——「＋ 添加字段」表单（指定类型/分组），替代旧的单行「直接加字段」。**
+
+### Added
+
+- `entry add-field`（CLI + `POST /api/entries/:ref/fields` 同源）：给**单条条目**添加扩展字段——`--key/--label/--type/--group/--value`，只落条目自身结构行（template_field_id=NULL），**栏目字典零污染**；重复键报冲突并指路 `--set` 写值；未知类型/未知分组/ KV 栏目都在写盘前拒绝；`--dry-run` 预览。
+- 面板条目页新增「＋ 添加字段」弹窗：key / 标签 / 类型（中文名+内部 id）/ 分组（本栏目分组下拉）/ 初值；提交后块即时出现、刷新保持。
+- `serializeEntry` 输出 `entryFields`（条目自身字段定义，行优先、字典兜底）——v3 块渲染契约补齐：面板 BlockBoard 从此跟随**条目自己的结构**渲染，条目内新加的扩展字段不再只有 CLI 可见。
+
+### Changed
+
+- 旧「＋ 直接加字段」保留为熟手旁路，改名「字段=值 快填」，提示语更新为「按值推断类型，只落本条目」。
+- 契约测试同步：dump 条目键白名单加入 `entryFields`。
+
+### 验证
+
+- lint / typecheck / unit **410/410**（+6 add-field 专项）/ build / smoke 137/137 全绿。
+- 真机走查 14/14（Playwright + 本机 Chrome，全新隔离 home）：弹窗表单→提交→「预算」块即时出现带 3000→刷新保持→重复键报错且弹窗可继续改→快填旁路正常；发现「块渲染仍字典驱动」一处真缺陷（toast 成功但 UI 无块）→ serializeEntry 补 entryFields 修复 → 复验全绿。
+
 ## 0.38.0 (2026-11-11)
 
 **schema v3：动态结构——条目字段写时复制（copy-on-write）。栏目字段字典降级成模板，每个条目带自己的结构行与值行。**

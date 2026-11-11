@@ -25,6 +25,7 @@ import { mdImageIds, rewriteMdImages } from '../../core/mdimages.ts';
 import { normalizeSourceItem, normalizeSourceItems, resolveSourceConflicts, sourceItemTimeLabel } from '../../core/source.ts';
 import { displayPath } from '../../core/paths.ts';
 import { computeTable, renderTableText } from '../../shared/table.ts';
+import { FIELD_TYPES } from '../../shared/fields/types.ts';
 import type { FieldDef, SourceItem } from '../../shared/fields/types.ts';
 
 export function mustFindSection(store: Store, ref: unknown): StoreSection {  const s = findSection(store, ref);
@@ -1126,6 +1127,56 @@ export function renderEntryChange(d: EntryChangeView) {
   }
   const extra = d.newFields?.length ? `\n新增字段: ${d.newFields.join(', ')}` : '';
   return `已更新条目 ${d.title}（${d.id}）· 改动 ${(d.changed || []).join(', ')} · 完整度 ${c.filled}/${c.total} = ${c.ratio}%${extra}`;
+}
+
+/**
+ * entry.add-field：在条目内添加**扩展字段**（显式指定类型/分组）。
+ *
+ * v3 写时复制语义：只写条目自身的结构行（template_field_id 由 upsert 按字典判定），
+ * **不动栏目字典**——字典保持「模板 + 台账」身份。--value 顺手给初值时走
+ * updateEntry 的同一条封装链（凭据样键落盘即密文）。
+ */
+export async function addEntryField(ref: unknown, ctx: {
+  key?: unknown; label?: unknown; type?: unknown; group?: unknown; value?: unknown;
+  section?: string; 'dry-run'?: boolean;
+} = {}) {
+  const key = assertFieldKey(String(ctx.key ?? '').trim());
+  const type = String(ctx.type || 'text');
+  if (!(FIELD_TYPES as readonly string[]).includes(type)) {
+    throw badInput(`未知字段类型 "${type}"（可用: ${FIELD_TYPES.join(', ')}）`);
+  }
+  const store = await loadStore();
+  const target = resolveEntry(store, ref, ctx.section);
+  const sec = mustFindSection(store, target.section);
+  if (sec.kv) {
+    throw badInput(`栏目「${sec.title}」是一张 KV 表（一行一个键值对），不给它加字段——要加键用 nx-sk key set <名称> <值>，或在面板 KV 表格里加一行。`);
+  }
+  const rows = entryStructures(store).get(target.id) || [];
+  const hit = rows.find((r) => r.key === key);
+  if (hit) throw conflict(`条目已有字段「${key}」（行 ${hit.id}）——直接写值即可：nx-sk entry update ${target.id} --set ${key}=值`);
+  const groupIds = (sec.groups || []).map((g) => g.id);
+  const group = String(ctx.group ?? '').trim() || groupIds[0] || 'other';
+  if (!groupIds.includes(group) && group !== 'other') {
+    throw badInput(`栏目「${sec.title}」没有分组 "${group}"（可用: ${groupIds.join(', ') || '无'}）`);
+  }
+  const def = { key, label: String(ctx.label ?? '').trim() || key, type, group } as unknown as FieldDef;
+  if (ctx['dry-run']) {
+    return { status: 'skipped', dryRun: true, entry: target.id, wouldAddField: def, wouldSetValue: ctx.value !== undefined && ctx.value !== '' };
+  }
+  await upsertEntryFields(target.id, [def]);
+  const hasInitial = ctx.value !== undefined && ctx.value !== '';
+  if (hasInitial) await updateEntry(target.id, { section: sec.id, set: { [key]: ctx.value } });
+  const got = await getEntry(target.id, { section: sec.id });
+  return { ...got, addedField: def, valueSet: hasInitial };
+}
+
+export function renderEntryAddField(d: Awaited<ReturnType<typeof addEntryField>>) {
+  if ((d as { status?: string }).status === 'skipped') {
+    const w = (d as unknown as { wouldAddField: FieldDef }).wouldAddField;
+    return `试运行（未落盘）：将给条目 ${String((d as unknown as { entry: string }).entry)} 添加扩展字段「${w.label}」(${w.key}) · 类型 ${w.type} · 分组 ${String(w.group)}${(d as unknown as { wouldSetValue: boolean }).wouldSetValue ? ' · 带初值' : ''}`;
+  }
+  const got = d as Awaited<ReturnType<typeof getEntry>> & { addedField: FieldDef; valueSet: boolean };
+  return `已添加扩展字段「${got.addedField.label}」(${got.addedField.key}) · 类型 ${got.addedField.type} · 分组 ${String(got.addedField.group)}${got.valueSet ? ' · 已写入初值' : ''}\n${renderEntryGet(got)}`;
 }
 
 // —— 表格字段（table）的现值 ——

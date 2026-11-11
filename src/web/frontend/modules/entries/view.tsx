@@ -118,7 +118,7 @@ function syncEntryHash(sectionId: string, entryId: string): void {
  */
 export default function SectionView({ sectionId: rawId, listHidden = false }: ViewProps) {
   const sectionId = rawId || '';
-  const { ui, patchUi, toast, guard, dialog, reload } = useStore();
+  const { ui, patchUi, toast, guard, dialog, reload, boot } = useStore();
   const [data, setData] = useState<SectionDump | null>(null);
   // 条目列表里 shortcut 字段只报数量（#5 原文：字段显示只需要分组数量）。
   const shortcutDefs = data ? data.fields.filter((f) => f.type === 'shortcut') : [];
@@ -127,6 +127,9 @@ export default function SectionView({ sectionId: rawId, listHidden = false }: Vi
   const [draft, setDraft] = useState<Draft | null>(null);
   const [modal, setModal] = useState<ModalState | null>(null);
   const [quick, setQuick] = useState('');
+  // v3：条目内字段扩展表单（指定类型/分组）；null = 关闭
+  const [af, setAf] = useState<{ key: string; label: string; type: string; group: string; value: string } | null>(null);
+  const [afBusy, setAfBusy] = useState(false);
   // 栏目 ZIP：zip = { fileName, buffer, preview }（buffer 用于确认时再 POST 一次，服务端不存状态）
   const [zip, setZip] = useState<ZipState | null>(null);
   // 加密包先问口令：ask = { fileName, buffer }
@@ -235,8 +238,11 @@ export default function SectionView({ sectionId: rawId, listHidden = false }: Vi
 
   const groups = useMemo<BoardGroup[]>(() => {
     if (!data) return [];
-    return data.groups.map((g) => ({ ...g, fields: data.fields.filter((f) => f.group === g.id) })).filter((g) => g.fields.length);
-  }, [data]);
+    // v3：块渲染跟随**条目自身的字段行**（含条目内添加的扩展字段）；
+    // 没有行数据（旧数据/兜底）才回退栏目字典。
+    const defs = current?.entryFields?.length ? current.entryFields : data.fields;
+    return data.groups.map((g) => ({ ...g, fields: defs.filter((f) => f.group === g.id) })).filter((g) => g.fields.length);
+  }, [data, current]);
 
   // —— 正文版式（块布局）——
   // 版式是**显示关系**，存在 section.layout 里（与字段字典分开），所以有两条保存链：
@@ -310,6 +316,34 @@ export default function SectionView({ sectionId: rawId, listHidden = false }: Vi
     toast(`已写入 ${k}${r.newFields?.length ? '（新字段已登记）' : ''}`);
     await load(draft.id);
     await reload();
+  });
+
+  // v3：条目内添加扩展字段（显式类型/分组）——POST 到 entry.add-field 路由。
+  // 与 quickAdd 的分工：这里是正门（表单给全 key/标签/类型/分组），
+  // quickAdd 保留为熟手旁路（一行 字段=值，类型按值推断）。
+  const submitAddField = guard(async () => {
+    if (!af || !draft) return;
+    const key = af.key.trim();
+    if (!key) { toast('填一下字段 key（英文字母开头）', 'bad'); return; }
+    setAfBusy(true);
+    try {
+      await api(`/api/entries/${encodeURIComponent(draft.id)}/fields`, {
+        method: 'POST',
+        body: {
+          key,
+          label: af.label.trim() || undefined,
+          type: af.type || 'text',
+          group: af.group || undefined,
+          value: af.value === '' ? undefined : af.value,
+        },
+      });
+      toast(`已添加扩展字段 ${af.label.trim() || key}`);
+      setAf(null);
+      await load(draft.id);
+      await reload();
+    } finally {
+      setAfBusy(false);
+    }
   });
 
   const addEntry = guard(async () => {
@@ -627,21 +661,29 @@ export default function SectionView({ sectionId: rawId, listHidden = false }: Vi
                 />
               </div>
 
-              {/* 「直接加字段」是给熟手的旁路，平时收起来——正文优先，别让一行表单常驻在顶部 */}
-              <details className="quick-add">
-                <summary>＋ 直接加字段</summary>
-                <div className="rowgap">
-                  <input
-                    className="grow"
-                    style={{ minWidth: 220 }}
-                    placeholder="字段=值　（回车写入；没见过的键会自动登记）"
-                    value={quick}
-                    onChange={(e) => setQuick(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') quickAdd(); }}
-                  />
-                  <button className="btn small" onClick={quickAdd} disabled={!quick.includes('=')}>写入</button>
-                </div>
-              </details>
+              {/* v3：条目内字段扩展——「＋ 添加字段」是正门（类型/分组可选），
+                  「字段=值」快填保留为熟手旁路（平时收起，正文优先） */}
+              <div className="add-field-bar">
+                <button
+                  type="button"
+                  className="btn small ghost"
+                  onClick={() => setAf({ key: '', label: '', type: 'text', group: groups[0]?.id || '', value: '' })}
+                >＋ 添加字段</button>
+                <details className="quick-add">
+                  <summary>字段=值 快填</summary>
+                  <div className="rowgap">
+                    <input
+                      className="grow"
+                      style={{ minWidth: 220 }}
+                      placeholder="字段=值　（回车写入；没见过的键按值推断类型，只落本条目）"
+                      value={quick}
+                      onChange={(e) => setQuick(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') quickAdd(); }}
+                    />
+                    <button className="btn small" onClick={quickAdd} disabled={!quick.includes('=')}>写入</button>
+                  </div>
+                </details>
+              </div>
 
               <BlockBoard
                 groups={groups}
@@ -765,6 +807,64 @@ export default function SectionView({ sectionId: rawId, listHidden = false }: Vi
               </div>
             );
           })()}
+        </Modal>
+      ) : null}
+
+      {af ? (
+        <Modal
+          title={`添加扩展字段 · ${data?.section.title || ''}`}
+          onClose={() => { if (!afBusy) setAf(null); }}
+          footer={(
+            <>
+              <button className="btn ghost" onClick={() => setAf(null)} disabled={afBusy}>取消</button>
+              <button className="btn" onClick={submitAddField} disabled={afBusy || !af.key.trim()}>
+                {afBusy ? '添加中…' : '添加'}
+              </button>
+            </>
+          )}
+        >
+          <div className="stack">
+            <div className="hint">字段只加在<b>这一条条目</b>上（写时复制，不动栏目模板）；凭据样的键（密码 / 令牌 / 密钥）落盘即密文。</div>
+            <div className="grid">
+              <div className="field">
+                <div className="flabel"><span>key</span><span className="fkey">英文字母开头</span></div>
+                <div className="fctrl"><input value={af.key} onChange={(e) => setAf({ ...af, key: e.target.value })} placeholder="例如 budget" /></div>
+              </div>
+              <div className="field">
+                <div className="flabel"><span>标签</span><span className="fkey">缺省同 key</span></div>
+                <div className="fctrl"><input value={af.label} onChange={(e) => setAf({ ...af, label: e.target.value })} placeholder="例如 预算" /></div>
+              </div>
+              <div className="field">
+                <div className="flabel"><span>类型</span></div>
+                <div className="fctrl">
+                  <select value={af.type} onChange={(e) => setAf({ ...af, type: e.target.value })}>
+                    {(boot?.fieldTypes || []).map((t) => (
+                      <option key={t} value={t}>{boot?.fieldTypeLabels?.[t] ? `${boot.fieldTypeLabels[t]}（${t}）` : t}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div className="field">
+                <div className="flabel"><span>分组</span><span className="fkey">块在页面里的位置</span></div>
+                <div className="fctrl">
+                  <select value={af.group} onChange={(e) => setAf({ ...af, group: e.target.value })}>
+                    {groups.map((g) => <option key={g.id} value={g.id}>{g.title}</option>)}
+                  </select>
+                </div>
+              </div>
+            </div>
+            <div className="field wide">
+              <div className="flabel"><span>初值</span><span className="fkey">可留空，建完再填</span></div>
+              <div className="fctrl">
+                <input
+                  value={af.value}
+                  onChange={(e) => setAf({ ...af, value: e.target.value })}
+                  onKeyDown={(e) => { if (e.key === 'Enter') submitAddField(); }}
+                  placeholder="顺手给个值（选填）"
+                />
+              </div>
+            </div>
+          </div>
         </Modal>
       ) : null}
 

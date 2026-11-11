@@ -10,7 +10,7 @@ import { FILL_LABELS, fillPolicy, isExcludedField, isSensitiveField } from './fi
 import { isBlank, isPlainRow, isStoredEmpty } from './values.ts';
 import { displaySensitive } from './sensitive.ts';
 import { behaviorOf } from './fields/registry.ts';
-import type { TableColumnDef } from '../shared/fields/types.ts';
+import type { FieldDef, TableColumnDef } from '../shared/fields/types.ts';
 import type { SerializedEntry } from '../shared/model.ts';
 import type { EntryFieldView } from './store-shape.ts';
 // 版式（块布局）的对齐规则也只有一份：读出去之前先按当前字段自愈一遍，
@@ -154,6 +154,9 @@ export function serializeEntry(
     // 两者混在一起会让「补全清单」和「不填清单」分不开。
     excluded: c.excluded,
     values,
+    // v3：条目自身的字段定义（有结构行时=行，含扩展字段；没有时回退栏目字典）。
+    // 面板的块渲染必须跟着它走——只读字典的话，条目内新加的扩展字段渲染不出来。
+    entryFields: defs as unknown as FieldDef[],
   };
 }
 

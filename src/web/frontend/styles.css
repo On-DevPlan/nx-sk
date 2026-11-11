@@ -456,6 +456,10 @@ label.inline { display: inline-flex; align-items: center; gap: 6px; }
 
 /* 快捷加字段：熟手的旁路，默认收起——正文优先，别让一行表单常驻顶部 */
 .quick-add { padding: 0 14px 8px; font-size: 11px; color: var(--mid); }
+/* v3：条目内字段扩展条——「＋ 添加字段」正门 + 快填旁路并排 */
+.add-field-bar { display: flex; align-items: flex-start; gap: 4px; }
+.add-field-bar > .btn { margin: 0 14px 8px; }
+.add-field-bar .quick-add { padding-left: 0; }
 .quick-add > summary {
   list-style: none;
   width: fit-content;
