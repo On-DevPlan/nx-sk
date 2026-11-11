@@ -1,7 +1,7 @@
 // 栏目（section）：一组同构条目的容器 + 一份字段字典。
 // 字典是**数据**不是代码分支，所以 agent 与面板看到的字段永远一致。
 // v3：字典降级成「模板」——存量条目按自身结构行读写，sync 负责把缺口补进去。
-import { loadStore, mutateStore, entryStructures, syncEntryStructures, type Store, type StoreSection } from '../../core/store.ts';
+import { loadStore, mutateStore, entryStructures, syncEntryStructures, isDetachedField, type Store, type StoreSection } from '../../core/store.ts';
 import { assertFieldKey, assertSafeId } from '../../core/paths.ts';
 import { badInput, blocked, conflict, notFound } from '../../core/errors.ts';
 import { FILL_POLICIES, FIELD_TYPES, SOURCE_GROUP, ensureSourceBuiltin, findSection, getTemplate, groupFields, instantiateTemplate, mergeTemplate, sectionNames, syncSectionGroups, templateSummaries } from '../../core/fields.ts';
@@ -604,7 +604,8 @@ export async function dump(ref: unknown, { mask }: { mask?: boolean } = {}) {
   // 所以 `section dump --json` 拿到的合计与面板上看到的合计是同一个数。
   for (const e of data.entries) {
     const ownRows = structures.get(e.id) || null;
-    const defs = ownRows ? ownRows.map((r) => r.spec as unknown as FieldDef) : s.fields;
+    // 任务 #20：脱离行不序列化现值（与 serializeEntry/defsForEntry 同一读边界）。
+    const defs = ownRows ? ownRows.filter((r) => !isDetachedField(r)).map((r) => r.spec as unknown as FieldDef) : s.fields;
     const tables: Record<string, unknown> = {};
     for (const f of defs) {
       if (f.type === 'table') tables[f.key] = computeTable(f, e.values?.[f.key]);

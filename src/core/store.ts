@@ -11,7 +11,7 @@
 // 导出 API 与 Store 对象形状保持不变（这是全后端的磁盘纪律边界，见各模块文件头注释）。
 import { dbFile, storeFile } from './paths.ts';
 import { openAndBootstrap } from './db/bootstrap.ts';
-import { readStore, writeStore, upsertEntryFieldRows, propagateSectionTemplate } from './db/repo.ts';
+import { readStore, writeStore, upsertEntryFieldRows, propagateSectionTemplate, setEntryFieldDetached, deleteEntryFieldRow } from './db/repo.ts';
 import { fileHasContent } from './db/migrator.ts';
 import { setDefaultDb, tx } from './db/tx.ts';
 import { normalize, type Store, type EntryFieldView } from './store-shape.ts';
@@ -21,7 +21,7 @@ import type { FieldDef } from '../shared/fields/types.ts';
 // P6：栏目/条目/设置的形状下沉到 shared，面板与后端共用同一份声明。
 export type { StoreEntry, StoreSection, StoreSettings, SectionGroup } from './store-shape.ts';
 export type { Store, EntryFieldView } from './store-shape.ts';
-export { STORE_VERSION, defaultSettings, normalize } from './store-shape.ts';
+export { STORE_VERSION, defaultSettings, normalize, isDetachedField } from './store-shape.ts';
 
 // —— 进程级连接 ——
 let db: Conn | null = null;
@@ -150,6 +150,23 @@ export async function mutateStore<T>(fn: (draft: Store) => T, explicitPath?: str
 export async function upsertEntryFields(entryId: string, defs: FieldDef[]): Promise<void> {
   const conn = ensureDb();
   tx((db) => upsertEntryFieldRows(db, entryId, defs), { db: conn });
+}
+
+/**
+ * 任务 #20：条目级字段移除（detach/restore = 翻 meta 标记；行不存在返回 false）。
+ * 独立事务、rev 前进（见 db/repo.ts 同名函数注释）——与 upsertEntryFields 同一口径：
+ * 写的是「结构」，先前 loadStore 出来的 Store 对象因此变陈旧，
+ * 调用方要新形状就重新 loadStore（service 层返回前都会再 getEntry）。
+ */
+export async function detachEntryField(entryId: string, rowId: string, detached: boolean): Promise<boolean> {
+  const conn = ensureDb();
+  return tx((db) => setEntryFieldDetached(db, entryId, rowId, detached), { db: conn });
+}
+
+/** 扩展行硬删（field_data/边随 CASCADE）；行不存在返回 false。 */
+export async function removeEntryFieldRow(entryId: string, rowId: string): Promise<boolean> {
+  const conn = ensureDb();
+  return tx((db) => deleteEntryFieldRow(db, entryId, rowId), { db: conn });
 }
 
 /**

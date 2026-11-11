@@ -111,6 +111,23 @@ export default {
       render: (d: Parameters<typeof service.renderEntryAddField>[0]) => service.renderEntryAddField(d),
     },
     {
+      id: 'entry.remove-field',
+      cli: ['entry', 'remove-field'],
+      http: ['DELETE', '/api/entries/:ref/fields/:key'],
+      summary: '从单条条目移除字段：模板字段=脱离（值保留，--restore 找回，不影响栏目字典与其他条目）；扩展字段=硬删（值一并删，不可恢复）；内置「原始资料」不给删',
+      args: ['ref'],
+      flags: {
+        key: { type: 'string', required: true, hint: '字段 key（或中文标签）' },
+        section: { type: 'string', hint: '限定栏目，解决同名歧义' },
+        restore: { type: 'boolean', hint: '把已脱离的模板字段恢复到本条目（值原样回来）' },
+        'dry-run': { type: 'boolean' },
+      },
+      run: (ctx: {
+        ref?: string; key?: unknown; section?: string; restore?: boolean; 'dry-run'?: boolean;
+      } = {}) => service.removeEntryField(ctx.ref, ctx),
+      render: (d: Parameters<typeof service.renderEntryRemoveField>[0]) => service.renderEntryRemoveField(d),
+    },
+    {
       id: 'entry.table',
       cli: ['entry', 'table'],
       http: ['GET', '/api/tables/:ref'],

@@ -17,7 +17,7 @@ import { basename, dirname, extname, join, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 import { createZip, readZip } from '../../core/zip.ts';
 import { isEncryptedPackage, openPackage, sealPackage } from '../../core/securezip.ts';
-import { loadStore, mutateStore, entryStructures, type Store, type StoreEntry, type StoreSection } from '../../core/store.ts';
+import { loadStore, mutateStore, entryStructures, isDetachedField, type Store, type StoreEntry, type StoreSection } from '../../core/store.ts';
 import type { EntryFieldView } from '../../core/store.ts';
 import { displayPath, exportDir, VERSION } from '../../core/paths.ts';
 import { findSection, inferFieldType, isSensitiveField, sectionNames } from '../../core/fields.ts';
@@ -75,9 +75,10 @@ function uniqueSectionId(store: Store, base: string): string {
   return `${base}-${Date.now()}`;
 }
 
-/** 条目的字段定义清单：自身结构行优先、栏目字典兜底（v3 写时复制，包里要带扩展行的值）。 */
+/** 条目的字段定义清单：自身结构行优先、栏目字典兜底（v3 写时复制，包里要带扩展行的值）。
+ *  任务 #20：脱离行（meta.detached）不算——值已不进 values，定义也不进导出包。 */
 function entryDefs(section: StoreSection, ownRows: EntryFieldView[] | null | undefined): FieldDefLike[] {
-  return ownRows ? ownRows.map((r) => r.spec as unknown as FieldDefLike) : (section.fields || []) as unknown as FieldDefLike[];
+  return ownRows ? ownRows.filter((r) => !isDetachedField(r)).map((r) => r.spec as unknown as FieldDefLike) : (section.fields || []) as unknown as FieldDefLike[];
 }
 
 /** 字段定义的宽松读取形状（transfer 只碰这几个键）。 */

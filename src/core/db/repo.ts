@@ -30,7 +30,7 @@ import { getMeta, setMeta } from './migrator.ts';
 import { tx } from './tx.ts';
 import type { Conn, Row } from './driver.ts';
 import type { Store, StoreEntry, StoreSection, EntryFieldView } from '../store-shape.ts';
-import { STORE_VERSION } from '../store-shape.ts';
+import { STORE_VERSION, isDetachedField } from '../store-shape.ts';
 import { POINTER_KINDS, entryFieldId, fieldDataId, fieldTargetKey } from './identity.ts';
 import type { FieldDef } from '../../shared/fields/types.ts';
 
@@ -137,7 +137,9 @@ export function readStore(db: Conn): LoadedRaw {
     const list = structures.get(entryId) || [];
     list.push(view);
     structures.set(entryId, list);
-    if (r.data_value != null) {
+    // 任务 #20：脱离行（meta.detached）的值**不再进 values**——读边界统一过滤；
+    // 数据仍住在 field_data（writeStore 按捕获行原样保留），restore 即回。
+    if (r.data_value != null && !isDetachedField(view)) {
       const values = valuesByEntry.get(entryId) || {};
       values[view.key] = parseJson(r.data_value, null);
       valuesByEntry.set(entryId, values);
@@ -311,8 +313,12 @@ export function writeStore(db: Conn, store: Store, { expectedRev = null, declare
         position += 1;
       };
 
+      // 任务 #20：脱离行（meta.detached）的键——values 里已经没有它（readStore 过滤），
+      // 值必须由**捕获行**原样带回 field_data；缺行补齐循环也永远不许把它「复活」成可见行。
+      const detachedKeys = new Set<string>();
+
       if (captured.length) {
-        // 存量条目：原样恢复（属性不回刷字典）。
+        // 存量条目：原样恢复（属性不回刷字典；detached 的 meta 也原样——脱离状态跨重写存活）。
         for (const r of captured) {
           putRow(String(r.id),
             r.template_field_id == null ? null : String(r.template_field_id),
@@ -322,6 +328,16 @@ export function writeStore(db: Conn, store: Store, { expectedRev = null, declare
             created: r.data_created_at == null ? null : String(r.data_created_at),
             updated: r.data_updated_at == null ? null : String(r.data_updated_at),
           });
+          if (isDetachedField({ meta: parseJson(r.meta, {}) as Record<string, unknown> })) {
+            detachedKeys.add(String(r.key));
+            if (r.data_value != null) {
+              conn.run(insFieldData, {
+                id: fieldDataId(String(r.id)), entryFieldId: String(r.id), value: String(r.data_value),
+                createdAt: r.data_created_at == null ? (e.createdAt || at) : String(r.data_created_at),
+                updatedAt: r.data_updated_at == null ? (e.updatedAt || at) : String(r.data_updated_at),
+              });
+            }
+          }
         }
       } else {
         // 新条目：按字典实例化**全部**模板行（值缺也留结构——完整度/序列化都按行算）。
@@ -335,8 +351,10 @@ export function writeStore(db: Conn, store: Store, { expectedRev = null, declare
       }
 
       // values 里缺行的键：在字典 → 建模板行（position 追加）；否则 → 扩展占位行。
+      // 任务 #20：脱离行也在 rowIdByKey 里（上面按捕获行原样恢复），所以这里天然跳过；
+      // 再加一道显式判据——就算调用方塞来了 detached 键的 values，也绝不补出可见行（复活）。
       for (const key of Object.keys(e.values || {})) {
-        if (rowIdByKey.has(key)) continue;
+        if (detachedKeys.has(key) || rowIdByKey.has(key)) continue;
         const d = dictByKey.get(key);
         if (d) {
           const def = d as unknown as Record<string, unknown>;
@@ -351,8 +369,9 @@ export function writeStore(db: Conn, store: Store, { expectedRev = null, declare
 
       // 值逐键落 field_data（undefined 跳过；null 落 JSON 'null'——「显式清空」与
       // 「从没填过」在键存在性上等价于旧版 values 列：null 有键、undefined 没键）。
+      // 脱离行的值不走这里（上面已按捕获行原样带回），stale 草稿不许覆掉藏着的值。
       for (const [key, value] of Object.entries(e.values || {})) {
-        if (value === undefined) continue;
+        if (value === undefined || detachedKeys.has(key)) continue;
         const rowId = rowIdByKey.get(key);
         if (!rowId) continue;
         const times = dataTimes.get(key);
@@ -468,6 +487,40 @@ export function upsertEntryFieldRows(conn: Conn, entryId: string, defs: FieldDef
         { id, entryId, key, ...shape, position: maxPos + 1 });
     }
   }
+}
+
+/**
+ * 任务 #20：条目级字段移除的两个直接写（不动 Store 对象，所以走独立事务 + rev 前进）。
+ *
+ * detach/restore = 只翻 meta 的 `detached` 标记：行、值、边全保留（restore 即原样回来）。
+ * 两者都 bump rev：拿着「移除前 values」的旧 Store 对象再提交会撞 BLOCKED，
+ * 而不是把已硬删的行经「values 缺行补占位行」静默复活，或把脱离键的值覆进隐藏行。
+ * 行不存在返回 false（调用方据此报 NOT_FOUND，事务里不落任何写）。
+ */
+export function setEntryFieldDetached(db: Conn, entryId: string, rowId: string, detached: boolean): boolean {
+  return tx((conn) => {
+    const r = conn.get('SELECT meta FROM entry_fields WHERE id = :id AND entry_id = :entryId', { id: rowId, entryId });
+    if (!r) return false;
+    const meta = parseJson(r.meta, {}) as Record<string, unknown>;
+    if (detached) meta.detached = 1;
+    else delete meta.detached;
+    conn.run('UPDATE entry_fields SET meta = :meta WHERE id = :id', { meta: JSON.stringify(meta), id: rowId });
+    setRev(conn, getRev(conn) + 1, nowIso());
+    return true;
+  }, { db, mode: 'IMMEDIATE' });
+}
+
+/** 扩展行硬删：field_data / entry_attach 随 CASCADE 走；kind='field' 的内部指针按删除钩子口径软删。 */
+export function deleteEntryFieldRow(db: Conn, entryId: string, rowId: string): boolean {
+  return tx((conn) => {
+    const r = conn.get('SELECT 1 AS x FROM entry_fields WHERE id = :id AND entry_id = :entryId', { id: rowId, entryId });
+    if (!r) return false;
+    const at = nowIso();
+    conn.run('DELETE FROM entry_fields WHERE id = :id', { id: rowId });
+    conn.run("UPDATE attachments SET deleted_at = :at, updated_at = :at WHERE kind = 'field' AND target_key = :id AND deleted_at IS NULL", { at, id: rowId });
+    setRev(conn, getRev(conn) + 1, at);
+    return true;
+  }, { db, mode: 'IMMEDIATE' });
 }
 
 /**
