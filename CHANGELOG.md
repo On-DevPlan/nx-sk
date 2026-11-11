@@ -31,6 +31,14 @@
   - 面板：块头 hover 出无边框 `×`（BlockBoard 新可选 prop `onRemoveField`，kvTable 等调用点零影响）——模板字段弹「从本条目移除…（不影响栏目模板与其他条目）」、扩展字段弹 danger「值会一并删除，不可恢复」；add-field-bar 下方新增「已脱离」弱字 chips 管理条，每个带「恢复」按钮。
   - 契约测试同步：dump 条目键白名单加入 `detachedFields`。
   - 验证：unit **438/438**（+7 remove-field 专项，含「detach 后连续两次 updateEntry 不复活」）/ smoke 137/137 零削弱；真机走查 17/17（Playwright + 本机 Chrome，隔离 home 7875）：hover 出 ×、移除→块消失+chip、恢复→块与值回来、扩展硬删→块与值都没、刷新持久化、dialog 取消不写、console 零错误。期间发现并修复 1 个真缺陷（writeStore 脱离判据误传 meta 对象，值在全量重写中丢失→restore 变 null）。
+- **任务 #21（#18 验收反馈）：debug 引用只绑数据位置 + 格子内联数据板**（用户裁决原文：「debug字段引用具体的字段数据 不要引用结构」「结果至少是条目/条目-字段」「条目-field位置 而不是fielddata 从而可以实现内联数据板的功能 实时响应绑定的位置的结果」）：
+  - **结构引用不收**：`nx-sk://section/…` 在 coerce 层丢弃进 warnings（语法无歧义）；模板字段引用 `nx-sk://field/<栏目id>/<key>` 要查库才认得出，新增写入封装 `seal/debug.ts` 丢弃（warnings 带原因）。坏链仍保留（#18「坏链留证」不变）。`isStoredEmpty` 同步：refs 空但有 warnings 的文档不再被当空清掉——「引用为什么没了」的台账必须留档。
+  - **内联数据板**：格子直接显示绑定位置的实时值（字段值截断内联、条目完整度、附件字节），悬浮预览仍是详情形态；值改→保存→reload→批量重解，格子跟着变，无需刷新页面。
+  - 新出口 `resource resolve-batch`（`POST /api/resources/resolve-batch`，action 显式标 `readOnly` 豁免 dry-run 检查）：一次请求取回全部引用摘要，坏链不抛（每项自带 ok/error），值一律打码口径（reveal 不开这个口子）。
+  - picker 改走 `resource search --scope debug`：只出条目/条目-字段（含模板行与扩展行，副题带条目名）/附件，栏目与模板字段命中不出现——别让用户选了再被写入点丢。默认口径（侧栏三类检索）零改动。
+  - demo 播种的 debug 引用同步改为条目级（指向示例条目自身与其名称字段）。
+  - 文案随语义更新：「非法引用已忽略」→「引用已忽略」；picker 占位与提示语改口径。
+  - 验证：unit **441/441**（coerce 拒结构、sealDebug 拒模板字段+坏链保留、warnings 留档、scope=debug 口径、resolve-batch 形状）/ smoke 137/137 零削弱；真机走查 22/22（Playwright + 本机 Chrome，隔离 home 7876）：格子内联实时值、悬浮预览、picker 无结构命中、改名称保存后格子实时刷新、CLI 混写结构引用被逐层丢弃且 warnings 可见、坏链标灰、resolve-batch 直测、复制 locator 不回归、console/HTTP 零错误。
 
 ## 0.40.0 (2026-11-11)
 

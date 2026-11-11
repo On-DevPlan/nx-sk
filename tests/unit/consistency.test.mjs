@@ -457,6 +457,9 @@ test('反向：代码里的写命令都声明了 --dry-run；本地备份已删�
   for (const a of ACTIONS) {
     const isWrite = Array.isArray(a.http) && a.http[0] !== 'GET';
     if (!isWrite) continue;
+    // 显式声明 readOnly 的 POST 出口（如 resource.resolveBatch：批量入参塞不进 query）
+    // 不是写命令，豁免 dry-run 检查——豁免必须写在 action 上，不能默认放过。
+    if (a.readOnly) continue;
     if (!(a.flags && a.flags['dry-run'])) missingDryRun.push(a.id);
     // P4：模块陆续迁到 .ts，读源码时优先 .ts、回退 .js
     const src = await readFile(join(ROOT, 'src/modules', a.module, 'service.ts'), 'utf8')

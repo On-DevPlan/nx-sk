@@ -34,8 +34,8 @@ export interface ResourceHit {
 const hay = (...parts: unknown[]) => parts.map((p) => String(p ?? '')).join('\n').toLowerCase();
 const match = (needle: string, ...parts: unknown[]) => hay(...parts).includes(needle);
 
-/** 字段命中的构造：模板字段用 <sectionId> 段（等价旧写法见 locatorAliases）。 */
-function fieldHit(sec: StoreSection, def: { key: string; label?: string }, entryId?: string): ResourceHit {
+/** 字段命中的构造：模板字段用 <sectionId> 段（等价旧写法见 locatorAliases）；带 entryId 时是条目-字段位置。 */
+function fieldHit(sec: StoreSection, def: { key: string; label?: string }, entryId?: string, entryTitle?: string): ResourceHit {
   const parts: LocatorParts = entryId
     ? { kind: 'field', entryId, key: def.key }
     : { kind: 'field', sectionId: sec.id, key: def.key };
@@ -43,14 +43,14 @@ function fieldHit(sec: StoreSection, def: { key: string; label?: string }, entry
     locator: formatLocator(parts),
     kind: 'field',
     title: String(def.label || def.key),
-    subtitle: entryId ? `${sec.title} › 条目 ${entryId}` : `${sec.title}（栏目字段）`,
+    subtitle: entryId ? `${sec.title} › 条目 ${entryTitle || entryId}` : `${sec.title}（栏目字段）`,
     sectionId: sec.id,
     ...(entryId ? { entryId } : {}),
     key: def.key,
   };
 }
 
-export async function searchResources({ q, kind, section }: { q?: unknown; kind?: string; section?: string } = {}) {
+export async function searchResources({ q, kind, section, scope }: { q?: unknown; kind?: string; section?: string; scope?: string } = {}) {
   const store = await loadStore();
   const structures = entryStructures(store);
   const needle = String(q ?? '').trim().toLowerCase();
@@ -61,10 +61,14 @@ export async function searchResources({ q, kind, section }: { q?: unknown; kind?
     sections = [sec];
   }
   const want = (k: string) => !kind || kind === k;
+  // #21：debug 引用面板口径——只出**数据位置**（条目/条目-字段/附件）。
+  // 栏目命中与模板字段命中（结构）不出现；字段命中改为「各条目的结构行」（含模板行），
+  // locator 直接就是 `nx-sk://field/<条目id>/<key>`——面板格子内联数据板要绑的就是这个位置。
+  const debugScope = scope === 'debug';
 
   const items: ResourceHit[] = [];
   for (const sec of sections) {
-    if (want('section') && (!needle || match(needle, sec.id, sec.title, sec.description))) {
+    if (want('section') && !debugScope && (!needle || match(needle, sec.id, sec.title, sec.description))) {
       items.push({
         locator: formatLocator({ kind: 'section', sectionId: sec.id }),
         kind: 'section', title: sec.title, subtitle: `栏目 ${sec.id}`, sectionId: sec.id,
@@ -83,15 +87,24 @@ export async function searchResources({ q, kind, section }: { q?: unknown; kind?
       }
     }
     if (want('field')) {
-      // 栏目字典字段（= 全局字段；等价旧写法是复合串 `section:key`）
-      for (const def of sec.fields) {
-        if (!needle || match(needle, def.key, def.label)) items.push(fieldHit(sec, def));
-      }
-      // 条目扩展行（quickAdd / 条目内 add-field 出来的、不在字典的行）
-      for (const e of mine) {
-        for (const r of structures.get(e.id) || []) {
-          if (r.templateFieldId != null) continue;
-          if (!needle || match(needle, r.key, r.label)) items.push(fieldHit(sec, { key: r.key, label: r.label }, e.id));
+      if (debugScope) {
+        for (const e of mine) {
+          for (const r of structures.get(e.id) || []) {
+            if (isDetachedField(r)) continue;
+            if (!needle || match(needle, r.key, r.label)) items.push(fieldHit(sec, { key: r.key, label: r.label }, e.id, e.title));
+          }
+        }
+      } else {
+        // 栏目字典字段（= 全局字段；等价旧写法是复合串 `section:key`）
+        for (const def of sec.fields) {
+          if (!needle || match(needle, def.key, def.label)) items.push(fieldHit(sec, def));
+        }
+        // 条目扩展行（quickAdd / 条目内 add-field 出来的、不在字典的行）
+        for (const e of mine) {
+          for (const r of structures.get(e.id) || []) {
+            if (r.templateFieldId != null) continue;
+            if (!needle || match(needle, r.key, r.label)) items.push(fieldHit(sec, { key: r.key, label: r.label }, e.id, e.title));
+          }
         }
       }
     }
@@ -210,6 +223,26 @@ export async function resolveLocator(loc: unknown, { reveal = false }: { reveal?
     };
   }
   throw notFound(`定位符指向的资源不存在（既不是条目也不是栏目）: ${head}`);
+}
+
+/**
+ * 批量解析（面板「内联数据板」的出口，任务 #21）：一次请求拿回所有绑定位置的实时值。
+ * 与单条 resolve 的区别只有两点：坏链**不抛**（每项自带 ok/error，格子照常标灰），
+ * 以及**永远打码口径**（reveal 不开这个口子——批量出口是给面板渲染用的）。
+ */
+export async function resolveBatch({ refs }: { refs?: unknown } = {}) {
+  const list = Array.isArray(refs) ? refs : [];
+  const items: Array<{ locator: string; ok: boolean; info?: ResolveResult; error?: string }> = [];
+  for (const r of list) {
+    const text = String(r ?? '').trim();
+    if (!text) continue;
+    try {
+      items.push({ locator: text, ok: true, info: await resolveLocator(text) });
+    } catch (e) {
+      items.push({ locator: text, ok: false, error: (e as Error)?.message || String(e) });
+    }
+  }
+  return { count: items.length, items };
 }
 
 // —— CLI 人读渲染 ——

@@ -1819,6 +1819,11 @@ body.col-resizing, body.col-resizing * { cursor: col-resize !important; user-sel
 .dbg-chip.dead { color: var(--mid); border-style: dashed; }
 .dbg-chip-kind { color: var(--mid); font-size: 10px; }
 .dbg-chip-label { min-width: 0; }
+/* #21 内联数据板：绑定位置的实时值（值变 → reload → resolve-batch 刷新） */
+.dbg-chip-value {
+  color: var(--ink); font-size: 11px; font-family: ui-monospace, Consolas, monospace;
+  background: var(--soft); border-radius: 3px; padding: 0 4px; max-width: 150px;
+}
 .dbg-chip-x {
   border: 0; background: none; cursor: pointer; color: var(--mid);
   font-size: 13px; line-height: 1; padding: 0 2px; border-radius: 3px;

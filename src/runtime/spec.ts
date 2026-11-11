@@ -47,6 +47,8 @@ export interface Action {
   binaryBody?: boolean;
   maxBody?: number;
   raw?: boolean;
+  /** 只读聚合出口却走 POST（批量入参塞不进 query）：豁免「写命令必须声明 --dry-run」的一致性检查。 */
+  readOnly?: boolean;
   serveRaw?: (ctx: Ctx, meta: { req: unknown; res: unknown; url: URL; transport: 'http' }) => unknown;
   run: (ctx: Ctx, meta: { transport: 'cli' | 'http' }) => unknown;
   render?: (data: unknown, ctx: Ctx) => unknown;

@@ -6,6 +6,13 @@ import { identityRemap, identityReveal, noSubFields } from './common.ts';
  * debug（资源引用）：值 = 内部资源定位符（locator）数组的**自描述文档**
  * `{ v: 1, refs: string[] }`——与 entrylist / table 同一条「形状住在数据里」的纪律。
  *
+ * 第四条（任务 #21 验收反馈：「debug字段引用具体的字段数据 不要引用结构」
+ * 「结果至少是条目/条目-字段」）：**结构引用不收**——`nx-sk://section/…` 在
+ * coerce 层就丢弃进 warnings（语法上无歧义，不用查库）；模板字段引用
+ * `nx-sk://field/<栏目id>/<key>` 要查库才知道 head 是栏目还是条目，那条在
+ * 写入封装 `seal/debug.ts` 里执行。引用要绑到**数据位置**（条目/条目-字段/附件），
+ * 面板的格子才可能内联显示绑定位置的实时值（内联数据板）。
+ *
  * 三条刻意的取舍（任务 #18 用户裁决）：
  *   - **引用本身不敏感**：sensitive 恒 false，`--mask` 不特殊处理——
  *     敏感的是被引用的内容（密文值在 resolve/预览侧打码，见 modules/resources）。
@@ -39,6 +46,11 @@ export const debugBehavior: FieldBehavior = {
       // 只认规范形态：parse 认旧复合串，但写入点不收（存进库的必须能一眼认出是 locator）
       const parts = text.startsWith(LOCATOR_SCHEME) ? parseLocator(text) : null;
       if (!parts) { warnings.push(text); continue; }
+      // #21：栏目引用 = 结构，不是数据位置，不收（模板字段引用在 seal 层查库拒）
+      if (parts.kind === 'section') {
+        warnings.push(`${text}（结构引用不支持：至少引用到条目/条目-字段/附件）`);
+        continue;
+      }
       const canonical = `${LOCATOR_SCHEME}${parts.kind}/${parts.kind === 'field' ? `${parts.entryId ?? parts.sectionId}/${parts.key}` : (parts.sectionId ?? parts.entryId ?? parts.fileId)}`;
       if (!refs.includes(canonical)) refs.push(canonical);
     }
@@ -75,7 +87,7 @@ export const debugBehavior: FieldBehavior = {
     // 台账只显示计数与 locator 列表，**不展开内容**（避免刷屏；内容走 resource resolve）
     const lines = [`引用 ${refs.length} 个资源`];
     for (const r of refs) lines.push(`  ${r}`);
-    for (const w of warnings) lines.push(`  [非法引用已忽略] ${w}`);
+    for (const w of warnings) lines.push(`  [引用已忽略] ${w}`);
     return lines;
   },
   // 引用本身不敏感（预览内容才敏感，那条边界在 resolve/预览出口执行）。
