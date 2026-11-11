@@ -2,6 +2,18 @@
 
 本文件格式参考 [Keep a Changelog](https://keepachangelog.com/)，中文正文。
 
+## [Unreleased]
+
+**任务 #16：全局视觉改造——彻底无边框、Notion 配色令牌化。**
+
+### Changed
+
+- **配色令牌化**（`styles.css` `:root`，Notion 口径）：`--paper #ffffff`（主底）、`--soft #f9f8f7`（次级底：侧栏、静态容器）、`--hover #eeeceb`（悬浮/选中加深的唯一色块）、`--mid #7d7a75`（弱字色：图标、计数、旁注）、`--line/--line-strong` 对齐 rgba(55,53,47,.09/.16) 弱线量级、`--soft-2` 值并入 #eeeceb（保留变量免改引用）、`--ink` 不动。
+- **弱线条表达块**：容器静止态不铺底色——`.blk` / `.panel` hover 才现出 1px 弱线轮廓（`box-shadow: inset 0 0 0 1px var(--line)`）；输入框静止态改「白底 + 1px 弱线」，hover 用线加深（不再是灰底）；原先拿 `--soft-2` 当分隔线的实线（`.tree-row`、`.source-item`、`.tp-col`、`.entry-head`、sticky-head 压边等）统一换成 `var(--line)`。
+- **hover/选中底色统一**：所有带 `:hover` / `.active` / `.selected` / `.on` / `.sel` / 拖放落点语义的选择器（约 40 处，含侧栏 antd Tree 覆盖层、`.tab.active`、`.dgrp-head`/`.drow`、`.row.selected`、`.btn.ghost`、`.sn-item`、`.tree-sec/.tree-ent`、`.tf-*` 系列、`.peek-menu-row`、`.source-item.sel` 等）的 `background` 一律换成 `var(--hover)`；纯静态容器（`.sb`、`.tag`、`.group-title`、`pre.block`、`.md-preview`、`.entry-head`、`.tf-calc`、`.source-strip` 等）继续用 `--soft`。
+- **antd 主题对齐**（`App.tsx` `ANTD_THEME`）：`colorTextSecondary #7d7a75`、`colorBorder rgba(55,53,47,.16)`、`colorBorderSecondary rgba(55,53,47,.09)` 与新令牌同源。
+- 不变量保持：语义红 #b3261e 不动、状态用标签不用色块不动、主按钮深色填充不动；只改视觉（颜色/线/底色），DOM 结构、类名、文案、交互逻辑零改动。
+
 ## 0.39.0 (2026-11-11)
 
 **任务 #15：条目内字段扩展正门——「＋ 添加字段」表单（指定类型/分组），替代旧的单行「直接加字段」。**
