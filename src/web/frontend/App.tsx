@@ -167,6 +167,10 @@ export default function App() {
     [nav.groups, currentId],
   );
 
+  // #14：侧栏树里已经有当前栏目的条目（懒加载完成且非空）时，正文不再重复显示条目列表。
+  // 侧栏收起时列表照旧出现——它是收起态下唯一的条目导航，也保住「勾选导出」的入口。
+  const listHidden = !collapsed && (entryMap[currentId]?.length ?? 0) > 0;
+
   const crumbs = useMemo(() => {
     if (!current) return [];
     const isSectionLike = current.kind === 'section';
@@ -241,7 +245,7 @@ export default function App() {
               <ErrorBoundary key={current.id}>
                 <Suspense fallback={<div className="pad muted">加载中…</div>}>
                   {current.kind === 'section'
-                    ? <SectionPane sectionId={current.id} />
+                    ? <SectionPane sectionId={current.id} listHidden={listHidden} />
                     : <ToolPane view={current} />}
                 </Suspense>
               </ErrorBoundary>
@@ -257,9 +261,9 @@ export default function App() {
 }
 
 /** 栏目视图的动态挂载点：共用 entries 模块的视图，把 sectionId 传进去。 */
-function SectionPane({ sectionId }: { sectionId: string }) {
+function SectionPane({ sectionId, listHidden }: { sectionId: string; listHidden: boolean }) {
   const View = SECTION_VIEW;
-  return <View sectionId={sectionId} />;
+  return <View sectionId={sectionId} listHidden={listHidden} />;
 }
 
 /** 工具页的动态挂载点：component 在注册表里必有，这里只为收窄类型。 */

@@ -68,6 +68,7 @@ body {
   width: 264px; flex-shrink: 0;
   background: var(--soft);
   min-height: 0;
+  position: relative; /* 拖拽线挂在右缘 */
 }
 .sb-head {
   display: flex; align-items: center; gap: 8px;
@@ -97,6 +98,12 @@ body {
 .sb-icon { color: var(--mid); font-size: 12px; flex-shrink: 0; }
 .sb-icon-leaf { opacity: .75; }
 .sb .count { color: var(--mid); font-size: 10px; font-variant-numeric: tabular-nums; }
+/* 侧栏右缘拖拽线（#14）：5px 命中区骑在侧栏与内容区交界，悬停/拖动时给出可见反馈 */
+.sb-resizer {
+  position: absolute; top: 0; right: 0; bottom: 0; width: 5px;
+  cursor: col-resize; z-index: 6;
+}
+.sb-resizer:hover, .sb-resizer.active { background: var(--soft-2); }
 
 /* ── 面包屑栏：头部的替代品——收起开关 + 位置 + 刷新，一行 36px，细线压底 ── */
 .crumbs {

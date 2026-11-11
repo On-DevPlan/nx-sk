@@ -4,6 +4,11 @@ import type { ComponentType, LazyExoticComponent } from 'react';
 /** 面板视图的公共 props：栏目视图收 `sectionId`，工具页不收。 */
 export interface ViewProps {
   sectionId?: string;
+  /**
+   * #14：侧栏树里已经能看到当前栏目的条目时，正文不再重复渲染条目列表
+   * （列表列与它的拖拽线一起隐藏，编辑器独占正文宽度）。由 App 计算后传入。
+   */
+  listHidden?: boolean;
 }
 
 export interface ViewDef {
