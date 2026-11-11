@@ -18,9 +18,9 @@
 //   · 库比程序新（schema_version > CURRENT）：**绝不降级写**。
 //   · 有表但没有 meta.store_kind（别人把 SQLite 文件改名成 nxsk.db）：
 //     **绝不自动建表**——那会把别人的库就地改成我们的结构。
-import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { appHome, PROJECT_ROOT, storeFile } from '../paths.ts';
+import { appHome, migrationDir, PROJECT_ROOT, storeFile } from '../paths.ts';
 import { badInput } from '../errors.ts';
 import { stamp } from '../ids.ts';
 import { openRaw, type Conn } from './driver.ts';
@@ -60,6 +60,8 @@ export interface BootstrapResult {
   migration?: Record<string, unknown> | null;
   /** 导入留证文件路径。 */
   evidence?: string | null;
+  /** 升级/导入前对库文件的快照备份路径（`~/nx-sk/migrate/<ts>-pre-*.db`）。 */
+  snapshot?: string | null;
 }
 
 /**
@@ -147,16 +149,21 @@ function bootstrap(db: Conn): BootstrapResult {
   if (storeKindOf(db) !== STORE_KIND) throw new NotNxSkStoreError(db.path);
 
   // ── 情况 C：版本落后 → 逐步升级（每步一个事务，失败回滚并中止启动）──
+  // **升级之前先备份**：checkpoint 把 WAL 落进主文件，再整份复制到 migrate/——
+  // 升级脚本出错时既有事务回滚，也有一份升级前的完整库可以退回。
   const v = Number(getMeta(db, 'schema_version') || '0') || 0;
   if (v > CURRENT_SCHEMA_VERSION) throw new StoreTooNewError(v, CURRENT_SCHEMA_VERSION);
   let upgradedFrom: number | null = null;
+  let snapshot: string | null = null;
   if (v < CURRENT_SCHEMA_VERSION) {
+    snapshot = snapshotDb(db, `v${v}-to-v${CURRENT_SCHEMA_VERSION}`);
     const applied = migrate(db, { from: v });
     upgradedFrom = applied.length ? v : null;
   }
 
   // ── 情况 D：还没从 JSON 迁过，而 store.json 在 → 导入（崩溃恢复窗口）──
   if (!getMeta(db, 'imported_from_json_at') && fileHasContent(storeFile())) {
+    snapshot = snapshot || snapshotDb(db, 'import-json');
     let outcome: ImportOutcome | null = null;
     tx((conn) => {
       if (getMeta(conn, 'imported_from_json_at')) return; // 双检
@@ -168,12 +175,30 @@ function bootstrap(db: Conn): BootstrapResult {
       const migration = out.migration
         ? { ...out.migration, snapshot: displayPath(evidence), snapshotRaw: evidence, ...(out.migrationDetail || {}) }
         : null;
-      return { action: 'imported', upgradedFrom, migration, evidence };
+      return { action: 'imported', upgradedFrom, migration, evidence, snapshot };
     }
-    if (out && out.action === 'corrupt-seeded') return { action: 'corrupt-seeded', upgradedFrom, corrupt: out.corrupt || null };
+    if (out && out.action === 'corrupt-seeded') return { action: 'corrupt-seeded', upgradedFrom, corrupt: out.corrupt || null, snapshot };
   }
 
-  return { action: upgradedFrom !== null ? 'upgraded' : 'none', upgradedFrom };
+  return { action: upgradedFrom !== null ? 'upgraded' : 'none', upgradedFrom, snapshot };
+}
+
+/**
+ * 升级/导入前的库快照：先把 WAL checkpoint 进主文件（否则复制出来的库缺最近写入），
+ * 再整份复制到 `migrate/<ts>-pre-<reason>.db`。复制失败返回 null（尽力而为——
+ * 事务回滚仍是主防线，快照是可退回的额外保险）。
+ */
+function snapshotDb(db: Conn, reason: string): string | null {
+  try {
+    db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+    const dir = migrationDir();
+    mkdirSync(dir, { recursive: true });
+    const to = join(dir, `${stamp()}-pre-${reason}.db`);
+    copyFileSync(db.path, to);
+    return to;
+  } catch {
+    return null;
+  }
 }
 
 /** 库里有没有**已提交**的 schema（另一个进程的成果）。探不到就当「有」（保守，不删）。 */
