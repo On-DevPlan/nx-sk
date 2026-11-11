@@ -1,8 +1,10 @@
 // 本地 ESLint 规则：单文件物理行数预算（三档）。
 //
 // 口径（固定在这里；改口径必须同时改注释和单测）：
-//   - 统计对象：单个文件的**物理行**，即 `sourceCode.lines.length`，
-//     等价于编辑器行号 / 内置 max-lines 的默认口径。
+//   - 统计对象：单个文件的**物理行**，等于编辑器里看到的行号。
+//   - 实现上取 `sourceCode.lines`，但**末尾换行不额外算一行**：
+//     ESLint 的 lines 在文件以换行结尾时会多出一个空串，必须减掉，
+//     否则「995 行的文件」会被算成 996，和编辑器/MaxLines 口径都对不上。
 //   - 空行、注释行、块注释都计入：本项目注释是设计意图的主要载体，
 //     行数在这里是「认知负担」的代理指标，注释不是噪声。
 //   - 不按函数或代码块统计：拆分决策发生在文件粒度。
@@ -94,6 +96,12 @@ function readOptions(context) {
   };
 }
 
+/** 物理行数：与编辑器一致，末尾换行不算额外一行。 */
+function physicalLines(context) {
+  const lines = context.sourceCode.lines;
+  return lines.length > 1 && lines[lines.length - 1] === '' ? lines.length - 1 : lines.length;
+}
+
 /** 提醒档：600~799 报提醒；已登记但回落到 800 以下报陈旧登记。 */
 export const lineBudgetWarn = {
   meta: {
@@ -105,7 +113,7 @@ export const lineBudgetWarn = {
 
   create(context) {
     const { warn, approve, registry } = readOptions(context);
-    const count = context.sourceCode.lines.length;
+    const count = physicalLines(context);
     const rel = repoRelative(context.filename);
     const entry = registry.get(rel);
 
@@ -143,7 +151,7 @@ export const lineBudgetError = {
 
   create(context) {
     const { approve, hard, registry } = readOptions(context);
-    const count = context.sourceCode.lines.length;
+    const count = physicalLines(context);
     const rel = repoRelative(context.filename);
     const entry = registry.get(rel);
 

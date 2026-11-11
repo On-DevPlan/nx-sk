@@ -46,6 +46,8 @@ const ruleTester = new RuleTester({
 ruleTester.run('line-budget-warn', lineBudgetWarn, {
   valid: [
     { code: lines(599), filename: SRC, options: [OPTIONS] },
+    // 末尾换行不额外算一行：599 行带结尾换行仍是 599
+    { code: `${lines(599)}\n`, filename: SRC, options: [OPTIONS] },
     { code: lines(800), filename: SRC, options: [OPTIONS] },
     { code: lines(1000), filename: SRC, options: [OPTIONS] },
     {
@@ -56,6 +58,7 @@ ruleTester.run('line-budget-warn', lineBudgetWarn, {
   ],
   invalid: [
     { code: lines(600), filename: SRC, options: [OPTIONS], errors: [{ messageId: 'overWarn' }] },
+    { code: `${lines(600)}\n`, filename: SRC, options: [OPTIONS], errors: [{ messageId: 'overWarn' }] },
     { code: lines(601), filename: SRC, options: [OPTIONS], errors: [{ messageId: 'overWarn' }] },
     { code: lines(799), filename: SRC, options: [OPTIONS], errors: [{ messageId: 'overWarn' }] },
     // 目录覆盖：tests / scripts 与 src 同口径
@@ -126,7 +129,9 @@ ruleTester.run('line-budget-error', lineBudgetError, {
 
 async function totalLines(relPath) {
   const src = await readFile(join(ROOT, relPath), 'utf8');
-  return src.split('\n').length;
+  const parts = src.split('\n');
+  // 与规则同口径：末尾换行不额外算一行
+  return parts.length > 1 && parts[parts.length - 1] === '' ? parts.length - 1 : parts.length;
 }
 
 test('阈值固定为 600 / 800 / 1000 且严格递增', () => {
@@ -179,12 +184,12 @@ test('登记的文件必须仍在 800~999 档，且不超过登记上限（陈�
   }
 });
 
-test('生效目录覆盖 tests / scripts（src 在存量硬超限文件拆完后接入）', async () => {
+test('生效目录覆盖 src / tests / scripts', async () => {
   const { default: flat } = await import('../../eslint.config.js');
   const blocks = flat.filter((b) => b?.rules && 'local/line-budget-error' in b.rules);
   assert.ok(blocks.length > 0, 'eslint.config.js 里找不到行数预算的接线');
   const patterns = blocks.flatMap((b) => (Array.isArray(b.files) ? b.files : [b.files]));
-  for (const dir of ['tests', 'scripts']) {
+  for (const dir of ['src', 'tests', 'scripts']) {
     assert.ok(
       patterns.some((p) => String(p).startsWith(`${dir}/`)),
       `行数预算必须覆盖 ${dir}/**，当前 files：${patterns.join(', ')}`,

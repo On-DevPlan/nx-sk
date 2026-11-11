@@ -21,5 +21,38 @@
   "warn": 600,
   "approve": 800,
   "hard": 1000,
-  "registry": []
+  "registry": [
+    {
+      "path": "src/shared/table.ts",
+      "lines": 995,
+      "max": 995,
+      "reason": "表格公式引擎 + 列/汇总归一 + 计算 + 文本渲染同在一个 shared 纯模块里。计划拆成 table/formula.ts、table/schema.ts、table/compute.ts、table/text.ts，本文件留门面；拆分期间不得再涨。",
+      "by": "trae",
+      "at": "2026-11-12"
+    },
+    {
+      "path": "src/web/frontend/modules/entries/view.tsx",
+      "lines": 946,
+      "max": 946,
+      "reason": "条目面板容器里混着列表、详情表单与栏目导入弹窗。计划拆出 entryDetail.tsx（详情）与 importSection.tsx（导入），容器只留选中态与列表；交互与 hook 顺序保持不动。",
+      "by": "trae",
+      "at": "2026-11-12"
+    },
+    {
+      "path": "src/modules/sections/service.ts",
+      "lines": 877,
+      "max": 877,
+      "reason": "栏目 CRUD 与字段/分组校验、全部 render 函数混在一起。计划拆出 validate.ts（校验与补丁描述）与 render.ts（渲染），service.ts 只留 CRUD/tree。",
+      "by": "trae",
+      "at": "2026-11-12"
+    },
+    {
+      "path": "src/web/frontend/components/fields/shortcutLibrary/ShortcutLibrary.tsx",
+      "lines": 819,
+      "max": 819,
+      "reason": "快捷键库容器里混着尺寸/折叠持久化、按键命中查找与预览交互。计划拆出状态 hook 与命中查找，容器只留组合；DOM 与 className 不动。",
+      "by": "trae",
+      "at": "2026-11-12"
+    }
+  ]
 }
