@@ -54,6 +54,8 @@ export interface SerializedEntry {
   missing: Array<{ key: string; label: string }>;
   excluded: Array<{ key: string; label: string; fill: unknown; fillLabel: unknown }>;
   values: Record<string, unknown>;
+  /** v3：条目自身的字段定义（结构行优先，回退栏目字典）——面板块渲染的唯一依据。 */
+  entryFields?: FieldDef[];
   [key: string]: unknown;
 }
 
