@@ -14,8 +14,8 @@ await useTempHome();
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const { ACTIONS, MODULES, SELF_CHECK, selfCheckActions } = await import('../../src/runtime/registry.ts');
 const { ALL_COMMANDS, helpEntries, resolveCommand } = await import('../../src/runtime/cli.ts');
-const { ROUTES, routeTable } = await import('../../src/runtime/api.ts');
-const { cliPathsOf } = await import('../../src/runtime/spec.ts');
+const { ROUTES, routeTable, matchRoute } = await import('../../src/runtime/api.ts');
+const { cliPathsOf, compileRoute } = await import('../../src/runtime/spec.ts');
 const { VIEWS } = await import('../../src/web/frontend/registry.ts');
 
 const listDirs = async (rel) => (await readdir(join(ROOT, rel), { withFileTypes: true })).filter((d) => d.isDirectory()).map((d) => d.name).sort();
@@ -472,6 +472,24 @@ test('反向：代码里的写命令都声明了 --dry-run；本地备份已删�
   // 这里反向键住：任何服务都不该再出现 snapshotStore，否则就是自相矛盾的半件产品。
   for (const s of snapshots) {
     assert.ok(!s.hasSnapshot, `${s.module} 还在留快照（snapshotStore 应已全部删除）`);
+  }
+});
+
+// —— #22：CLI 代理层的可往返性（结构断言，零副作用） ——
+// 面板活着时 CLI 把 action 打到 POST /api/cli，服务端**按 id 查 ACTIONS** 再执行；
+// 于是「每条有 http 声明的 action 都能被代理层找回自己」必须钉住：
+// 路由要解析回同一条 action、binaryBody 必须有 file flag（代理口读本地文件全靠它）。
+test('反向：每条 http action 可被 CLI 代理层往返（task #22）', () => {
+  for (const a of ACTIONS) {
+    if (!Array.isArray(a.http)) continue;
+    if (a.raw === true) continue; // raw 下载口不代理（直跑落盘），没有往返义务
+    const { method, keys } = compileRoute(a.http);
+    const concrete = `/${a.http[1].split('/').filter(Boolean).map((s) => (s.startsWith(':') ? 'z_sentinel' : s)).join('/')}`;
+    const hit = matchRoute(method, concrete);
+    assert.ok(hit, `${a.id} 的 http 声明 ${method} ${a.http[1]} 必须能命中路由`);
+    assert.equal(hit.route.action.id, a.id, `${method} ${a.http[1]} 必须解析回 ${a.id}（代理按 id 查表，路由也得指回同一条）`);
+    assert.equal(keys.length, hit.params.length);
+    if (a.binaryBody) assert.ok(a.flags && a.flags.file, `${a.id} 是 binaryBody 却没声明 file flag，代理口无法读取本地文件`);
   }
 });
 
