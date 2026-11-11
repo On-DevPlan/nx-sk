@@ -3,7 +3,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve as resolvePath } from 'node:path';
 import type { Server } from 'node:http';
-import { APP_NAME, DEFAULT_PORT, ENV_STORE, VERSION } from '../core/paths.ts';
+import { APP_NAME, DEFAULT_PORT, ENV_STORE_DB, VERSION } from '../core/paths.ts';
 import { badInput, external, toErrorShape } from '../core/errors.ts';
 import { parseDataArg, parseStdinValue } from '../core/argsafe.ts';
 import { ACTIONS, MODULES, MODULE_TITLES, commandEntry, type CommandEntry } from './registry.ts';
@@ -327,8 +327,9 @@ export async function runCli(argv: string[]) {
     if (t.startsWith('--store=')) { opts.store = t.slice('--store='.length); continue; }
     tokens.push(t);
   }
-  // 全局 flag 先摘掉再匹配命令；--store 通过环境变量下传，服务层就不必到处接一个路径参数
-  if (opts.store) process.env[ENV_STORE] = resolvePath(opts.store);
+  // 全局 flag 先摘掉再匹配命令；--store 通过环境变量下传，服务层就不必到处接一个路径参数。
+  // 0.36 起存储是 SQLite：--store 指向 nxsk.db 的路径（旧 store.json 的导入来源仍走 NX_SK_STORE）。
+  if (opts.store) process.env[ENV_STORE_DB] = resolvePath(opts.store);
   OUTPUT_JSON = opts.json;
 
   let lastAction: Action | null = null;

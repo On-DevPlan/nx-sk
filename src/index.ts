@@ -7,7 +7,7 @@ export * as transfer from './modules/transfer/service.ts';
 export * as skill from './modules/skill/service.ts';
 
 export { CODES, AppError } from './core/errors.ts';
-export { APP_NAME, VERSION, appHome, storeFile } from './core/paths.ts';
+export { APP_NAME, VERSION, appHome, storeFile, dbFile } from './core/paths.ts';
 export { loadStore, saveStore, mutateStore, storePathInUse } from './core/store.ts';
 export { MODULES, ACTIONS, commandEntry } from './runtime/registry.ts';
 export { ALL_COMMANDS } from './runtime/cli.ts';

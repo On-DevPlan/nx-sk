@@ -31,8 +31,13 @@ const isIgnored = (p) => new Promise((resolve) => {
 // 扫进了提交，最后靠 reset --soft + 重写历史才清掉。这类东西一旦 push 到公开仓库
 // 就收不回来，所以必须有断言兜底，不能只靠「写在 .gitignore 里的君子协定」。
 const MUST_BE_IGNORED = [
-  'store.json',                    // 整库数据：档案 + 密文凭据
+  'store.json',                    // 旧版整库数据：档案 + 密文凭据（首启导入后改名留证，同样不许入库）
   'store.json.pre-kv-backup',      // 迁移/备份副本（容易漏：它不匹配 `store.json`）
+  'store.json.imported-20261111-112955', // 导入留证副本
+  'nxsk.db',                       // 0.36 起的整库数据（SQLite 主库）
+  'nxsk.db-wal',                   // WAL 附属（里面同样有未 checkpoint 的数据）
+  'nxsk.db-shm',
+  'nxsk.db.imported-x',            // 库级留证副本
   '.vaultkey',                     // 加密密钥本体
   '.vaultsalt',                    // 口令派生的盐
   '张三-个人信息.txt',
@@ -49,12 +54,12 @@ test('.gitignore 挡得住 PII 与本机数据', async () => {
 
 test('仓库里当前没有任何被跟踪的 PII / 本机数据文件', async () => {
   const tracked = await gitLines(['ls-files']);
-  const BAD = /(^|\/)(store\.json(\..*)?|\.vaultkey|\.vaultsalt)$|个人信息|简历/;
+  const BAD = /(^|\/)(store\.json(\..*)?|nxsk\.db(-wal|-shm|-journal|\..*)?|\.vaultkey|\.vaultsalt)$|个人信息|简历/;
   const hits = tracked.filter((f) => BAD.test(f));
   assert.deepEqual(hits, [], `这些文件不该被 git 跟踪（要用 'git rm --cached' 摘掉）: ${hits.join(', ')}`);
 });
 
-test('仓库里没有 store.json —— 真实数据在 ~/nx-sk/，在仓库之外', async () => {
-  const found = (await gitLines(['ls-files'])).filter((f) => /(^|\/)store\.json$/.test(f));
-  assert.deepEqual(found, [], `仓库里出现了 store.json，数据应在 ~/nx-sk/: ${found.join(', ')}`);
+test('仓库里没有 store.json / nxsk.db —— 真实数据在 ~/nx-sk/，在仓库之外', async () => {
+  const found = (await gitLines(['ls-files'])).filter((f) => /(^|\/)(store\.json|nxsk\.db)$/.test(f));
+  assert.deepEqual(found, [], `仓库里出现了本机数据文件，数据应在 ~/nx-sk/: ${found.join(', ')}`);
 });

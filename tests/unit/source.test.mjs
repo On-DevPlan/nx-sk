@@ -190,24 +190,22 @@ test('CLI 渲染：旧的标「已被取代，留痕」，并报当前/留痕条
   assert.match(out, /留痕可查/, out);
 });
 
-// 放在文件末尾：本测试会直接覆写共享 store，模拟「老形状」数据，不能影响前面的用例。
+// 放在文件末尾：本测试会直接改共享存储的行，模拟「老形状」数据，不能影响前面的用例。
 test('存量栏目缺 source 时 normalize 读一次即自愈（KV 表不加）', async () => {
-  // 直接写一份「老形状」的 store：栏目只有一个 text 字段、没有 source
-  const { storePathInUse } = await import('../../src/core/store.ts');
-  const { writeFile } = await import('node:fs/promises');
-  const legacy = {
-    version: 3,
-    settings: { defaultSection: 'oldsec', navGroups: [] },
-    sections: [{
-      id: 'oldsec', title: '老栏目', order: 50, template: null, kv: false,
-      titleField: 'a', titleLabel: '名称',
-      groups: [{ id: 'main', title: '基本' }],
-      fields: [{ key: 'a', label: 'A', type: 'text', group: 'main' }],
-      createdAt: null, updatedAt: null,
-    }],
-    entries: [], files: [],
-  };
-  await writeFile(storePathInUse(), JSON.stringify(legacy), 'utf8');
+  // 0.36 起存储是 SQLite：建一个只带 text 字段的栏目，再**直接删掉**它的 source
+  // 分组/字段行——等价于旧测试「手写一份没有 source 的 store.json」。
+  await sections.addSection({
+    id: 'oldsec', title: '老栏目',
+    groups: [{ id: 'main', title: '基本' }],
+    fields: [{ key: 'a', label: 'A', type: 'text', group: 'main' }],
+  });
+  const { dbFile } = await import('../../src/core/paths.ts');
+  const { openRaw } = await import('../../src/core/db/driver.ts');
+  const db = openRaw(dbFile());
+  try {
+    db.run("DELETE FROM fields WHERE section_id = 'oldsec' AND key = 'source'");
+    db.run("DELETE FROM groups WHERE section_id = 'oldsec' AND id = 'source'");
+  } finally { db.close(); }
 
   const store = await sections.listSections();
   const sec = store.sections.find((s) => s.id === 'oldsec');

@@ -4,6 +4,7 @@ import { loadStore, mutateStore } from '../../core/store.ts';
 import type { Store, StoreSettings } from '../../core/store.ts';
 import { findSection } from '../../core/fields.ts';
 import { badInput, notFound } from '../../core/errors.ts';
+import { dbFile, displayPath } from '../../core/paths.ts';
 
 export const SETTING_KEYS = ['defaultSection', 'navGroups', 'navHidden', 'navOrder'];
 
@@ -184,7 +185,7 @@ export async function updateSettings({ set, key, value, 'dry-run': dryRun }: { s
     for (const [k, v] of Object.entries(resolved)) { before[k] = settings[k]; settings[k] = v; }
     return { before, after: { ...resolved } };
   }) as { before: Record<string, unknown>; after: Record<string, unknown> };
-  return { status: 'ok', set: result.after, before: result.before, path: '~/nx-sk/store.json' };
+  return { status: 'ok', set: result.after, before: result.before, path: displayPath(dbFile()) };
 }
 
 export function renderSettings(data: {

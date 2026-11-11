@@ -15,7 +15,7 @@
     "LICENSE"
   ],
   "engines": {
-    "node": ">=18.17"
+    "node": ">=22.13.0"
   },
   "repository": {
     "type": "git",
@@ -36,7 +36,7 @@
     "unlink:local": "node scripts/link-local.mjs --unlink",
     "dev:vite": "vite",
     "dev:serve": "pnpm run build && node bin/nx-sk.mjs serve --no-open",
-    "build": "tsc -p tsconfig.build.json && vite build && node scripts/link-local.mjs --auto",
+    "build": "tsc -p tsconfig.build.json && node scripts/copy-migrations.mjs && vite build && node scripts/link-local.mjs --auto",
     "start": "pnpm run build && node bin/nx-sk.mjs serve",
     "lint": "eslint .",
     "typecheck": "tsc -b",

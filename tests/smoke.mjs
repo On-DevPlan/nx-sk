@@ -14,7 +14,7 @@ const BIN = join(ROOT, 'bin', 'nx-sk.mjs');
 const NODE = process.execPath;
 
 const home = await mkdtemp(join(tmpdir(), 'nx-sk-smoke-'));
-const env = { ...process.env, NX_SK_HOME: home, NX_SK_STORE: join(home, 'store.json') };
+const env = { ...process.env, NX_SK_HOME: home, NX_SK_STORE: join(home, 'store.json'), NX_SK_STORE_DB: join(home, 'nxsk.db') };
 delete env.NX_SK_PASSPHRASE;
 
 let passed = 0;
@@ -257,9 +257,13 @@ step('key list 默认给原文', keyList.count === 1 && keyList.keys[0].value ==
 const keyListMasked = await cliJson(['key', 'list', '--mask']);
 step('key list --mask 打码', keyListMasked.keys[0].value === 'sk-s******dcba');
 
-const raw = await readFile(join(home, 'store.json'), 'utf8');
-step('store.json 里没有密钥明文', !raw.includes('sk-smoke'), '只有 AES-GCM 密文对象');
-step('store.json 里落的是密文对象', /"alg": "aes-256-gcm"/.test(raw));
+// 落盘防护看**库文件字节**（SQLite 把 TEXT 原样存进页里；CLI 子进程退出时 WAL 已
+// checkpoint 回主库，但 -wal 也一并读上，绝不给明文留藏身角落）。
+const dbBytes = (await readFile(join(home, 'nxsk.db'), 'latin1'))
+  + await readFile(join(home, 'nxsk.db-wal'), 'latin1').catch(() => '');
+step('nxsk.db 里没有密钥明文', !dbBytes.includes('sk-smoke'), '只有 AES-GCM 密文对象');
+// SQLite 里 values 是紧凑 JSON（无缩进空格），正则兼容两种排版。
+step('nxsk.db 里落的是密文对象', /"alg":\s*"aes-256-gcm"/.test(dbBytes));
 
 const refuseMask = await cliError(['key', 'set', 'SMOKE_KEY', 'sk-x******zzzz']);
 step('拒绝把打码串当新密钥写回', refuseMask.error.includes('打码'));
@@ -340,7 +344,7 @@ const xExp = await cliJson(['transfer', 'bundle-export', '--sections', 'secret',
 step('跨机导出：secret 栏目打进 ZIP', xExp.sections === 1 && xExp.entries >= 1);
 
 const homeB = await mkdtemp(join(tmpdir(), 'nx-sk-smoke-B-'));
-const envB = { ...process.env, NX_SK_HOME: homeB, NX_SK_STORE: join(homeB, 'store.json') };
+const envB = { ...process.env, NX_SK_HOME: homeB, NX_SK_STORE: join(homeB, 'store.json'), NX_SK_STORE_DB: join(homeB, 'nxsk.db') };
 delete envB.NX_SK_PASSPHRASE;
 function cliB(args, { expectFail = false } = {}) {
   return new Promise((resolve) => {
@@ -372,12 +376,18 @@ const gotB = await cliJsonB(['key', 'get', 'SMOKE_KEY']);
 step('B 机导入后 key get 能解出明文（与原机密钥无关）',
   gotB.value === 'sk-smoke-NEW-0987654321fedcba', String(gotB.value));
 
-// 落盘后必须**仍是密文对象**（落盘防护不丢），且解得开说明用的就是 B 机密钥
-const storeB = JSON.parse(await readFile(join(homeB, 'store.json'), 'utf8'));
-const entryB = storeB.entries.find((e) => e.section === 'secret');
+// 落盘后必须**仍是密文对象**（落盘防护不丢），且解得开说明用的就是 B 机密钥。
+// 0.36 起读 B 机的 nxsk.db（B 机 CLI 子进程都已退出、WAL 已 checkpoint，只读打开安全）。
+const { openRaw } = await import('../src/core/db/driver.ts');
+const dbB = openRaw(join(homeB, 'nxsk.db'), { readOnly: true });
+let entryB = null;
+try {
+  const row = dbB.get("SELECT \"values\" AS v FROM entries WHERE section_id = 'secret' LIMIT 1");
+  entryB = row ? JSON.parse(row.v) : null;
+} finally { dbB.close(); }
 function isCipher(v) { return !!v && typeof v === 'object' && typeof v.ct === 'string' && typeof v.iv === 'string'; }
 step('导入后 secret 落盘仍是密文（已用本机 vaultKey 重新加密）',
-  !!entryB && isCipher(entryB.values.value));
+  !!entryB && isCipher(entryB.value));
 
 const skillGet = await cliJson(['skill', 'get', 'nx-sk', '10-sections-entries', '--dry-run']);
 step('skill get --json 是四元', skillGet.skillName === 'nx-sk' && skillGet.ref === 'references/10-sections-entries.md'
