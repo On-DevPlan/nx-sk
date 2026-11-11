@@ -2,7 +2,7 @@
 
 本文件格式参考 [Keep a Changelog](https://keepachangelog.com/)，中文正文。
 
-## [Unreleased]
+## 0.36.0 (2026-11-11)
 
 **底层存储从 store.json 重构为 SQLite（node:sqlite），采用「存储版本号 + 组合式迁移脚本」机制，运行时不做旧结构兼容。**
 
@@ -16,16 +16,20 @@
 - **attachments 对齐 nx-kv v2**：kind ∈ (file/url/section/entry/field)；file 行 id = FileRecord.id **原样**（values 里嵌的引用一字不改）；url/section/entry/field 用确定性派生 id（`att_*_<sha1[0:16]>`），身份规则收敛到 `db/identity.ts` 唯一实现；dedupe_key 唯一部分索引（软删后可重新登记）；边表 entry_attach / section_attach / field_attach，**role 是边的语义不是资源属性**（inline=从 values 用现有 fileReferences 重算、attach/source=显式边跨重写保留）；删除钩子对指向已删条目/栏目/字段的内部指针行软删（UPDATE deleted_at，行不物理删），`findDriftedPointers` 可检漂移。
 - `engines.node` 升到 `>=22.13.0`（node:sqlite 免 `--experimental-sqlite` 的下限，与 nx-kv 同口径；`db/version.ts` 运行时先检查再 import，报错指得出真因）。`--store` 全局 flag 改指 DB 路径；`setting set` 返回值与面板存储页展示的 `path` 从 store.json 换成 nxsk.db。
 - build 链路新增 `scripts/copy-migrations.mjs`（tsc 不拷 .sql，迁移脚本随 dist 发布）。
+- **升级之前先备份**：凡「往既有库里写结构」的路径都先做库快照——版本升级（情况 C）复制 `migrate/<ts>-pre-vX-to-vY.db`，崩溃恢复补导入（情况 D）复制 `migrate/<ts>-pre-import-json.db`；复制前 `wal_checkpoint(TRUNCATE)` 保证快照含最近写入。首启导入的 JSON 原件由 `.imported-<ts>` 改名留证兜底（同一纪律）。
 
 ### Added
 
-- 新单测 24 项（`tests/unit/db-*.test.mjs`）：迁移 runner（空库→v1、幂等、坏脚本回滚、缺边/降级、async 事务体堵死）、导入器（带/不带 version、无 json、corrupt、失败回滚 + 留证改名）、rev 冲突（并发提交第二个报 BLOCKED 且不动库）、往返保真（json→db→loadStore 与 normalize(json) 深比较；inline 边 = fileReferences 重算结果）、attachments 身份/删除钩子/漂移/dedupe 索引。
+- 新单测 27 项（`tests/unit/db-*.test.mjs`）：迁移 runner（空库→v1、幂等、坏脚本回滚、缺边/降级、async 事务体堵死）、导入器（带/不带 version、无 json、corrupt、失败回滚 + 留证改名）、rev 冲突（并发提交第二个报 BLOCKED 且不动库）、往返保真（json→db→loadStore 与 normalize(json) 深比较；inline 边 = fileReferences 重算结果）、attachments 身份/删除钩子/漂移/dedupe 索引。
+- **json 迁 db 防丢测试**（`db-import-fidelity.test.mjs`）：真实形状 fixture（分组/字段/版式/KV 栏目/密文 blob/file+md 双载体引用/settings）逐项断言——每个栏目/条目/分组/字段 id 在库一个不少、layout 与密文逐字节保真、附件 55→55 式对账、inline 边精确到 (entry, field_key, attachment)。**升级导致丢数据会被这组测试直接钉死**。
+- **升级备份测试**（`db-upgrade.test.mjs`）：v0→v1 升级与崩溃恢复补导入两条路径都必须先留 `migrate/pre-*.db` 快照，且快照本身是可打开、含升级前数据的完整库。
 - `core/store-shape.ts`：Store 形状与 normalize 从 store.ts 拆出（形状层零依赖 facade，避免 store.ts ⇄ db/* 运行时循环 import）。
 
 ### 验证
 
-- `pnpm lint` / `pnpm typecheck` / `pnpm build` / `pnpm test:unit`（395/395）/ `pnpm test:smoke`（137/137）全绿（Node 24.18.0，Windows）。
+- `pnpm lint` / `pnpm typecheck` / `pnpm build` / `pnpm test:unit`（398/398）/ `pnpm test:smoke`（137/137）全绿（Node 24.18.0，Windows）。
 - 冒烟里「CLI 与 HTTP 写进的是同一份数据」原样保留——serve 与 CLI 两个进程现在写的是同一个 nxsk.db，rev 校验在跨进程路径上被真实覆盖。
+- **真实数据迁移实录**（2026-11-11）：live `~/nx-sk/store.json`（13 栏目 / 57 条目 / 55 附件记录 / 42 个 AES-GCM 密文 / 1 KV 栏目）导入 `nxsk.db` 后逐项对账全等；55 条 FileRecord → attachments(kind='file')，51 条 inline 引用边与 CLI `file list`「被条目引用 51/55」精确吻合；抽样密文 blob 逐字节一致、kid 保留、`--mask` 解密链路完好。迁移前全量备份 138 文件 / 40,039,375 字节校验一致。
 
 ## 0.35.0 (2026-11-11)
 
