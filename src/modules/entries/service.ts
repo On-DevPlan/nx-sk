@@ -5,10 +5,14 @@
 // 写入分两趟：趟 A（异步，在草稿 section 上跑）解析字段、加密敏感值；
 // 趟 B（同步，在 mutateStore 事务里）只做赋值。这样加密只发生在事务外，
 // 事务里没有 await，也就没有「改了一半又抛错」的中间态。
-import { loadStore, mutateStore, type Store, type StoreEntry, type StoreSection } from '../../core/store.ts';
+//
+// schema v3（写时复制）：字段解析顺序 = 条目自身结构行 → 栏目字典 → quickAdd 推断。
+// quickAdd **不再登记进字典**——推断出的 def 只用于封装本次值，
+// 写后由 upsertEntryFields 把条目自身的占位行归正（type/label/spec）。
+import { loadStore, mutateStore, entryStructures, upsertEntryFields, type EntryFieldView, type Store, type StoreEntry, type StoreSection } from '../../core/store.ts';
 import { assertFieldKey } from '../../core/paths.ts';
 import { badInput, conflict, notFound } from '../../core/errors.ts';
-import { BOOL_FALSE, BOOL_TRUE, SOURCE_FIELD, SOURCE_GROUP, findKvSection, findSection, instantiateTemplate, isSensitiveField, looksSecretish, sectionNames } from '../../core/fields.ts';
+import { SCALAR_FIELD_TYPES, SOURCE_FIELD, SOURCE_GROUP, findKvSection, findSection, inferFieldType, instantiateTemplate, isSensitiveField, looksSecretish, sectionNames } from '../../core/fields.ts';
 import { behaviorOf } from '../../core/fields/registry.ts';
 import { sealOf } from '../../core/fields/seal/index.ts';
 import { sealScalar } from '../../core/fields/seal/common.ts';
@@ -18,7 +22,7 @@ import { isCipherBlob, maskValue } from '../../core/crypto.ts';
 import { sensitiveViewer } from '../../core/vault.ts';
 import * as att from '../../core/attachments.ts';
 import { mdImageIds, rewriteMdImages } from '../../core/mdimages.ts';
-import { looksLikeSourceList, normalizeSourceItem, normalizeSourceItems, resolveSourceConflicts, sourceItemTimeLabel } from '../../core/source.ts';
+import { normalizeSourceItem, normalizeSourceItems, resolveSourceConflicts, sourceItemTimeLabel } from '../../core/source.ts';
 import { displayPath } from '../../core/paths.ts';
 import { computeTable, renderTableText } from '../../shared/table.ts';
 import type { FieldDef, SourceItem } from '../../shared/fields/types.ts';
@@ -61,10 +65,32 @@ function resolveFieldDef(section: StoreSection, rawKey: unknown): FieldDef | nul
 }
 
 /**
- * 把一个没见过的键登记进草稿字典。
- * key 直接用用户敲的那个词（中文也行）——**写什么就存什么**，不必再记一个英文别名。
+ * v3：在**条目自身结构行**里解析用户敲的键。
+ * key 精确优先，其次 label；模板行（出身字典）优先于扩展行。
+ * 同类多命中 = 二义，报 CONFLICT 并列出行 id，让调用方用键名精确指定。
  */
-function registerField(section: StoreSection, rawKey: unknown, rawValue: unknown): FieldDef {
+function resolveOwnRow(ownRows: EntryFieldView[] | null | undefined, rawKey: unknown): FieldDef | null {
+  const rows = ownRows || [];
+  const key = String(rawKey).trim();
+  const byKey = rows.filter((r) => r.key === key);
+  const pool = byKey.length ? byKey : rows.filter((r) => String(r.label ?? '') === key);
+  if (!pool.length) return null;
+  const template = pool.filter((r) => r.templateFieldId != null);
+  const chosen = template.length ? template : pool;
+  if (chosen.length > 1) {
+    throw conflict(`字段定位「${key}」在条目自身结构里有 ${chosen.length} 行命中（${chosen.map((r) => r.id).join(', ')}），请用键名精确指定`);
+  }
+  return chosen[0].spec as unknown as FieldDef;
+}
+
+/**
+ * 把一个既不在字典、也不在条目行里的键推断成**扩展字段** def。
+ * key 直接用用户敲的那个词（中文也行）——**写什么就存什么**，不必再记一个英文别名。
+ *
+ * v3：不再 push 进 section.fields——扩展字段只活在条目自己的结构行上（写时复制），
+ * 字典保持「模板 + 台账」的身份。def 用于封装本次值 + 写后归正行。
+ */
+function inferExtensionField(section: StoreSection, rawKey: unknown, rawValue: unknown): FieldDef {
   // KV 栏目**拒绝加字段**：它的形状就是「一行一个键值对」，多一个字段就散了。
   // 这里必须报错而不是静默登记 —— 静默的后果是用户看到一堆无意义的字段名
   // （真实事故：面板那行「KV 直填」把 `3123312=xxx` 登记成了字段，而不是一个新键）。
@@ -81,17 +107,15 @@ function registerField(section: StoreSection, rawKey: unknown, rawValue: unknown
   // 键名长得像凭据（密码 / 令牌 / 密钥 / 账号…）→ **直接建成密文字段**。
   //
   // 这是「大胆写」能成立的前提：agent 可以一把 `--set 密码=…` 写进栏目，
-  // 而这把密码**落盘就是密文**，不会明文躺在 store.json 里。
+  // 而这把密码**落盘就是密文**，不会明文躺在存储里。
   // 刻意只对标量值生效：数组类（附件 / 结构清单 / 资料袋）有自己的形状，不能改类型。
   if (looksSecretish(key) && SCALAR_FIELD_TYPES.has(type)) type = 'secret';
-  const def = {
+  return {
     key,
     label: key,
     type: type as FieldDef['type'],
     group: section.groups?.[0]?.id || section.fields?.[0]?.group || 'other',
   } as FieldDef;
-  section.fields.push(def);
-  return def;
 }
 
 /**
@@ -116,50 +140,16 @@ async function prepareValue(section: StoreSection, def: FieldDef, raw: unknown, 
 }
 
 /**
- * 新字段的类型推断。**刻意不推 number**：
- * 18 位的身份证号 / 长数字 ID 超过 2^53，推成数字会**静默丢精度**。
- * 值仍是字符串，所以「直接存 kv」不会因为类型推断损坏数据。
- */
-// 值像不像附件 id（`f_xxxx`）。用来推断「写了一个没登记过的键」该登记成什么类型：
-// `--set 简历附件=f_abc` / `--set 简历附件=f_a,f_b` 应当登记成**附件字段**，
-// 而不是一个普通文本字段或 tags。
-const looksLikeFileId = (x: unknown) => typeof x === 'string' && /^f_[0-9a-z]+$/i.test(x.trim());
-const looksLikeRow = (x: unknown) => !!x && typeof x === 'object' && !Array.isArray(x);
-
-// 标量类型：值就是一个字符串/数字/布尔。能安全地改成密文字段（type: 'secret'）。
-// 数组类（file / entrylist / source / tags）有自己的形状，不在自动改型的范围里。
-const SCALAR_FIELD_TYPES = new Set(['text', 'textarea', 'number', 'date', 'month', 'bool']);
-
-function inferFieldType(raw: unknown): string {
-  if (Array.isArray(raw)) {
-    if (raw.length && raw.every(looksLikeFileId)) return 'file';
-    // 一袋 source（带 kind 且有内容）→ 登记成原始资料袋；判断比 entrylist 严，
-    // 因为 entrylist 的列也可能叫 kind —— 宁可登记成 entrylist 也不要错认成 source
-    if (looksLikeSourceList(raw)) return 'source';
-    // 行对象数组登记成结构清单——`--data '{"账号清单":[{…},{…}]}'` 自动建出能渲染的字段
-    if (raw.length && raw.every(looksLikeRow)) return 'entrylist';
-    return 'tags';
-  }
-  if (looksLikeFileId(raw)) return 'file';
-  if (typeof raw === 'string') {
-    const parts = raw.split(/[,，、;；]+/).map((x) => x.trim()).filter(Boolean);
-    if (parts.length && parts.every(looksLikeFileId)) return 'file';
-  }
-  if (typeof raw === 'boolean') return 'bool';
-  const s = String(raw).trim().toLowerCase();
-  if (BOOL_TRUE.includes(s) || BOOL_FALSE.includes(s)) return 'bool';
-  return 'text';
-}
-
-/**
- * 趟 A：在草稿 section 上解析字段、算出要写进去的值。
+ * 趟 A：解析字段、算出要写进去的值。
  *
- * **不认识的键不再报错**——直接登记进字段字典再写。
- * 字典从「写入的关卡」降级成「已用字段的台账 + 模板给的填写提示」：
+ * **不认识的键不再报错**——先查条目自身结构行，再查栏目字典，
+ * 都没有就按值推断成扩展字段（v3：只落条目行，不进字典）。
+ * 字典从「写入的关卡」降级成「模板 + 已用字段的台账」：
  * 用户想存什么键就存什么键，这才是 KV 该有的手感。
  */
-async function prepareWrite({ section, currentValues = {}, incoming }: {
+async function prepareWrite({ section, ownRows = null, currentValues = {}, incoming }: {
   section: StoreSection;
+  ownRows?: EntryFieldView[] | null;
   currentValues?: Record<string, unknown>;
   incoming: Record<string, unknown>;
 }): Promise<{ values: Record<string, unknown>; newFields: FieldDef[] }> {
@@ -167,11 +157,14 @@ async function prepareWrite({ section, currentValues = {}, incoming }: {
   const newFields: FieldDef[] = [];
   const values: Record<string, unknown> = {};
   for (const [rawKey, rawValue] of Object.entries(incoming)) {
-    let def = resolveFieldDef(draft, rawKey);
+    let def = resolveOwnRow(ownRows, rawKey) || resolveFieldDef(draft, rawKey);
     if (!def) {
-      def = registerField(draft, rawKey, rawValue);
+      def = inferExtensionField(draft, rawKey, rawValue);
       newFields.push(def);
     }
+    // prepareValue 的敏感判据读字典——保证 def 在草稿里（扩展行/扩展 def 不在；
+    // 只影响本次封装值，不落盘）。
+    if (!draft.fields.some((x) => x.key === def!.key)) draft.fields.push(def!);
     values[def.key] = await prepareValue(draft, def, rawValue, currentValues[def.key]);
   }
   return { values, newFields };
@@ -182,8 +175,14 @@ function autoTitle(section: StoreSection, values: Record<string, unknown>): stri
   return v === undefined || v === null || v === '' ? '' : String(v);
 }
 
+/** 条目自身行优先、字典兜底的字段定义清单（序列化/台账共用）。 */
+function defsForEntry(sec: StoreSection, ownRows: EntryFieldView[] | null | undefined): FieldDef[] {
+  return ownRows ? ownRows.map((r) => r.spec as unknown as FieldDef) : sec.fields;
+}
+
 export async function listEntries({ section, q }: { section?: string; q?: unknown } = {}) {
   const store = await loadStore();
+  const structures = entryStructures(store);
   let list = store.entries;
   if (section) list = list.filter((e) => e.section === mustFindSection(store, section).id);
   const viewers = new Map<string, Awaited<ReturnType<typeof sensitiveViewer>>>();
@@ -191,12 +190,13 @@ export async function listEntries({ section, q }: { section?: string; q?: unknow
   for (const e of list) {
     const sec = store.sections.find((s) => s.id === e.section);
     if (!sec) continue;
-    if (!viewers.has(sec.id)) viewers.set(sec.id, await sensitiveViewer(sec, list.filter((x) => x.section === sec.id)));
-    const item = serializeEntry(sec, e, { decrypt: viewers.get(sec.id) });
+    if (!viewers.has(sec.id)) viewers.set(sec.id, await sensitiveViewer(sec, list.filter((x) => x.section === sec.id), structures));
+    const ownRows = structures.get(e.id) || null;
+    const item = serializeEntry(sec, e, { decrypt: viewers.get(sec.id), ownRows });
     if (q) {
       // file 字段值是附件 id（可能挂多个），把解析出的附件名都加进搜索文本，
       // 才能按「简历/成绩单」搜到条目
-      const fileNames = sec.fields
+      const fileNames = defsForEntry(sec, ownRows)
         .filter((f) => f.type === 'file')
         .flatMap((f) => att.fileIdsOf(e.values?.[f.key])
           .map((id) => att.findFileRecord(store, id)?.name || ''));
@@ -223,8 +223,10 @@ export async function getEntry(ref: unknown, { mask, section }: { mask?: boolean
   const entry = resolveEntry(store, ref, section);
   const sec = store.sections.find((s) => s.id === entry.section);
   if (!sec) throw notFound(`条目 ${entry.id} 指向的栏目已不存在: ${entry.section}`);
-  const decrypt = await sensitiveViewer(sec, [entry]);
-  const serialized = serializeEntry(sec, entry, { mask: !!mask, decrypt });
+  const structures = entryStructures(store);
+  const ownRows = structures.get(entry.id) || null;
+  const decrypt = await sensitiveViewer(sec, [entry], structures);
+  const serialized = serializeEntry(sec, entry, { mask: !!mask, decrypt, ownRows });
   // 附带附件信息：键 = 附件 id / 文件名，值为名称 / 路径 / 链接。
   // 两个来源：`file` 字段挂的附件，以及**图文字段正文里内嵌的图片**（`![说明](f_x)`）——
   // 后者不进来的话，`entry get` 只能打印一串 f_xxx，而人/agent 要的是「这份文件在磁盘哪」。
@@ -242,23 +244,25 @@ export async function getEntry(ref: unknown, { mask, section }: { mask?: boolean
   // 附件引用由各类型的 `refs` 决定：file 的 id 列表 + md 正文图片 + 资料袋里的 file item。
   // 这里的口径是「谁引用了它」（与 attachments.fileReferences 一致）：资料袋 text 正文里
   // 内嵌的图不算——既有行为，P2 不改；导出打包才算（见 transfer.referencedFileIds）。
-  for (const f of sec.fields) {
+  const defs = defsForEntry(sec, ownRows);
+  for (const f of defs) {
     for (const id of behaviorOf(f.type).refs(f, serialized.values[f.key])) putFile(id);
   }
   // 字段类型随读出来：CLI 渲染要知道哪个值是「图文」，才能把 f_xxx 换成文件名/路径；
   // 结构清单还要带**列定义**（entryFields），渲染行时才知道每个键的人读标签
   const fieldTypes: Record<string, string> = {};
   const entryFields: Record<string, Array<{ key: string; label: string; sensitive: boolean }>> = {};
-  for (const f of sec.fields) {
+  for (const f of defs) {
     fieldTypes[f.key] = f.type;
     if (f.type === 'entrylist') {
-      entryFields[f.key] = (f.fields || []).map((s) => ({ key: s.key, label: s.label, sensitive: s.sensitive === true }));
+      entryFields[f.key] = ((f as unknown as { fields?: Array<{ key: string; label: string; sensitive?: boolean }> }).fields || [])
+        .map((s) => ({ key: s.key, label: s.label, sensitive: s.sensitive === true }));
     }
   }
   // 表格的**现值**：计算列与统计行在读的时候现算，不落盘 ——
   // 所以「存的数字」和「算出来的合计」永远同源，不会出现「合计是上个月的值」。
   const tables: Record<string, unknown> = {};
-  for (const f of sec.fields) {
+  for (const f of defs) {
     if (f.type !== 'table') continue;
     tables[f.key] = computeTable(f, serialized.values[f.key]);
   }
@@ -281,6 +285,14 @@ export async function addEntry({ section, title, set, data, tags, 'dry-run': dry
   }
 
   const { values, newFields } = await prepareWrite({ section: sec, incoming });
+  // 模板默认值（v3）：字典里 defaultValue 非空、本次没给的键，落默认值。
+  // 敏感字段走同一个封装入口（落盘即密文），与显式写入零差别。
+  for (const def of sec.fields) {
+    const d = def as unknown as Record<string, unknown>;
+    if (d.defaultValue === undefined || d.defaultValue === null) continue;
+    if (values[def.key] !== undefined) continue;
+    values[def.key] = await prepareValue(sec, def, d.defaultValue, undefined);
+  }
   const finalTitle = String(title || autoTitle(sec, values) || '').trim();
   if (!finalTitle) {
     throw badInput(`无法确定条目名：加 --title <名>，或先填上「${sec.titleField || '首个字段'}」字段`);
@@ -296,16 +308,12 @@ export async function addEntry({ section, title, set, data, tags, 'dry-run': dry
     return { status: 'skipped', dryRun: true, wouldCreate: { ...entry, values: maskAll(sec, entry) }, createdFields: newFields.map((f) => f.key) };
   }
   await mutateStore((s) => {
-    // 自动登记的字段必须跟条目一起落盘：只有 addEntry 报了 createdFields 却不写
-    // 字典，面板/`entry get` 都按 section.fields 序列化——那些值会当场「隐身」。
-    // updateEntry 一直是写的（见下方同名逻辑），这里对齐成同一份行为。
-    const section = s.sections.find((x) => x.id === sec.id)!;
-    for (const f of newFields) {
-      if (!section.fields.some((x) => x.key === f.key)) section.fields.push(f);
-    }
-    if (newFields.length) section.updatedAt = nowIso();
+    // v3 写时复制：自动推断的扩展字段**不进字典**——writeStore 会为新条目
+    // 实例化全部模板行，并为 values 里字典没有的键落扩展占位行；
+    // 占位行的 type/label/spec 由下方 upsertEntryFields 按推断结果归正。
     s.entries.push(entry);
   });
+  if (newFields.length) await upsertEntryFields(entry.id, newFields);
   return {
     status: 'ok', created: true, id: entry.id, title: entry.title, section: sec.id,
     completeness: completeness(sec, entry), createdFields: newFields.map((f) => f.key),
@@ -325,16 +333,17 @@ export async function updateEntry(ref: unknown, patch: Record<string, any> = {})
   if (!changedKeys.length && patch.title === undefined && patch.tags === undefined) {
     throw badInput('没有要改的内容：用 --set 字段=值 / --data @file.json / --unset 字段 / --title / --tags');
   }
-  // 先把 unset 的字段名解析出来（错别字要在写盘前就报掉）
+  const ownRows = entryStructures(store).get(target.id) || null;
+  // 先把 unset 的字段名解析出来（错别字要在写盘前就报掉）：条目自身行优先，再字典。
   const unsetKeys: string[] = [];
   for (const k of unset) {
-    const def = resolveFieldDef(sec, k);
+    const def = resolveOwnRow(ownRows, k) || resolveFieldDef(sec, k);
     if (!def) throw notFound(`栏目「${sec.title}」没有字段: ${k}`);
     unsetKeys.push(def.key);
   }
 
   const { values, newFields } = await prepareWrite({
-    section: sec, currentValues: target.values, incoming,
+    section: sec, ownRows, currentValues: target.values, incoming,
   });
 
   if (dryRun) {
@@ -356,17 +365,15 @@ export async function updateEntry(ref: unknown, patch: Record<string, any> = {})
 
   await mutateStore((s) => {
     const e = s.entries.find((x) => x.id === target.id)!;
-    const section = s.sections.find((x) => x.id === e.section)!;
-    for (const f of newFields) {
-      if (!section.fields.some((x) => x.key === f.key)) section.fields.push(f);
-    }
+    // v3 写时复制：扩展键不再 push 进字典（见 addEntry 同名注释），
+    // 行归正在下方 upsertEntryFields。
     for (const [k, v] of Object.entries(values)) e.values[k] = v;
     for (const k of unsetKeys) e.values[k] = null;
     if (patch.title !== undefined) e.title = String(patch.title);
     if (Array.isArray(patch.tags)) e.tags = patch.tags.map(String);
     e.updatedAt = nowIso();
-    if (newFields.length) section.updatedAt = nowIso();
   });
+  if (newFields.length) await upsertEntryFields(target.id, newFields);
 
   const after = await loadStore();
   const finalEntry = after.entries.find((x) => x.id === target.id)!;
@@ -376,7 +383,7 @@ export async function updateEntry(ref: unknown, patch: Record<string, any> = {})
     // 报**解析后**的字段 key，而不是用户敲的中文标签——调用方/agent 拿它去对比字典
     changed: [...Object.keys(values), ...unsetKeys.map((k) => `-${k}`)],
     newFields: newFields.map((f) => f.key),
-    completeness: completeness(finalSec, finalEntry),
+    completeness: completeness(finalSec, finalEntry, entryStructures(after).get(finalEntry.id)),
   };
 }
 
@@ -409,24 +416,39 @@ interface FieldDictEntry {
 /** 字段字典：agent 在填之前必须先看这个，否则只能靠猜字段名。 */
 export async function fieldDictionary({ section }: { section?: string } = {}) {
   const store = await loadStore();
-  const shape = (sec: StoreSection) => ({
-    id: sec.id,
-    title: sec.title,
-    titleField: sec.titleField,
-    titleLabel: sec.titleLabel,
-    groups: sec.groups,
-    fields: (sec.fields as unknown as FieldDictEntry[]).map((x) => ({
-      key: x.key, label: x.label, type: x.type, group: x.group,
-      kind: x.kind || '',
-      // 结构清单的列跟着字典出去：agent 写行之前得知道行里允许哪些键
-      fields: x.fields || null,
-      // 表格的列（带类型/公式）与统计行同理
-      columns: x.columns || null,
-      totals: x.totals || null,
-      maxRows: x.maxRows || null,
-      hint: x.hint || '', options: x.options || null, sensitive: isSensitiveField(sec, x.key),
-    })),
-  });
+  const structures = entryStructures(store);
+  const shape = (sec: StoreSection) => {
+    // 台账 = 栏目字典 + 各条目的**扩展行**（v3：quickAdd 不进字典，但台账要看得见）。
+    // 按 key 去重（字典优先），形状从各自的 spec 出。
+    const byKey = new Map<string, Record<string, unknown>>();
+    for (const x of sec.fields as unknown as FieldDictEntry[]) byKey.set(x.key, x as unknown as Record<string, unknown>);
+    for (const e of store.entries) {
+      if (e.section !== sec.id) continue;
+      for (const r of structures.get(e.id) || []) {
+        if (byKey.has(r.key)) continue;
+        byKey.set(r.key, r.spec as Record<string, unknown>);
+      }
+    }
+    return {
+      id: sec.id,
+      title: sec.title,
+      titleField: sec.titleField,
+      titleLabel: sec.titleLabel,
+      groups: sec.groups,
+      fields: [...byKey.values()].map((x) => ({
+        key: String(x.key), label: String(x.label ?? x.key), type: String(x.type || 'text'), group: x.group ? String(x.group) : undefined,
+        kind: String(x.kind || ''),
+        // 结构清单的列跟着字典出去：agent 写行之前得知道行里允许哪些键
+        fields: (x.fields as unknown[] | null) || null,
+        // 表格的列（带类型/公式）与统计行同理
+        columns: (x.columns as FieldDictEntry['columns']) || null,
+        totals: (x.totals as unknown[] | null) || null,
+        maxRows: (x.maxRows as number | null) ?? null,
+        hint: String(x.hint || ''), options: (x.options as string[] | null) || null,
+        sensitive: x.sensitive === true || x.type === 'secret' || isSensitiveField(sec, x.key),
+      })),
+    };
+  };
   if (section) return { count: 1, sections: [shape(mustFindSection(store, section))] };
   return { count: store.sections.length, sections: store.sections.map(shape) };
 }
@@ -1116,9 +1138,11 @@ export async function getTable(ref: unknown, { field, mask, section }: { field?:
   const store = await loadStore();
   const entry = resolveEntry(store, ref, section);
   const sec = mustFindSection(store, entry.section);
-  const defs = sec.fields.filter((f) => f.type === 'table');
+  const structures = entryStructures(store);
+  const ownRows = structures.get(entry.id) || null;
+  const defs = defsForEntry(sec, ownRows).filter((f) => f.type === 'table');
   if (!defs.length) {
-    throw notFound(`栏目「${sec.title}」没有表格字段（table）。现有字段: ${sec.fields.map((f) => `${f.label}(${f.type})`).join('、')}`);
+    throw notFound(`栏目「${sec.title}」没有表格字段（table）。现有字段: ${defsForEntry(sec, ownRows).map((f) => `${f.label}(${f.type})`).join('、')}`);
   }
   const wanted = String(field ?? '').trim();
   const def = wanted
@@ -1127,8 +1151,8 @@ export async function getTable(ref: unknown, { field, mask, section }: { field?:
   if (!def) {
     throw notFound(`栏目「${sec.title}」没有叫「${wanted}」的表格字段（有: ${defs.map((f) => `${f.label}(${f.key})`).join('、')}）`);
   }
-  const decrypt = await sensitiveViewer(sec, [entry]);
-  const serialized = serializeEntry(sec, entry, { mask: !!mask, decrypt });
+  const decrypt = await sensitiveViewer(sec, [entry], structures);
+  const serialized = serializeEntry(sec, entry, { mask: !!mask, decrypt, ownRows });
   return {
     id: entry.id,
     title: entry.title,
@@ -1186,16 +1210,18 @@ const KEY_FIELD_RE = new RegExp(`${KEY_URL_RE.source}|${KEY_SECRET_RE.source}`, 
 
 export async function keysLedger({ section, q, reveal }: { section?: string; q?: unknown; reveal?: boolean } = {}) {
   const store = await loadStore();
+  const structures = entryStructures(store);
   let sections = store.sections;
   if (section) sections = [mustFindSection(store, section)];
   const out: Array<{ section: string; sectionId: string; entry: string; entryId: string; key: string; label: string; sensitive: boolean; value: string }> = [];
   for (const sec of sections) {
     const mine = store.entries.filter((e) => e.section === sec.id);
     if (!mine.length) continue;
-    const decrypt = await sensitiveViewer(sec, mine);
+    const decrypt = await sensitiveViewer(sec, mine, structures);
     for (const e of mine) {
-      const item = serializeEntry(sec, e, { decrypt });
-      for (const def of sec.fields) {
+      const ownRows = structures.get(e.id) || null;
+      const item = serializeEntry(sec, e, { decrypt, ownRows });
+      for (const def of defsForEntry(sec, ownRows)) {
         const raw = item.values?.[def.key];
         if (raw === undefined || raw === null || String(raw).trim() === '') continue;
 

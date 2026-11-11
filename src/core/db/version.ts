@@ -11,8 +11,11 @@
  * settings / ui_state / meta。store.json 只在首启被导入一次，运行时不再读写。
  * v2（2026-11-11）：挂载收敛到「具体条目的具体字段」——entry_attach 去 role='source'
  * （source 只是普通字段），删结构级边表 section_attach / field_attach（附件挂在结构上没价值）。
+ * v3（2026-11-11）：动态结构/写时复制——栏目字段字典降级成模板，每个条目自带 entry_fields
+ * 行（结构）+ field_data 行（值）；entries 的 "values" JSON 列退役；entry_attach 改挂
+ * entry_field_id；quickAdd 不再污染字典；sync 第二阶段把字典缺行补进存量条目（只增不改）。
  */
-export const CURRENT_SCHEMA_VERSION = 2;
+export const CURRENT_SCHEMA_VERSION = 3;
 
 /**
  * 运行时最低 Node 版本。

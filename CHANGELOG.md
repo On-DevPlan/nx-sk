@@ -2,6 +2,20 @@
 
 本文件格式参考 [Keep a Changelog](https://keepachangelog.com/)，中文正文。
 
+## [Unreleased]
+
+**schema v3：动态结构——条目字段写时复制（copy-on-write）。栏目字段字典降级成模板，每个条目带自己的结构行与值行。**
+
+### Changed
+
+- **写时复制**：新增 `entry_fields`（条目自身字段行：key/label/type/spec/fill/position，`template_field_id` 非 NULL=出身模板、NULL=扩展字段）与 `field_data`（值逐键一行，JSON 文本，密文 blob 原样搬运）。`entries."values"` 列退役；`entry_attach` 的挂载点从 (entry_id, field_key) 收敛到 `entry_field_id`。行 id 全部确定性派生（`ef_<sha1[0:16]>` / `d_<sha1[0:16]>`，见 `db/identity.ts`），迁移搬运与运行时写入共用同一公式。
+- **模板只初始化**：新建条目按字典实例化全部模板行；字典后续增删改（add-field / set-field / remove-field）**不回刷存量条目**——存量条目按自身行读写（序列化、完整度、附件反查、密文视图、导出包都看行）。
+- **quickAdd 不污染字典**：`--set 新键=值` 推断出的字段只落条目自身的扩展行（bool / secretish→secret / file 等推断规则不变，落盘即密文）；`entry fields` 台账 = 字典 + 各条目扩展行（按 key 去重）。
+- **`section sync` 重定义为两阶段（都只增不改）**：阶段 1 代码模板→栏目字典（原语义）；阶段 2 栏目字典→存量条目结构行（补缺行，position 追加）。非模板栏目不再报错——「add-field 之后跑 sync 把新行补进条目」正是 v3 的主要用法。`fields` 表新增 `default_value` 列：sync 补的新行与新建条目没给值的键都按它落数据行（只给新行，不回刷）。
+- 序列化契约不变：空值仍输出 `null`、`values` 键集与条目行一致；栏目 ZIP 包格式不变（manifest.entries[].values 仍是逐键 map）。
+- 迁移：`migrations/v3.sql`（DDL + entries/entry_attach 重建）+ `migrations/v3-apply.ts`（拆行/边重映射/unmapped 计数写 `meta.migrate_v3`）；`CURRENT_SCHEMA_VERSION=3`；v1/v2.sql 一字未动。升级前自动快照 `migrate/<ts>-pre-v2-to-v3.db` 机制不变。
+- 测试同步：db-upgrade 的升级用例改为**裸 SQL 造真 v2 库**再升级（改版本号模拟旧库在 v3 下不再成立）；smoke 的存储布局探针（直读 values 列）改为 JOIN field_data——这是 schema 变化本身强制的适配；attachments 的「备用附件登记进字典」用例改为钉条目扩展行 + 字典不被污染。
+
 ## 0.37.0 (2026-11-11)
 
 **schema v2：挂载位置收敛到「具体栏目的具体条目的具体字段」——source 只是普通字段，附件不挂结构。**

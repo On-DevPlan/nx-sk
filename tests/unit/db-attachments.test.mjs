@@ -26,10 +26,15 @@ test('身份规则：url 大小写不敏感、内部指针 id 确定性、前缀
   assert.equal(identity.attIdForUrl('HTTPS://X.dev/a'), identity.attIdForUrl('https://x.dev/a'), '小写归一');
   assert.equal(identity.attIdForSection('demo'), identity.attIdForSection('demo'));
   assert.match(identity.attIdForEntry('e_1'), /^att_entry_[0-9a-f]{16}$/);
-  assert.match(identity.attIdForField('demo', 'att'), /^att_field_[0-9a-f]{16}$/);
-  assert.equal(identity.fieldTargetKey('demo', 'att'), 'demo:att');
-  const p = identity.pointerIdentity('field', { sectionId: 'demo', key: 'att' });
-  assert.deepEqual(p, { id: identity.attIdForField('demo', 'att'), targetKind: 'field', targetKey: 'demo:att' });
+  // v3：条目结构行 / 值行都是确定性派生；field 指针挂在结构行 id 上
+  assert.match(identity.entryFieldId('e_1', 'att'), /^ef_[0-9a-f]{16}$/);
+  assert.equal(identity.entryFieldId('e_1', 'att'), identity.entryFieldId('e_1', 'att'), '同一 (条目,键) 永远同一行');
+  assert.match(identity.fieldDataId(identity.entryFieldId('e_1', 'att')), /^d_[0-9a-f]{16}$/);
+  const ef = identity.entryFieldId('e_1', 'att');
+  assert.match(identity.attIdForField(ef), /^att_field_[0-9a-f]{16}$/);
+  assert.equal(identity.fieldTargetKey('demo', 'att'), 'demo:att', 'template_field_id 的复合串口径');
+  const p = identity.pointerIdentity('field', { entryFieldId: ef });
+  assert.deepEqual(p, { id: identity.attIdForField(ef), targetKind: 'field', targetKey: ef });
   assert.throws(() => identity.pointerIdentity('file', {}), /只认内部种类/);
 });
 

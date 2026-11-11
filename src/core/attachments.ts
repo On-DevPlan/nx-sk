@@ -246,8 +246,15 @@ export function findFileRecord(store: StoreLike, ref: unknown): FileRecord | nul
  *   3. `source` 字段 —— 原始资料袋里 kind='file' 的 item（袋是溯源的锚点：
  *      字段值是从这份原件整理出来的，原件被删，溯源就成了空话）。
  * 同一个（条目, 字段）只出一条。附件中心据此显示「被哪些栏目 / 条目 / 字段用到」。
+ *
+ * v3：传 `structures`（条目自身结构行）时，扫描的字段定义用**条目自己的行**——
+ * 扩展行里的 file/md/source 引用也算数；不传退回栏目字典（旧行为）。
  */
-export function fileReferences(store: StoreLike, rec: FileRecord | null | undefined): FileReference[] {
+export function fileReferences(
+  store: StoreLike,
+  rec: FileRecord | null | undefined,
+  structures?: Map<string, { key: string; spec: Record<string, unknown> }[]>,
+): FileReference[] {
   if (!rec) return [];
   // 按 **id** 判定命中，不做对象引用比较（`===`）：调用方拿到的往往是
   // listFiles 加工过的副本，引用比较会静默失配 —— 附件就被误判成「未引用」了。
@@ -266,10 +273,12 @@ export function fileReferences(store: StoreLike, rec: FileRecord | null | undefi
     // 一次栏目只扫一遍条目，别在字段循环里反复全表扫
     const entries = (store.entries || []).filter((e) => e.section === sec.id);
     if (!entries.length) continue;
-    const refFields = (sec.fields || []).filter(mayReferenceFiles);
-    if (!refFields.length) continue;
 
     for (const e of entries) {
+      const defs = (structures?.get(e.id)?.map((r) => r.spec as { key: string; label?: string; type: string })
+        ?? (sec.fields || [])) as Array<{ key: string; label?: string; type: string }>;
+      const refFields = defs.filter(mayReferenceFiles);
+      if (!refFields.length) continue;
       const push = (f: { key: string; label?: string }) => out.push({
         sectionId: sec.id, sectionTitle: sec.title,
         entryId: e.id, entryTitle: e.title,
@@ -291,11 +300,25 @@ export function fileReferences(store: StoreLike, rec: FileRecord | null | undefi
  * 中心据此按栏目筛选 / 分组 —— 组织方式**完全由栏目驱动，不预定义任何分类或槽位**。
  * 带 `file` / `md` 字段的栏目都算数：md 字段正文里贴的图也是正式引用；
  * `source` 袋也算——袋里的原始文件是溯源的锚点，同样要能按栏目筛出来。
+ * v3：字典没有但条目自身行有的（扩展 file 键），该栏目同样算数。
  */
-export function collectFileSections(store: StoreLike): Array<{ id: string; title?: string }> {
-  return (store.sections || [])
-    .filter((s) => (s.fields || []).some(mayReferenceFiles))
-    .map((s) => ({ id: s.id, title: s.title }));
+export function collectFileSections(
+  store: StoreLike,
+  structures?: Map<string, { key: string; spec: Record<string, unknown> }[]>,
+): Array<{ id: string; title?: string }> {
+  const out: Array<{ id: string; title?: string }> = [];
+  for (const s of store.sections || []) {
+    let hit = (s.fields || []).some(mayReferenceFiles);
+    if (!hit && structures) {
+      for (const e of store.entries || []) {
+        if (e.section !== s.id) continue;
+        const rows = structures.get(e.id);
+        if (rows?.some((r) => mayReferenceFiles(r.spec as { type: string }))) { hit = true; break; }
+      }
+    }
+    if (hit) out.push({ id: s.id, title: s.title });
+  }
+  return out;
 }
 
 export function fileRecordAbs(rec: Pick<FileRecord, 'rel'>): string {
@@ -308,7 +331,11 @@ export function fileLinks(rec: Pick<FileRecord, 'id'>): { url: string; downloadU
 }
 
 /** 对外（CLI / Web）的完整描述：物理路径 + 展示路径 + 链接（+ 可选的反向引用）。 */
-export function describeFile(rec: FileRecord, store: StoreLike | null = null) {
+export function describeFile(
+  rec: FileRecord,
+  store: StoreLike | null = null,
+  structures?: Map<string, { key: string; spec: Record<string, unknown> }[]>,
+) {
   const abs = fileRecordAbs(rec);
   return {
     ...rec,
@@ -317,7 +344,7 @@ export function describeFile(rec: FileRecord, store: StoreLike | null = null) {
     path: abs,
     displayPath: displayPath(abs),
     sourceDisplay: rec.sourcePath ? displayPath(rec.sourcePath) : '',
-    usedBy: store ? fileReferences(store, rec) : [],
+    usedBy: store ? fileReferences(store, rec, structures) : [],
     ...fileLinks(rec),
   };
 }

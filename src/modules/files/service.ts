@@ -2,7 +2,7 @@
 // 台账（store.files）的读写走 store.js——和 entries 一样的「两趟」结构：
 // 先在事务外完成文件移动/复制，再在 mutateStore 事务里改台账。
 import type { ServerResponse } from 'node:http';
-import { loadStore, mutateStore } from '../../core/store.ts';
+import { loadStore, mutateStore, entryStructures } from '../../core/store.ts';
 import { displayPath, filesDir } from '../../core/paths.ts';
 import { badInput, external, notFound } from '../../core/errors.ts';
 import { nowIso } from '../../core/ids.ts';
@@ -36,8 +36,9 @@ export async function listFiles({ category, q, section, limit = 0, offset = 0 }:
   category?: string; q?: string; section?: string; limit?: number; offset?: number;
 } = {}) {
   const store = await loadStore();
+  const structures = entryStructures(store);
   assertCategory(category);
-  const withRefs = store.files.map((rec) => ({ rec, usedBy: fileReferences(store, rec) }));
+  const withRefs = store.files.map((rec) => ({ rec, usedBy: fileReferences(store, rec, structures) }));
   let list = withRefs;
   if (category) list = list.filter((x) => x.rec.category === category);
   if (section === 'none' || section === 'unlinked') {
@@ -64,7 +65,7 @@ export async function listFiles({ category, q, section, limit = 0, offset = 0 }:
   let totalBytes = 0;
   for (const r of store.files) totalBytes += r.bytes;
   // 分组素材：带 file 或 md 字段的栏目（栏目驱动）及其引用数
-  const sections = collectFileSections(store).map((s) => ({
+  const sections = collectFileSections(store, structures).map((s) => ({
     ...s, count: withRefs.filter((x) => x.usedBy.some((u) => u.sectionId === s.id)).length,
   }));
   return {
@@ -76,14 +77,14 @@ export async function listFiles({ category, q, section, limit = 0, offset = 0 }:
     rootRaw: filesDir(),
     sections,
     page: { limit: size, offset: start, count: pageList.length, total: filtered, hasMore: start + pageList.length < filtered },
-    files: pageList.map((x) => describeFile(x.rec, store)),
+    files: pageList.map((x) => describeFile(x.rec, store, structures)),
   };
 }
 
 export async function getFile(ref: unknown) {
   const store = await loadStore();
   // 带 store：顺带反查「被哪些条目引用」
-  return describeFile(mustFind(store, ref), store);
+  return describeFile(mustFind(store, ref), store, entryStructures(store));
 }
 
 export async function addFile(patch: Record<string, unknown> = {}) {
@@ -200,7 +201,8 @@ export async function removeFile(ref: unknown, patch: Record<string, unknown> = 
 export async function cleanupUnreferenced(patch: Record<string, unknown> = {}) {
   const dryRun = patch['dry-run'];
   const store = await loadStore();
-  const orphans = store.files.filter((rec) => !fileReferences(store, rec).length);
+  const structures = entryStructures(store);
+  const orphans = store.files.filter((rec) => !fileReferences(store, rec, structures).length);
   if (!orphans.length) {
     // 已经是期望状态（没有孤儿）→ skipped，不是失败
     return { status: 'skipped', count: 0, removed: [], reason: '没有未引用的附件' };

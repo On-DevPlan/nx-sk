@@ -14,6 +14,7 @@ import { chmodPrivate, ensureDir, pathExists } from './fsx.ts';
 import { KEY_BYTES, decryptValue, deriveKey, isCipherBlob, keyId, newKey } from './crypto.ts';
 import { behaviorOf } from './fields/registry.ts';
 import type { StoreEntry, StoreSection } from './store.ts';
+import type { EntryFieldView } from './store-shape.ts';
 import type { FieldDef } from '../shared/fields/types.ts';
 
 export const SOURCE_ENV = 'env';
@@ -100,12 +101,27 @@ export async function currentKeyId() {
  * 为什么放在这里：render 是纯函数（可单测、无 IO），而「什么时候允许解密」
  * 是安全决策——把它收成**一个**函数，就不会出现「某个出口忘了打码」。
  * 只有当栏目里真有密文字段、且条目里真有密文时才去解析密钥（避免无谓地生成密钥文件）。
+ *
+ * v3：传 `structures` 时敏感/清单字段的判据用「字典 ∪ 条目自身行」（同行键以行为准）——
+ * 扩展行里 `--set 密码=…` 推断出的 secret 键也要解得开。
  */
-export async function sensitiveViewer(section: StoreSection | null | undefined, entries: StoreEntry[] = []) {
-  const sensitive = (section?.fields || []).filter((f) => f.sensitive || f.type === 'secret');
+export async function sensitiveViewer(
+  section: StoreSection | null | undefined,
+  entries: StoreEntry[] = [],
+  structures?: Map<string, EntryFieldView[]>,
+) {
+  const defs = new Map<string, FieldDef>();
+  for (const f of section?.fields || []) defs.set(f.key, f as unknown as FieldDef);
+  if (structures) {
+    for (const e of entries) {
+      for (const r of structures.get(e.id) || []) defs.set(r.key, r.spec as unknown as FieldDef);
+    }
+  }
+  const allFields = [...defs.values()];
+  const sensitive = allFields.filter((f) => f.sensitive || f.type === 'secret');
   // 清单类（结构清单 entrylist / 表格 table）的敏感**子值**也是密文落盘：
   // 不探行内的话，清单里真有密文时 viewer 不会被创建，读出来全变成「需要密钥才能解密」。
-  const lists = (section?.fields || []).filter((f) => f.type === 'entrylist' || f.type === 'table');
+  const lists = allFields.filter((f) => f.type === 'entrylist' || f.type === 'table');
   if (!sensitive.length && !lists.length) return undefined;
   const keys = sensitive.map((f) => f.key);
   // 两种清单的「列」字段名不同（fields / columns），但密文边界的判据是同一个 ——

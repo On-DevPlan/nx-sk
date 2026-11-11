@@ -17,9 +17,10 @@ import { basename, dirname, extname, join, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 import { createZip, readZip } from '../../core/zip.ts';
 import { isEncryptedPackage, openPackage, sealPackage } from '../../core/securezip.ts';
-import { loadStore, mutateStore, type Store, type StoreEntry, type StoreSection } from '../../core/store.ts';
+import { loadStore, mutateStore, entryStructures, type Store, type StoreEntry, type StoreSection } from '../../core/store.ts';
+import type { EntryFieldView } from '../../core/store.ts';
 import { displayPath, exportDir, VERSION } from '../../core/paths.ts';
-import { findSection, isSensitiveField, sectionNames } from '../../core/fields.ts';
+import { findSection, inferFieldType, isSensitiveField, sectionNames } from '../../core/fields.ts';
 import { decryptValue, isCipherBlob } from '../../core/crypto.ts';
 import { resolveVaultKey } from '../../core/vault.ts';
 import { CATEGORY_IDS, fileRecordAbs, findFileRecord, importContent } from '../../core/attachments.ts';
@@ -74,10 +75,27 @@ function uniqueSectionId(store: Store, base: string): string {
   return `${base}-${Date.now()}`;
 }
 
-async function plainValues(section: StoreSection, values: unknown): Promise<Record<string, unknown>> {
+/** 条目的字段定义清单：自身结构行优先、栏目字典兜底（v3 写时复制，包里要带扩展行的值）。 */
+function entryDefs(section: StoreSection, ownRows: EntryFieldView[] | null | undefined): FieldDefLike[] {
+  return ownRows ? ownRows.map((r) => r.spec as unknown as FieldDefLike) : (section.fields || []) as unknown as FieldDefLike[];
+}
+
+/** 字段定义的宽松读取形状（transfer 只碰这几个键）。 */
+interface FieldDefLike {
+  key: string;
+  label?: string;
+  type: string;
+  sensitive?: unknown;
+  fields?: unknown;
+  columns?: unknown;
+  [k: string]: unknown;
+}
+
+async function plainValues(defs: FieldDefLike[], values: unknown): Promise<Record<string, unknown>> {
+  const asSection = { fields: defs };
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(values || {})) {
-    if (!isSensitiveField(section, k)) { out[k] = v; continue; }
+    if (!isSensitiveField(asSection, k)) { out[k] = v; continue; }
     if (isCipherBlob(v)) {
       const { key } = await resolveVaultKey();
       out[k] = decryptValue(key, v);
@@ -87,9 +105,9 @@ async function plainValues(section: StoreSection, values: unknown): Promise<Reco
   }
   // 结构清单（entrylist）的敏感子值也是密文落盘：不解开的话包里会混进密文对象，
   // 导入到另一台机器（另一把密钥）就永远解不开了。
-  for (const f of section.fields || []) {
+  for (const f of defs) {
     if (f.type !== 'entrylist' || !Array.isArray(out[f.key])) continue;
-    const subs = (f.fields || []).filter((s) => s.sensitive);
+    const subs = ((f.fields || []) as Array<{ key: string; sensitive?: unknown }>).filter((s) => s.sensitive);
     if (!subs.length) continue;
     const plain: unknown[] = [];
     for (const row of out[f.key] as unknown[]) {
@@ -107,12 +125,12 @@ async function plainValues(section: StoreSection, values: unknown): Promise<Reco
   }
   // 表格（table）的敏感列同理。**列以值自带的 columns 为准**（表格的列存在数据里，
   // 字段定义里只有「初始列」）—— 用 f.columns 会漏掉编辑时新加的敏感列。
-  for (const f of section.fields || []) {
+  for (const f of defs) {
     if (f.type !== 'table') continue;
     const doc = out[f.key] as { rows?: unknown[]; columns?: unknown } | null | undefined;
     if (!doc || typeof doc !== 'object' || !Array.isArray(doc.rows)) continue;
     const sensitiveKeys = (Array.isArray(doc.columns) ? doc.columns : [])
-      .filter((c) => c && c.sensitive).map((c) => c.key);
+      .filter((c) => c && (c as { sensitive?: unknown }).sensitive).map((c) => (c as { key: string }).key);
     if (!sensitiveKeys.length) continue;
     let vaultKey: Buffer | null = null;
     const rows: unknown[] = [];
@@ -132,10 +150,10 @@ async function plainValues(section: StoreSection, values: unknown): Promise<Reco
 }
 
 /** 一个栏目引用了哪些附件：由各类型的 `refs` 决定（导出打包口径：算上资料袋正文图片）。 */
-function referencedFileIds(section: StoreSection, entries: StoreEntry[]): Set<string> {
+function referencedFileIds(entries: StoreEntry[], defsOf: (e: StoreEntry) => FieldDefLike[]): Set<string> {
   const ids = new Set<string>();
   for (const e of entries) {
-    for (const f of section.fields) {
+    for (const f of defsOf(e)) {
       const v = e.values?.[f.key];
       if (v === null || v === undefined) continue;
       // 原始资料袋里的 file item 与 text 正文内嵌的图都是正式引用：袋是「字段值从哪来」的
@@ -153,9 +171,11 @@ const extensionOf = (rec: { ext?: string | null; name?: string | null }) => rec.
  */
 export async function buildSectionZip(ref: unknown, { entryIds, passphrase, includeFiles = true }: BuildZipOptions = {}) {
   const store = await loadStore();
+  const structures = entryStructures(store);
   const section = findSection(store, ref);
   if (!section) throw notFound(`找不到栏目: ${ref} —— 现有: ${sectionNames(store)}`);
   const all = store.entries.filter((e) => e.section === section.id);
+  const defsOf = (e: StoreEntry) => entryDefs(section, structures.get(e.id));
   // 精确导出：按 id 或标题选条目；**只打包被选条目引用到的附件**（否则包会带一堆无关文件）
   let rows = all;
   const picked = (Array.isArray(entryIds) ? entryIds : []).map(String).filter(Boolean);
@@ -168,7 +188,7 @@ export async function buildSectionZip(ref: unknown, { entryIds, passphrase, incl
 
   const entries: Array<{ id: string; title: string; tags: string[]; createdAt: string | null; updatedAt: string | null; values: Record<string, unknown> }> = [];
   for (const e of rows) {
-    const plain = await plainValues(section, e.values);
+    const plain = await plainValues(defsOf(e), e.values);
     entries.push({
       id: e.id,
       title: e.title,
@@ -182,7 +202,7 @@ export async function buildSectionZip(ref: unknown, { entryIds, passphrase, incl
   const fileRecords = [];
   const zipEntries: ZipFile[] = [];
   let missingFiles = 0;
-  for (const id of referencedFileIds(section, rows)) {
+  for (const id of referencedFileIds(rows, defsOf)) {
     const rec = findFileRecord(store, id);
     if (!rec) { missingFiles += 1; continue; }
     const zipPath = `attachments/${rec.id}${extensionOf(rec)}`;
@@ -536,13 +556,17 @@ function uniqueTitle(base: string, taken: Set<string>): string {
   return `${base}（导入 ${Date.now()}）`;
 }
 
+/**
+ * 引用重映射：由各类型 `remap` 决定（file 的 id 列表、md 正文、source 袋里的 fileId 与正文图）。
+ * v3：键不在字典的（扩展字段）按值推断伪 def 再 remap——否则包里 `备用附件=f_x` 这类
+ * 引用会原样带过去，指向源机的附件 id；其余类型 remap 本来就是原样返回。
+ */
 function remapValues(section: StoreSection, values: Record<string, unknown>, idMap: Map<string, string>): Record<string, unknown> {
   const out = { ...values };
-  for (const f of section.fields || []) {
-    if (!(f.key in out)) continue;
-    // 引用重映射由各类型的 `remap` 决定（file 的 id 列表、md 正文、source 袋里的
-    // fileId 与正文图）；其余类型原样返回。
-    out[f.key] = behaviorOf(f.type).remap(f, out[f.key], idMap);
+  const byKey = new Map((section.fields || []).map((f) => [String(f.key), f as unknown as FieldDefLike]));
+  for (const [k, v] of Object.entries(out)) {
+    const def = byKey.get(k) || ({ key: k, type: inferFieldType(v) } as FieldDefLike);
+    out[k] = behaviorOf(String(def.type)).remap(def, v, idMap);
   }
   return out;
 }

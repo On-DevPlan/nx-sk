@@ -146,6 +146,8 @@ interface FieldDefBase {
   /** 读路径（core/render）按 fill 附加的人读标签；存储里不落这个键。 */
   fillLabel?: string;
   maxItems?: number;
+  /** v3 模板默认值：sync 补行 / 新建条目时，该键没给值就落这个（JSON 语义值）。 */
+  defaultValue?: unknown;
 }
 
 /** 标量 / 富内容字段：值是一个标量或字符串数组。 */

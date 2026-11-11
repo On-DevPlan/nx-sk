@@ -378,16 +378,20 @@ step('B 机导入后 key get 能解出明文（与原机密钥无关）',
 
 // 落盘后必须**仍是密文对象**（落盘防护不丢），且解得开说明用的就是 B 机密钥。
 // 0.36 起读 B 机的 nxsk.db（B 机 CLI 子进程都已退出、WAL 已 checkpoint，只读打开安全）。
+// v3：entries 的 values 列退役——值逐键在 field_data（这是存储布局探针，必须跟着 schema 走）。
 const { openRaw } = await import('../src/core/db/driver.ts');
 const dbB = openRaw(join(homeB, 'nxsk.db'), { readOnly: true });
 let entryB = null;
 try {
-  const row = dbB.get("SELECT \"values\" AS v FROM entries WHERE section_id = 'secret' LIMIT 1");
+  const row = dbB.get(`SELECT fd.value AS v FROM entries e
+    JOIN entry_fields ef ON ef.entry_id = e.id
+    JOIN field_data fd ON fd.entry_field_id = ef.id
+    WHERE e.section_id = 'secret' AND ef.key = 'value' LIMIT 1`);
   entryB = row ? JSON.parse(row.v) : null;
 } finally { dbB.close(); }
 function isCipher(v) { return !!v && typeof v === 'object' && typeof v.ct === 'string' && typeof v.iv === 'string'; }
 step('导入后 secret 落盘仍是密文（已用本机 vaultKey 重新加密）',
-  !!entryB && isCipher(entryB.value));
+  !!entryB && isCipher(entryB));
 
 const skillGet = await cliJson(['skill', 'get', 'nx-sk', '10-sections-entries', '--dry-run']);
 step('skill get --json 是四元', skillGet.skillName === 'nx-sk' && skillGet.ref === 'references/10-sections-entries.md'
