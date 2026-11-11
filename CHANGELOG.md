@@ -47,6 +47,11 @@
   - 观测开关 `NX_SK_CLI_PROXY_DEBUG=1`：stderr 打一行「经面板代理 :端口 actionId」，供冒烟/走查验证路径归属，正常输出零影响。
   - 一致性测试新增反向断言：每条 http action（raw 除外）的路由必须解析回同一 id、binaryBody 必须带 file flag；`Action.readOnly` 显式豁免 dry-run 检查（#21 的 resolveBatch 同用）。
   - 验证：unit **459/459**（+proxy.test 10 项：portfile 语义/发现双判据/分发口错误形状/代理与直跑数据等价/kv·array·binaryBody 三形态等价）/ smoke **142/142**（+5 项：serve 在跑→代理执行带端口、--direct 跳过、代理与直跑输出等价、portfile 内容、serve 死后回落直跑）；lint/typecheck/build 全绿。
+- **任务 #23（#21 的再验收反馈）：debug 数据板的实时性补到「悬浮/点击即查」**（用户裁决原文：「至少悬浮的时候 保证每次都是实时查值 如果有值就更新呀 动态绑定的 我不求完全那个元素变更 我这个debug字段就响应 至少我点击整个块 或者在块当中 或者鼠标悬浮 就实时查询值呀」）：
+  - **悬浮 = 单查**：每次 mouseenter 都对该 locator 走一次 `resource resolve`，浮层与格子内联值随结果更新（外部 CLI/别的页面改的值，鼠标一停就是新的）；解不到如实标灰、坏链悬浮不弹陈旧浮层。
+  - **点击所在块（含块头）= 整板批量重查**：控件向最近 `.blk` 挂 click 监听（卸载摘除），复用 resolve-batch 通路；与 #22 的 CLI 代理叠加后，外部改值→点块→面板显示新值，全程不重载页面。
+  - 保存后 reload 的整体刷新（#21）保留——三层刷新：boot 变 / 块点击 / 格子悬浮。
+  - 验证：五连全绿零削弱（unit 459/459、smoke 142/142）；真机走查 10/10（Playwright + 本机 Chrome，隔离 home 7878——7877 被 nx-kv 面板占用、serve 顺延并写 portfile，#22 机制在走查里现场自证）：CLI 改值不重载→悬浮出实时值→格子同步；再改值→点块/点块头→整板重查显示新值；点击前陈旧值可见（证明刷新不是 reload 带来的）；坏链悬浮如实标灰；console 零错误。
 
 ## 0.40.0 (2026-11-11)
 

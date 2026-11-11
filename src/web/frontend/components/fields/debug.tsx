@@ -8,6 +8,9 @@
 //      引用只允许**数据位置**（条目/条目-字段/附件）：结构引用在写入点就被拒（#21）。
 //   2. **悬浮预览**：鼠标停在格子上 → 浮层直接预览被引用内容（形态沿用 peek 外壳
 //      的头部三件套：标题 / 副题 / 类型；密文值在 resolve 出口就已打码）。
+//      #23 验收反馈：「至少悬浮的时候保证每次都是实时查值」——**每次 mouseenter 都
+//      单查这个 locator**，浮层与格子内联值随结果更新；另外**点击所在块任意处**
+//      （含块头）整板批量重查，外部（CLI / 别的页面）改的值不用等保存也能刷出来。
 //   3. **＋ 引用资源**：打开检索面板（与侧栏共用 `resource.search`，但只呈现
 //      条目/条目-字段/附件——结构类命中被过滤），选中即把 locator 追加进 refs——
 //      值仍走「N 处改动 → 保存」的既有通路。
@@ -104,25 +107,46 @@ export function DebugControl({ value, onChange }: ControlProps) {
   const [pickQ, setPickQ] = useState('');
   const [pickHits, setPickHits] = useState<SearchHit[]>([]);
   const chipRefs = useRef<Record<string, HTMLElement | null>>({});
+  const rootRef = useRef<HTMLDivElement | null>(null);
 
-  // **内联数据板**（#21）：一次批量解析全部引用；refs 变或 boot 变（任何保存后的
-  // reload）都整体重取——绑定位置的值变了，格子上的实时值跟着变。
+  // **内联数据板**（#21 + #23）：一次批量解析全部引用；refs 变、boot 变（保存后的
+  // reload）、或**点击所在块任意处**都整体重取——绑定位置的值变了，格子跟着变。
   // 坏链照常标灰（resolve-batch 不抛）；网络失败保留上一轮值（不误导成「全失效」）。
-  useEffect(() => {
-    if (!refs.length) { setResolved({}); return undefined; }
-    let dead = false;
+  const refreshAll = useCallback(() => {
+    if (!refs.length) { setResolved({}); return; }
     void api<{ items: Array<{ locator: string; ok: boolean; info?: ResolveInfo }> }>(
       '/api/resources/resolve-batch', { method: 'POST', body: { refs } },
     ).then((d) => {
-      if (dead) return;
       const next: Record<string, ResolveInfo | false> = {};
       for (const x of d.items) next[x.locator] = x.ok && x.info ? x.info : false;
       for (const r of refs) if (next[r] === undefined) next[r] = false;
       setResolved(next);
     }).catch(() => { /* 保留上一轮 */ });
-    return () => { dead = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refsKey, boot]);
+  }, [refsKey]);
+
+  useEffect(() => { refreshAll(); }, [refreshAll, boot]);
+
+  // #23：单查一个引用——悬浮每次都问一遍「现在那是什么值」，不求元素级推送，
+  // 但鼠标一停、格子与浮层必须是实时值。
+  const refreshOne = useCallback(async (loc: string) => {
+    try {
+      const info = await api<ResolveInfo>(`/api/resources/resolve?loc=${encodeURIComponent(loc)}`);
+      setResolved((prev) => ({ ...prev, [loc]: info }));
+    } catch {
+      setResolved((prev) => ({ ...prev, [loc]: false }));
+    }
+  }, []);
+
+  // 点击所在块（含块头）= 整板实时重查：从控件里向上找 .blk 挂监听，
+  // 卸载时摘掉；读边界只到 resolve，不写任何东西。
+  useEffect(() => {
+    const el = rootRef.current?.closest('.blk') || null;
+    if (!el) return undefined;
+    const on = () => refreshAll();
+    el.addEventListener('click', on);
+    return () => { el.removeEventListener('click', on); };
+  }, [refreshAll]);
 
   // 悬浮浮层跟着当前 hover 的格子实时定位（滚动/改宽都对）。
   useEffect(() => {
@@ -136,6 +160,7 @@ export function DebugControl({ value, onChange }: ControlProps) {
     if (!el) return;
     const b = el.getBoundingClientRect();
     setHover({ locator: loc, x: b.left, y: b.bottom + 6 });
+    void refreshOne(loc); // #23：悬浮即实时查值（浮层与格子内联值随结果更新）
   };
 
   const removeRef = (loc: string) => {
@@ -186,7 +211,7 @@ export function DebugControl({ value, onChange }: ControlProps) {
   const hoverInfo = hover ? resolved[hover.locator] : null;
 
   return (
-    <div className="dbg-field">
+    <div className="dbg-field" ref={rootRef}>
       {refs.length ? (
         <div className="dbg-chips">
           {refs.map((loc) => {
