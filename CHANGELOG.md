@@ -2,7 +2,7 @@
 
 本文件格式参考 [Keep a Changelog](https://keepachangelog.com/)，中文正文。
 
-## [Unreleased]
+## 0.38.0 (2026-11-11)
 
 **schema v3：动态结构——条目字段写时复制（copy-on-write）。栏目字段字典降级成模板，每个条目带自己的结构行与值行。**
 
