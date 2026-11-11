@@ -14,7 +14,7 @@ import { Dropdown, Tree, Input, Tooltip } from 'antd';
 import type { MenuProps, TreeProps } from 'antd';
 import {
   AppstoreOutlined, DatabaseOutlined, ExportOutlined, FileTextOutlined,
-  FolderOutlined, ImportOutlined, PaperClipOutlined, SearchOutlined, SettingOutlined,
+  FolderOutlined, ImportOutlined, PaperClipOutlined, ProfileOutlined, SearchOutlined, SettingOutlined,
 } from '@ant-design/icons';
 import { Copyable } from './ui.tsx';
 import { useStore } from '../store.tsx';
@@ -52,6 +52,17 @@ export interface SidebarNav {
 
 /** 条目摘要：侧栏树叶子节点只需要 id + 标题。 */
 export interface EntryLite { id: string; title: string }
+
+/** `resource.search` 命中项（与后端 ResourceHit 同形；面板只读这些键）。 */
+interface ResourceHit {
+  locator: string;
+  kind: string;
+  title: string;
+  subtitle: string;
+  sectionId?: string;
+  entryId?: string;
+  key?: string;
+}
 
 /** 条目叶子节点的 key 规则：与栏目 key（就是栏目 id）区分开。 */
 export const entryKey = (sectionId: string, entryId: string) => `e:${sectionId}:${entryId}`;
@@ -116,7 +127,8 @@ interface AppSidebarProps {
   entryMap: Record<string, EntryLite[]>;
   setEntryMap: Dispatch<SetStateAction<Record<string, EntryLite[]>>>;
   onGo: (id: string) => void;
-  onOpenEntry: (sectionId: string, entryId: string) => void;
+  /** focus = 打开条目后要把哪个字段块滚进视口（#18 侧栏全局搜索定位字段用）。 */
+  onOpenEntry: (sectionId: string, entryId: string, focus?: string) => void;
 }
 
 export default function AppSidebar({
@@ -227,6 +239,54 @@ export default function AppSidebar({
   // 搜索过滤：栏目标题或（已加载的）条目标题命中就保留；命中的分支全展开。
   // 未加载条目的栏目只按栏目名搜——懒加载的数据不该在搜索时被整库拉一遍。
   const needle = q.trim().toLowerCase();
+
+  // —— #18 全局资源检索：三类结果分组（当前条目字段 / 全局字段 / 条目）——
+  // 后端与 debug 引用字段共用同一条 `resource.search`；防抖 250ms，
+  // 树过滤保持原样（懒加载与右键菜单不回归），结果面板叠在树上方。
+  const [hits, setHits] = useState<ResourceHit[]>([]);
+  const [hitsBusy, setHitsBusy] = useState(false);
+  useEffect(() => {
+    const term = q.trim();
+    if (!term) { setHits([]); setHitsBusy(false); return undefined; }
+    let dead = false;
+    setHitsBusy(true);
+    const timer = setTimeout(async () => {
+      try {
+        const d = await api<{ items: ResourceHit[] }>(`/api/resources/search?q=${encodeURIComponent(term)}`);
+        if (!dead) setHits(d.items || []);
+      } catch {
+        if (!dead) setHits([]);
+      } finally {
+        if (!dead) setHitsBusy(false);
+      }
+    }, 250);
+    return () => { dead = true; clearTimeout(timer); };
+  }, [q]);
+
+  const hitGroups = useMemo(() => {
+    const isOwn = (r: ResourceHit) => r.kind === 'field'
+      && !!entryId && r.sectionId === currentId && (!r.entryId || r.entryId === entryId);
+    const ownFields: ResourceHit[] = [];
+    const globalFields: ResourceHit[] = [];
+    const entryHits: ResourceHit[] = [];
+    for (const r of hits) {
+      if (r.kind === 'field') (isOwn(r) ? ownFields : globalFields).push(r);
+      else if (r.kind === 'entry') entryHits.push(r);
+    }
+    return { ownFields, globalFields, entryHits };
+  }, [hits, currentId, entryId]);
+
+  const openHit = useCallback((r: ResourceHit) => {
+    if (r.kind === 'field') {
+      // 点字段结果 = 进条目并把该块滚进视口；模板字段没有条目段 → 用当前条目，
+      // 都没有 → 进栏目（视图自动选首条后仍按 focus 定位块）。
+      onOpenEntry(r.sectionId || '', r.entryId || entryId || '', r.key);
+    } else if (r.kind === 'entry') {
+      onOpenEntry(r.sectionId || '', r.entryId || '');
+    } else if (r.kind === 'section') {
+      onGo(r.sectionId || '');
+    }
+  }, [onGo, onOpenEntry, entryId]);
 
   // —— 右键菜单：按节点类型拼动作项，外壳交给 antd Dropdown（见 withCtx）——
   const entryMenu = useCallback((sid: string, e: EntryLite): MenuProps['items'] => {
@@ -435,11 +495,22 @@ export default function AppSidebar({
           size="small"
           allowClear
           prefix={<SearchOutlined className="sb-icon" />}
-          placeholder="搜索栏目 / 条目"
+          placeholder="搜索栏目 / 条目 / 字段"
           value={q}
           onChange={(e) => setQ(e.target.value)}
         />
       </div>
+
+      {/* #18：三类结果分组。点结果 = 导航（条目）或定位字段块（进条目 + 滚动 + 短暂高亮）。 */}
+      {needle ? (
+        <div className="sb-results" data-testid="sb-results">
+          {hitsBusy && !hits.length ? <div className="hint pad">检索中…</div> : null}
+          {!hitsBusy && !hits.length ? <div className="hint pad">没有命中的字段 / 条目</div> : null}
+          <ResultGroup title="当前条目字段" items={hitGroups.ownFields} onOpen={openHit} />
+          <ResultGroup title="全局字段" items={hitGroups.globalFields} onOpen={openHit} />
+          <ResultGroup title="条目" items={hitGroups.entryHits} onOpen={openHit} />
+        </div>
+      ) : null}
 
       <div className="sb-tree">
         <Tree
@@ -473,5 +544,35 @@ export default function AppSidebar({
         onDoubleClick={resetSbW}
       />
     </aside>
+  );
+}
+
+/** 一组检索结果（空组整组不渲染——三个分组是语义，不是占位）。 */
+function ResultGroup({ title, items, onOpen }: {
+  title: string;
+  items: ResourceHit[];
+  onOpen: (r: ResourceHit) => void;
+}) {
+  if (!items.length) return null;
+  return (
+    <div className="sb-result-group">
+      <div className="sb-result-title">{title}</div>
+      {items.slice(0, 40).map((r) => (
+        <button
+          type="button"
+          key={`${r.kind}:${r.locator}`}
+          className="sb-result-row"
+          title={`${r.locator}\n${r.subtitle}`}
+          onClick={() => onOpen(r)}
+        >
+          {r.kind === 'field'
+            ? <ProfileOutlined className="sb-icon" />
+            : <FileTextOutlined className="sb-icon sb-icon-leaf" />}
+          <span className="sb-label nowrap">{r.title}</span>
+          <span className="sb-result-sub nowrap">{r.subtitle}</span>
+        </button>
+      ))}
+      {items.length > 40 ? <div className="hint pad">…另有 {items.length - 40} 项</div> : null}
+    </div>
   );
 }

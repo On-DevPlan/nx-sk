@@ -35,7 +35,8 @@ export function FieldGroup({ title, fields, draft, onPatch, sectionTitle, entryT
       <div className="pad">
         <div className="grid">
           {fields.map((def) => (
-            <div key={def.key} className={`field ${['textarea', 'file', 'md', 'entrylist', 'table', 'source', 'shortcut'].includes(def.type) ? 'wide' : ''}`}>
+            // data-block：#18 侧栏全局搜索「定位字段块」的锚点（与 blockBoard 的 .blk 同词汇）
+            <div key={def.key} data-block={def.key} className={`field ${['textarea', 'file', 'md', 'entrylist', 'table', 'source', 'shortcut', 'debug'].includes(def.type) ? 'wide' : ''}`}>
               <div className="flabel">
                 <span>{def.label}</span>
                 {def.sensitive ? <span className="tag bad">密文</span> : null}

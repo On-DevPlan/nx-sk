@@ -212,6 +212,25 @@ export default function SectionView({ sectionId: rawId, listHidden = false }: Vi
   }, [entryWanted, data, draft?.id]);
   // 切栏目、或条目被删掉后，选择里不能留下不存在的 id（导出会因为「找不到条目」整包失败）
   useEffect(() => { setSelected(new Set()); }, [sectionId]);
+
+  // #18：侧栏点了「字段」结果 → 进本条目后把对应块滚进视口并短暂高亮。
+  // ui.focus 由 App 的 onOpenEntry 写入；消费一次立刻清空（切条目/重进不该再闪）。
+  const focusKey = String(ui.focus || '');
+  useEffect(() => {
+    if (!focusKey || !draft) return undefined;
+    const timer = setTimeout(() => {
+      const attr = focusKey.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+      const el = document.querySelector(`[data-block="${attr}"]`);
+      if (el) {
+        el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        el.classList.add('blk-focus');
+        setTimeout(() => el.classList.remove('blk-focus'), 1600);
+      }
+      patchUi({ focus: '' });
+    }, 160);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusKey, draft?.id]);
   useEffect(() => {
     setSelected((prev) => {
       const valid = new Set((data?.entries || []).map((e) => e.id));

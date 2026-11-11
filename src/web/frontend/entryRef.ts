@@ -1,5 +1,8 @@
 // 条目定位文本与剪贴板复制：条目视图（⧉ 按钮）与侧栏右键菜单共用一份。
 // #14 从 modules/entries/view.tsx 原样抽出——文本与行为不变，只是两处消费。
+// #18 补一行内部资源定位符（locator）：写法唯一来源是 shared/locator.ts，
+// 原有三行 CLI 命令文案逐字不变（行为等价红线）。
+import { formatLocator } from '../../shared/locator.ts';
 
 /**
  * 条目定位文本（点击复制用）：人读的路径 + agent 可直接执行的 CLI。
@@ -10,6 +13,7 @@ export function entryRefText(section: { id: string; title: string }, entry: { id
     `nx-sk 条目 · 栏目「${section.title}」(${section.id}) › 条目「${entry.title}」(${entry.id})`,
     `读: nx-sk entry get --section ${section.id} ${entry.id}`,
     `改: nx-sk entry update --section ${section.id} ${entry.id} --set 字段=值`,
+    `定位: ${formatLocator({ kind: 'entry', entryId: entry.id })}`,
   ].join('\n');
 }
 
