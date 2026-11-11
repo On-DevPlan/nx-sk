@@ -3,16 +3,23 @@
 // 为什么用 antd Tree：目录树要「生产级」的手感——键盘导航、展开态、选中态、
 // 大栏目虚拟滚动、懒加载子节点。自研这些细节成本高且容易粗糙，antd 是成熟开源实现；
 // 本文件只负责**数据编排**（栏目/条目/工具三层数据怎么喂给树）与**单色主题**。
+//
+// #14 补的两块基础设施：
+// - 右缘拖拽线：拖动改侧栏宽度（localStorage 持久化，双击恢复默认）；
+// - 右键菜单：节点类型各配一组动作（打开 / 新标签页 / 复制链接 / 展开折叠），
+//   定位与弹层全部交给 antd Dropdown(trigger=contextMenu)。
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { ComponentType, Dispatch, Key, SetStateAction } from 'react';
-import { Tree, Input, Tooltip } from 'antd';
-import type { TreeProps } from 'antd';
+import type { ComponentType, Dispatch, Key, ReactNode, SetStateAction } from 'react';
+import { Dropdown, Tree, Input, Tooltip } from 'antd';
+import type { MenuProps, TreeProps } from 'antd';
 import {
   AppstoreOutlined, DatabaseOutlined, ExportOutlined, FileTextOutlined,
   FolderOutlined, ImportOutlined, PaperClipOutlined, SearchOutlined, SettingOutlined,
 } from '@ant-design/icons';
 import { Copyable } from './ui.tsx';
+import { useStore } from '../store.tsx';
 import { api } from '../api/client.ts';
+import { copyText, entryRefText } from '../entryRef.ts';
 import type { Boot } from '../../../shared/model.ts';
 
 /** antd Tree 的节点形状（从 TreeProps 反推，避免 nodenext 下的深路径类型导入）。 */
@@ -71,6 +78,36 @@ const TOOL_ICONS: Record<string, ComponentType<{ className?: string }>> = {
   'export-import': ImportOutlined,
 };
 
+/** 侧栏宽度：纯视觉偏好，和收起态一样落 localStorage（不进 store 的 ui）。 */
+const SB_W_KEY = 'nx-sk-sidebar-w';
+const SB_W_DEFAULT = 264;
+const SB_W_MIN = 200;
+const SB_W_MAX = 420;
+
+function loadSbW(): number {
+  try {
+    const n = Number(localStorage.getItem(SB_W_KEY));
+    return Number.isFinite(n) && n >= SB_W_MIN && n <= SB_W_MAX ? n : SB_W_DEFAULT;
+  } catch {
+    return SB_W_DEFAULT;
+  }
+}
+
+/** 深链构造：与 App 的 onGo/onOpenEntry 写 hash 的格式同源。 */
+const sectionHash = (id: string) => `#/${encodeURIComponent(id)}`;
+const entryHash = (sid: string, eid: string) => `${sectionHash(sid)}?entry=${encodeURIComponent(eid)}`;
+const fullUrl = (hash: string) => `${window.location.origin}${window.location.pathname}${hash}`;
+
+/** 右键菜单外壳：antd Dropdown 的 contextMenu 触发。没有可用动作就不包（右键不弹空菜单）。 */
+function withCtx(items: MenuProps['items'], row: ReactNode) {
+  if (!items || items.length === 0) return row;
+  return (
+    <Dropdown trigger={['contextMenu']} menu={{ items }}>
+      {row}
+    </Dropdown>
+  );
+}
+
 interface AppSidebarProps {
   boot: Boot | null;
   nav: SidebarNav;
@@ -91,6 +128,49 @@ export default function AppSidebar({
   // 已加载条目列表的栏目（受控 loadedKeys：boot 变化后要整批刷新，不受控拿不到这份清单）
   const [loadedKeys, setLoadedKeys] = useState<Key[]>([]);
   const inFlight = useRef(new Set<string>());
+  const { toast } = useStore();
+
+  // —— 右缘拖拽线（Notion 式改宽）——
+  // 拖动过程只改本地 state（mousemove 不落盘），松手才写 localStorage；双击恢复默认。
+  const asideRef = useRef<HTMLElement>(null);
+  const [sbW, setSbW] = useState(loadSbW);
+  const sbWRef = useRef(sbW);
+  const [dragSb, setDragSb] = useState(false);
+  useEffect(() => {
+    if (!dragSb) return undefined;
+    const move = (ev: MouseEvent) => {
+      const left = asideRef.current?.getBoundingClientRect().left ?? 0;
+      const w = Math.round(Math.min(SB_W_MAX, Math.max(SB_W_MIN, ev.clientX - left)));
+      sbWRef.current = w;
+      setSbW(w);
+    };
+    const up = () => {
+      setDragSb(false);
+      try { localStorage.setItem(SB_W_KEY, String(sbWRef.current)); } catch { /* 隐私模式 */ }
+    };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+    document.body.classList.add('col-resizing');
+    return () => {
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', up);
+      document.body.classList.remove('col-resizing');
+    };
+  }, [dragSb]);
+  const resetSbW = useCallback(() => {
+    sbWRef.current = SB_W_DEFAULT;
+    setSbW(SB_W_DEFAULT);
+    try { localStorage.setItem(SB_W_KEY, String(SB_W_DEFAULT)); } catch { /* 隐私模式 */ }
+  }, []);
+
+  // 右键菜单的展开/折叠开关（搜索态展开由 searchExpanded 临时接管，菜单此时不给切换项）
+  const toggleExpand = useCallback((key: Key) => {
+    setExpanded((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
+  }, []);
+  const isExpanded = useCallback(
+    (key: string) => expanded.some((k) => String(k) === key),
+    [expanded],
+  );
 
   // 侧栏树需要每层图标——不引 emoji，全部用 @ant-design/icons 的单色线性图标
   const toolIcon = useCallback((id: string) => {
@@ -133,38 +213,111 @@ export default function AppSidebar({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [boot, ensureEntries]);
 
+  // #14：打开某个栏目时，侧栏自动拉它的条目并展开——Notion 的「子页面就在树里」。
+  // App 用「侧栏是否已有条目」决定正文要不要再显示列表（listHidden）；
+  // 同时把栏目记进 loadedKeys，reload 后跟着上面的整批刷新走。
+  useEffect(() => {
+    if (!currentId) return;
+    if (!(boot?.sections || []).some((s) => s.id === currentId)) return;
+    setExpanded((prev) => (prev.includes(currentId) ? prev : [...prev, currentId]));
+    setLoadedKeys((prev) => (prev.includes(currentId) ? prev : [...prev, currentId]));
+    void ensureEntries(currentId);
+  }, [currentId, boot, ensureEntries]);
+
   // 搜索过滤：栏目标题或（已加载的）条目标题命中就保留；命中的分支全展开。
   // 未加载条目的栏目只按栏目名搜——懒加载的数据不该在搜索时被整库拉一遍。
   const needle = q.trim().toLowerCase();
+
+  // —— 右键菜单：按节点类型拼动作项，外壳交给 antd Dropdown（见 withCtx）——
+  const entryMenu = useCallback((sid: string, e: EntryLite): MenuProps['items'] => {
+    const secTitle = (boot?.sections || []).find((s) => s.id === sid)?.title || sid;
+    return [
+      { key: 'open', label: '打开条目', onClick: () => onOpenEntry(sid, e.id) },
+      { key: 'tab', label: '新标签页打开', onClick: () => window.open(entryHash(sid, e.id), '_blank') },
+      {
+        key: 'ref',
+        label: '复制条目定位（CLI）',
+        onClick: async () => {
+          await copyText(entryRefText({ id: sid, title: secTitle }, { id: e.id, title: e.title }));
+          toast(`已复制条目定位：${secTitle} › ${e.title}`);
+        },
+      },
+    ];
+  }, [boot, onOpenEntry, toast]);
+
+  const sectionMenu = useCallback((s: NavSectionItem, hasKids: boolean): MenuProps['items'] => {
+    const items: MenuProps['items'] = [
+      { key: 'open', label: '打开栏目', onClick: () => onGo(s.id) },
+      { key: 'tab', label: '新标签页打开', onClick: () => window.open(sectionHash(s.id), '_blank') },
+      {
+        key: 'copy',
+        label: '复制栏目链接',
+        onClick: async () => {
+          await copyText(fullUrl(sectionHash(s.id)));
+          toast(`已复制栏目链接：${s.title}`);
+        },
+      },
+    ];
+    if (hasKids && !needle) {
+      items.push({
+        key: 'toggle',
+        label: isExpanded(s.id) ? '折叠条目' : '展开条目',
+        onClick: () => toggleExpand(s.id),
+      });
+    }
+    return items;
+  }, [needle, onGo, toast, isExpanded, toggleExpand]);
+
+  const viewMenu = useCallback((t: NavViewItem): MenuProps['items'] => [
+    { key: 'open', label: '打开', onClick: () => onGo(t.id) },
+    { key: 'tab', label: '新标签页打开', onClick: () => window.open(sectionHash(t.id), '_blank') },
+    {
+      key: 'copy',
+      label: '复制页面链接',
+      onClick: async () => {
+        await copyText(fullUrl(sectionHash(t.id)));
+        toast(`已复制页面链接：${t.title}`);
+      },
+    },
+  ], [onGo, toast]);
+
+  const groupMenu = useCallback((gi: number): MenuProps['items'] => (
+    needle ? [] : [{
+      key: 'toggle',
+      label: isExpanded(`g:${gi}`) ? '折叠分组' : '展开分组',
+      onClick: () => toggleExpand(`g:${gi}`),
+    }]
+  ), [needle, isExpanded, toggleExpand]);
 
   const treeData = useMemo<DataNode[]>(() => {
     const hit = (s: string) => !!needle && s.toLowerCase().includes(needle);
     const entryNode = (sid: string, e: EntryLite): DataNode => ({
       key: entryKey(sid, e.id),
       isLeaf: true,
-      title: (
+      title: withCtx(entryMenu(sid, e), (
         <span className="sb-row" title={e.title}>
           <FileTextOutlined className="sb-icon sb-icon-leaf" />
           <span className="sb-label nowrap">{e.title || '（无标题）'}</span>
         </span>
-      ),
+      )),
     });
 
     const sectionNode = (s: NavSectionItem): DataNode => {
       const entries = entryMap[s.id];
       const count = typeof s.count === 'number' ? s.count : undefined;
+      const hasKids = entries ? entries.length > 0 : (count ?? 0) > 0;
       return {
         key: s.id,
         // 还没加载过子节点的栏目交给 loadData；已知 0 条的栏目就是叶子
         isLeaf: entries ? entries.length === 0 : count === 0,
         children: entries ? entries.map((e) => entryNode(s.id, e)) : undefined,
-        title: (
+        title: withCtx(sectionMenu(s, hasKids), (
           <span className="sb-row" title={s.title}>
             <DatabaseOutlined className="sb-icon" />
             <span className="sb-label nowrap">{s.title}</span>
             {typeof count === 'number' ? <span className="count">{count}</span> : null}
           </span>
-        ),
+        )),
       };
     };
 
@@ -177,13 +330,13 @@ export default function AppSidebar({
         key: `g:${gi}`,
         selectable: false,
         children: kept.map(sectionNode),
-        title: (
+        title: withCtx(groupMenu(gi), (
           <span className="sb-row">
             <FolderOutlined className="sb-icon" />
             <span className="sb-label nowrap">{g.title}</span>
             <span className="count">{kept.length}</span>
           </span>
-        ),
+        )),
       } as DataNode;
     }).filter(Boolean) as DataNode[];
 
@@ -194,16 +347,16 @@ export default function AppSidebar({
     const toolNodes: DataNode[] = nav.tools.map((t) => ({
       key: `v:${t.id}`,
       isLeaf: true,
-      title: (
+      title: withCtx(viewMenu(t), (
         <span className="sb-row" title={t.title}>
           {toolIcon(t.id)}
           <span className="sb-label nowrap">{t.title}</span>
         </span>
-      ),
+      )),
     }));
 
     return [...groupNodes, ...flatNodes, ...toolNodes];
-  }, [nav, entryMap, needle, toolIcon]);
+  }, [nav, entryMap, needle, toolIcon, entryMenu, sectionMenu, viewMenu, groupMenu]);
 
   // 搜索时把有命中的分支全展开；此时受控展开态临时接管
   const searchExpanded = useMemo<Key[] | null>(() => {
@@ -267,7 +420,7 @@ export default function AppSidebar({
   }, [ensureEntries]);
 
   return (
-    <aside className="sb">
+    <aside className="sb" ref={asideRef} style={{ width: sbW }}>
       {/* 顶部：品牌 + 版本。原头部的品牌区搬到这里——侧栏是「我是谁」，内容区只管「在看什么」 */}
       <div className="sb-head">
         <span className="brand">
@@ -311,6 +464,14 @@ export default function AppSidebar({
           </Tooltip>
         </div>
       ) : null}
+
+      {/* 右缘拖拽线：拖动改宽（松手落 localStorage），双击恢复默认宽度 */}
+      <div
+        className={`sb-resizer${dragSb ? ' active' : ''}`}
+        title="拖动调整侧栏宽度（双击恢复默认）"
+        onMouseDown={(e) => { e.preventDefault(); setDragSb(true); }}
+        onDoubleClick={resetSbW}
+      />
     </aside>
   );
 }

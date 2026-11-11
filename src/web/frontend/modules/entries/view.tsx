@@ -11,6 +11,8 @@ import type { BlockLayout } from '../../../../shared/blockLayout.ts';
 import type { FieldDef } from '../../../../shared/fields/types.ts';
 import type { SerializedEntry } from '../../../../shared/model.ts';
 import { shortcutCount } from '../../components/fields/shortcut.tsx';
+import { copyText, entryRefText } from '../../entryRef.ts';
+import type { ViewProps } from '../../registry.ts';
 import KvTable from './kvTable.tsx';
 
 /** `/api/sections/:id/dump` 的栏目摘要。 */
@@ -92,16 +94,6 @@ interface ModalState { title: string; body: ReactNode }
 // String(obj) 恒为 '[object Object]'，会把「没改」误判成「每处都改了」
 const norm = (x: unknown) => (x === null || x === undefined ? '' : (typeof x === 'object' ? JSON.stringify(x) : String(x)));
 
-// 条目定位文本（面包屑点击复制用）：人读的路径 + agent 可直接执行的 CLI。
-// id 与标题都带——标题可能重名/被改，id 是唯一事实；命令里用 id 定位最稳。
-function entryRefText(section: { id: string; title: string }, entry: { id: string; title: string }) {
-  return [
-    `nx-sk 条目 · 栏目「${section.title}」(${section.id}) › 条目「${entry.title}」(${entry.id})`,
-    `读: nx-sk entry get --section ${section.id} ${entry.id}`,
-    `改: nx-sk entry update --section ${section.id} ${entry.id} --set 字段=值`,
-  ].join('\n');
-}
-
 /**
  * 选中条目后把 `?entry=<id>` 同步进地址栏，让当前地址本身就能分享/新开标签。
  * 只在地址栏已经指向这个栏目时替换——兜底选出来的栏目仍然不补 hash（见 App.tsx）。
@@ -124,7 +116,7 @@ function syncEntryHash(sectionId: string, entryId: string): void {
  *
  * 字段与分组全部来自后端，所以新增字段不需要改前端。
  */
-export default function SectionView({ sectionId: rawId }: { sectionId?: string }) {
+export default function SectionView({ sectionId: rawId, listHidden = false }: ViewProps) {
   const sectionId = rawId || '';
   const { ui, patchUi, toast, guard, dialog, reload } = useStore();
   const [data, setData] = useState<SectionDump | null>(null);
@@ -354,19 +346,12 @@ export default function SectionView({ sectionId: rawId }: { sectionId?: string }
   const copyEntryRef = guard(async (entry: { id: string; title: string } | null) => {
     if (!entry || !data) return;
     const text = entryRefText(data.section, entry);
-    try {
-      await navigator.clipboard.writeText(text);
-      toast(`已复制条目定位：${data.section.title} › ${entry.title}（贴给 agent 即可）`);
-    } catch {
-      // 剪贴板被拒（非安全上下文/权限）时退回选中文本方案
-      const ta = document.createElement('textarea');
-      ta.value = text;
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand('copy');
-      ta.remove();
-      toast(`已复制条目定位：${data.section.title} › ${entry.title}`);
-    }
+    // copyText 内部：优先剪贴板 API，被拒时退回 textarea+execCommand——两条 toast
+    // 文案与抽出前逐字一致（API 直路带「贴给 agent 即可」，退回路径不带）。
+    const direct = await copyText(text);
+    toast(direct
+      ? `已复制条目定位：${data.section.title} › ${entry.title}（贴给 agent 即可）`
+      : `已复制条目定位：${data.section.title} › ${entry.title}`);
   });
 
   /** 浏览器下载：让 <a download> 去接，前端不碰 zip 内容；含凭据与否由菜单项决定。 */
@@ -533,7 +518,12 @@ export default function SectionView({ sectionId: rawId }: { sectionId?: string }
       </div>
 
       <div className="cols" ref={colsRef}>
-        <div className="col" style={{ flex: `0 0 ${listW}px` }}>
+        {/* #14：侧栏树里已经有这个栏目的条目时，列表列与它的拖拽线一起隐藏——
+            条目导航交给侧栏树，正文只留编辑器。收起侧栏（或侧栏还没加载出条目）
+            列表照旧出现：它是收起态下唯一的条目导航，也保住「勾选导出」的入口。 */}
+        {listHidden ? null : (
+          <>
+            <div className="col" style={{ flex: `0 0 ${listW}px` }}>
           <div className="card">
             <div className="colhead">
               <label className="inline pickall" title="全选 / 取消全选（只影响导出与批量操作）">
@@ -588,12 +578,14 @@ export default function SectionView({ sectionId: rawId }: { sectionId?: string }
           </div>
         </div>
 
-        <div
-          className={`col-splitter${draggingCol ? ' active' : ''}`}
-          title="拖动调整左右宽度（双击恢复默认）"
-          onMouseDown={startColDrag}
-          onDoubleClick={resetColDrag}
-        />
+            <div
+              className={`col-splitter${draggingCol ? ' active' : ''}`}
+              title="拖动调整左右宽度（双击恢复默认）"
+              onMouseDown={startColDrag}
+              onDoubleClick={resetColDrag}
+            />
+          </>
+        )}
 
         <div className="col">
           {!draft ? (
