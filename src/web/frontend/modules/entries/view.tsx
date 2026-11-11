@@ -1,112 +1,24 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, ReactNode } from 'react';
+import type { DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent } from 'react';
 import { api } from '../../api/client.ts';
-import { checkZipFile, fmtBytes, isNeedPassphraseError, postZip } from '../../api/zip.ts';
+import { checkZipFile, isNeedPassphraseError, postZip } from '../../api/zip.ts';
 import { useStore } from '../../store.tsx';
-import { CliHints, Empty, Modal, Tag } from '../../components/ui.tsx';
-import BlockBoard from '../../components/blockBoard.tsx';
+import { CliHints } from '../../components/ui.tsx';
 import type { BoardGroup } from '../../components/blockBoard.tsx';
-import { FieldEditModal, FieldInfoModal } from '../../components/fieldInfo.tsx';
 import { reconcileLayout, sameLayout } from '../../../../shared/blockLayout.ts';
 import type { BlockLayout } from '../../../../shared/blockLayout.ts';
 import type { FieldDef } from '../../../../shared/fields/types.ts';
-import type { SerializedEntry } from '../../../../shared/model.ts';
-import { shortcutCount } from '../../components/fields/shortcut.tsx';
 import { copyText, entryRefText } from '../../entryRef.ts';
 import type { ViewProps } from '../../registry.ts';
 import KvTable from './kvTable.tsx';
-
-/** `/api/sections/:id/dump` 的栏目摘要。 */
-interface SectionDumpInfo {
-  id: string;
-  title: string;
-  description: string;
-  order: number;
-  template: string | null;
-  kv: boolean;
-  titleField: string | null;
-  titleLabel: string;
-  fields: number;
-}
-
-/** `/api/sections/:id/dump` 的响应（外部 JSON 边界）。 */
-interface SectionDump {
-  section: SectionDumpInfo;
-  groups: Array<{ id: string; title: string }>;
-  layout: BlockLayout | null;
-  fields: FieldDef[];
-  count: number;
-  entries: SerializedEntry[];
-}
-
-/** 正在编辑的草稿：id + 标题 + 值（与 `current` 对比算脏值）。 */
-interface Draft {
-  id: string;
-  title: string;
-  values: Record<string, unknown>;
-}
-
-/** 单栏目导入预览里的一条冲突。 */
-interface PreviewConflict {
-  id: string;
-  title: string;
-  reason: string;
-  existingId: string;
-  existingTitle: string;
-  copyTitle?: string;
-}
-
-/** `/api/sections/:id/import.zip?dry-run=1` 的预览（外部 JSON 边界）。 */
-interface ImportPreview {
-  status: string;
-  fileName?: string;
-  encrypted: boolean;
-  exportedAt?: string;
-  withSecrets: boolean;
-  section: {
-    source: { id: string; title: string };
-    targetId: string;
-    exists: boolean;
-    willCreate: boolean;
-    renamedFrom: string | null;
-    title: string;
-    fieldsToAdd: Array<{ key: string; label: string; type: string }>;
-    groupsToAdd: Array<{ id: string; title: string }>;
-  };
-  entries: { total: number; fresh: number; conflicts: PreviewConflict[]; titles: string[] };
-  files: { total: number; new: number; reused: number; bytes: number; issues: unknown[]; notBundled: number };
-  secrets: { sensitiveFields: number; masked: number };
-  warnings: string[];
-}
-
-interface ZipState { fileName: string; buffer: ArrayBuffer; preview: ImportPreview; passphrase: string }
-interface AskState { fileName: string; buffer: ArrayBuffer }
-
-/** `/api/sections/:id/import.zip` 的落地结果（面板只读 entries 四个数）。 */
-interface ApplySectionResult {
-  entries: { added: number; copied: number; overwritten: number; skipped: number };
-}
-
-type Conflict = 'skip' | 'copy' | 'overwrite';
-
-interface ModalState { title: string; body: ReactNode }
-
-// 脏值比较用：对象/数组（tags、entrylist 的行）必须走 JSON 序列化——
-// String(obj) 恒为 '[object Object]'，会把「没改」误判成「每处都改了」
-const norm = (x: unknown) => (x === null || x === undefined ? '' : (typeof x === 'object' ? JSON.stringify(x) : String(x)));
-
-/**
- * 选中条目后把 `?entry=<id>` 同步进地址栏，让当前地址本身就能分享/新开标签。
- * 只在地址栏已经指向这个栏目时替换——兜底选出来的栏目仍然不补 hash（见 App.tsx）。
- */
-function syncEntryHash(sectionId: string, entryId: string): void {
-  if (!sectionId) return;
-  const base = `#/${encodeURIComponent(sectionId)}`;
-  const hash = window.location.hash || '';
-  if (hash !== base && !hash.startsWith(`${base}?`)) return;
-  const next = `${base}?entry=${encodeURIComponent(entryId)}`;
-  if (hash !== next) window.history.replaceState(null, '', next);
-}
+import EntryListColumn from './EntryListColumn.tsx';
+import EntryDetailColumn from './EntryDetailColumn.tsx';
+import SectionToolbar from './SectionToolbar.tsx';
+import ImportModals from './ImportModals.tsx';
+import AddFieldModal from './AddFieldModal.tsx';
+import FieldModals from './FieldModals.tsx';
+import { norm, syncEntryHash } from './viewTypes.ts';
+import type { ApplySectionResult, AskState, Conflict, Draft, ImportPreview, ModalState, SectionDump, ZipState } from './viewTypes.ts';
 
 /**
  * 栏目详情视图。按栏目的形状分两种布局：
@@ -563,202 +475,75 @@ export default function SectionView({ sectionId: rawId, listHidden = false }: Vi
       onDragLeave={onDragLeave}
       onDrop={onDrop}
     >
-      <div className="toolbar rowgap pad">
-        <strong>{data.section.title}</strong>
-        <Tag>{data.section.id}</Tag>
-        <span className="muted">{data.count} 条 / {data.section.fields} 字段</span>
-        {data.section.description ? <span className="desc muted nowrap grow">{data.section.description}</span> : <span className="grow" />}
-        <label className="inline hint">
-          <input type="checkbox" checked={mask} onChange={() => patchUi({ mask: !mask })} />
-          打码显示（投屏/截图时用）
-        </label>
-        <button className="btn small ghost" onClick={() => load()}>刷新</button>
-        <details className="more" ref={moreRef}>
-          <summary className="btn small ghost">更多</summary>
-          <div className="more-menu">
-            <button type="button" onClick={() => exportZip(true)}>
-              {selected.size ? `导出选中 ${selected.size} 条（含凭据）` : '导出 ZIP（含凭据）'}
-            </button>
-            <button type="button" onClick={() => exportZip(false)}>
-              {selected.size ? `导出选中 ${selected.size} 条（打码）` : '导出 ZIP（打码）'}
-            </button>
-            <button type="button" onClick={() => { closeMore(); zipInput.current?.click(); }}>导入 ZIP…</button>
-          </div>
-        </details>
-        <input
-          ref={zipInput}
-          type="file"
-          accept=".zip,application/zip"
-          style={{ display: 'none' }}
-          onChange={(e) => {
-            // FileList 是活的：先拷成数组再清 value
-            const f = [...(e.target.files || [])][0];
-            e.target.value = '';
-            handleZip(f);
-          }}
-        />
-        <button className="btn small" onClick={addEntry}>新建条目</button>
-      </div>
+      <SectionToolbar
+        section={data.section}
+        count={data.count}
+        mask={mask}
+        onToggleMask={() => patchUi({ mask: !mask })}
+        onRefresh={() => load()}
+        moreRef={moreRef}
+        selectedCount={selected.size}
+        onExport={exportZip}
+        onCloseMore={closeMore}
+        zipInput={zipInput}
+        onZipChange={(e) => {
+          // FileList 是活的：先拷成数组再清 value
+          const f = [...(e.target.files || [])][0];
+          e.target.value = '';
+          handleZip(f);
+        }}
+        onAddEntry={addEntry}
+      />
 
       <div className="cols" ref={colsRef}>
         {/* #14：侧栏树里已经有这个栏目的条目时，列表列与它的拖拽线一起隐藏——
             条目导航交给侧栏树，正文只留编辑器。收起侧栏（或侧栏还没加载出条目）
             列表照旧出现：它是收起态下唯一的条目导航，也保住「勾选导出」的入口。 */}
         {listHidden ? null : (
-          <>
-            <div className="col" style={{ flex: `0 0 ${listW}px` }}>
-          <div className="card">
-            <div className="colhead">
-              <label className="inline pickall" title="全选 / 取消全选（只影响导出与批量操作）">
-                <input type="checkbox" checked={allPicked} onChange={toggleAll} />
-                <span>条目列表</span>
-              </label>
-              <span className="right muted">
-                {selected.size ? `已选 ${selected.size} / ${data.count}` : data.count}
-                {selected.size ? <button type="button" className="btn small ghost" onClick={() => setSelected(new Set())}>清空</button> : null}
-              </span>
-            </div>
-            <div className="colbody">
-              {data.entries.length ? data.entries.map((e) => (
-                <div
-                  key={e.id}
-                  className={`row selectable ${e.id === draft?.id ? 'selected' : ''}`}
-                  onClick={() => {
-                    patchUi({ entry: e.id });
-                    syncEntryHash(sectionId, e.id);
-                    setDraft({ id: e.id, title: e.title, values: { ...e.values } });
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    className="pick"
-                    checked={selected.has(e.id)}
-                    onClick={(ev) => ev.stopPropagation()}
-                    onChange={() => togglePick(e.id)}
-                    title="选中后可只导出这一条"
-                  />
-                  <span className="name">{e.title || '（无名）'}</span>
-                  <span className="acts">
-                    {shortcutDefs.map((def) => {
-                      const c = shortcutCount(e.values[def.key]);
-                      return (
-                        <span key={def.key} className="tag" title={`${def.label}：${c.groups} 组 · ${c.items} 条`}>
-                          {c.groups} 组 · {c.items} 条
-                        </span>
-                      );
-                    })}
-                    {e.missing.length ? <span className="tag">{e.completeness.ratio}%</span> : <span className="tag strong">已填满</span>}
-                    <button
-                      type="button"
-                      className="row-copy"
-                      title="复制条目定位（贴给 agent 即可修改）"
-                      onClick={(ev) => { ev.stopPropagation(); copyEntryRef(e); }}
-                    >⧉</button>
-                  </span>
-                </div>
-              )) : <Empty>还没有条目。点右上角「新建条目」，或用 CLI：nx-sk entry add --section {data.section.id} --set ...</Empty>}
-            </div>
-          </div>
-        </div>
-
-            <div
-              className={`col-splitter${draggingCol ? ' active' : ''}`}
-              title="拖动调整左右宽度（双击恢复默认）"
-              onMouseDown={startColDrag}
-              onDoubleClick={resetColDrag}
-            />
-          </>
+          <EntryListColumn
+            listW={listW}
+            sectionId={data.section.id}
+            entries={data.entries}
+            count={data.count}
+            selected={selected}
+            allPicked={allPicked}
+            shortcutDefs={shortcutDefs}
+            draftId={draft?.id}
+            dragging={draggingCol}
+            onToggleAll={toggleAll}
+            onClear={() => setSelected(new Set())}
+            onTogglePick={togglePick}
+            onPick={(e) => {
+              patchUi({ entry: e.id });
+              syncEntryHash(sectionId, e.id);
+              setDraft({ id: e.id, title: e.title, values: { ...e.values } });
+            }}
+            onCopyRef={copyEntryRef}
+            onStartDrag={startColDrag}
+            onResetDrag={resetColDrag}
+          />
         )}
 
-        <div className="col">
-          {!draft ? (
-            <div className="card"><Empty>左边选一条，或新建一条</Empty></div>
-          ) : (
-            <div className="card">
-              {/* 顶栏固定在窗口右上角：长栏目滚到一半也能看见「保存」——
-                  否则改完一个字段要翻到表单最底点保存，翻页越多越容易漏保存。 */}
-              <div className="colhead sticky-head">
-                <span
-                  className="crumb grow nowrap"
-                  title="点击复制条目定位（栏目›条目 + id + CLI 命令，贴给 agent 即可修改）"
-                  onClick={() => copyEntryRef(current || draft)}
-                >
-                  <span className="crumb-sec">{data.section.title}</span>
-                  <span className="crumb-sep">›</span>
-                  <span className="crumb-ent">{current?.title || draft.title}</span>
-                  <span className="crumb-copy" aria-hidden>⧉</span>
-                </span>
-                <span className="muted mono">{draft.id}</span>
-                {current ? <Tag kind={current.missing.length ? '' : 'strong'}>完整度 {current.completeness.ratio}%</Tag> : null}
-                {dirty.count ? (
-                  <>
-                    <span className="hint nowrap">{dirty.count} 处改动未保存</span>
-                    <button type="button" className="btn small" onClick={save} title="保存当前条目的改动">保存</button>
-                  </>
-                ) : null}
-              </div>
-
-              {/* 条目名是「这一页的标题」，不是第一个字段：给它一点标题的语气，
-                  但仍然是可编辑的输入，不让用户以为要另开弹窗改名 */}
-              <div className="entry-title pad">
-                <div className="entry-title-label">{data.section.titleLabel || '名称'}</div>
-                <input
-                  className="entry-title-input"
-                  value={draft.title}
-                  onChange={(e) => setDraft((d) => (d ? { ...d, title: e.target.value } : d))}
-                  aria-label={data.section.titleLabel || '名称'}
-                />
-              </div>
-
-              {/* 条目内字段扩展正门（类型/分组可选）。#19：「字段=值 快填」旁路按验收反馈撤除 */}
-              <div className="add-field-bar">
-                <button
-                  type="button"
-                  className="btn small ghost"
-                  onClick={() => setAf({ key: '', label: '', type: 'text', group: groups[0]?.id || '', value: '' })}
-                >＋ 添加字段</button>
-              </div>
-
-              {/* 任务 #20：已脱离的模板字段管理条——弱字 chips + 恢复按钮（值一直在，restore 即回） */}
-              {current?.detachedFields?.length ? (
-                <div className="detached-bar">
-                  <span className="hint">已从本条目移除：</span>
-                  {current.detachedFields.map((f) => (
-                    <span key={f.key} className="tag detached-chip" title={`模板字段 ${f.key}：已从本条目脱离，值仍保留`}>
-                      {f.label || f.key}
-                      <button type="button" className="chip-restore" onClick={() => restoreField(f.key, f.label || f.key)}>恢复</button>
-                    </span>
-                  ))}
-                </div>
-              ) : null}
-
-              <BlockBoard
-                groups={groups}
-                board={boardView}
-                onBoard={applyBoard}
-                draft={draft.values}
-                onPatch={patchField}
-                sectionTitle={data.section.title}
-                entryTitle={current?.title || draft.title}
-                sectionId={sectionId}
-                entryId={draft.id}
-                fieldActions={fieldActions}
-              />
-
-              <div className="rowgap pad">
-                <button className="btn" onClick={save} disabled={!dirty.count}>保存{dirty.count ? `（${dirty.count} 处改动）` : ''}</button>
-                <button className="btn ghost" onClick={() => load(draft.id)} disabled={!dirty.count}>放弃改动</button>
-                <button className="btn ghost" onClick={removeEntry}>删除条目</button>
-                {current?.missing.length ? (
-                  <span className="hint">模板建议里还有 {current.missing.length} 项没填（不影响使用）：{current.missing.slice(0, 5).map((m) => m.label).join('、')}{current.missing.length > 5 ? '…' : ''}</span>
-                ) : null}
-                {skippedExcluded.length ? (
-                  <span className="hint">另有 {skippedExcluded.length} 项已标不填、不计入完整度：{skippedExcluded.slice(0, 6).map((m) => m.label).join('、')}{skippedExcluded.length > 6 ? '…' : ''}</span>
-                ) : null}
-              </div>
-            </div>
-          )}
-        </div>
+        <EntryDetailColumn
+          data={data}
+          draft={draft}
+          current={current}
+          dirtyCount={dirty.count}
+          skippedExcluded={skippedExcluded}
+          sectionId={sectionId}
+          groups={groups}
+          boardView={boardView}
+          fieldActions={fieldActions}
+          onSave={save}
+          onCopyRef={copyEntryRef}
+          onDraftTitle={(title) => setDraft((d) => (d ? { ...d, title } : d))}
+          onAddField={() => setAf({ key: '', label: '', type: 'text', group: groups[0]?.id || '', value: '' })}
+          onRestoreField={restoreField}
+          onBoard={applyBoard}
+          onPatchField={patchField}
+          onDiscard={() => { if (draft) load(draft.id); }}
+          onRemoveEntry={removeEntry}
+        />
       </div>
 
       <CliHints module="entries" />
@@ -767,180 +552,47 @@ export default function SectionView({ sectionId: rawId, listHidden = false }: Vi
         <div className="drop-mask"><div>松开导入栏目 ZIP</div></div>
       ) : null}
 
-      {ask ? (
-        <Modal
-          title={`这个包已加密 · ${ask.fileName}`}
-          onClose={() => { if (!importing) { setAsk(null); setAskPw(''); } }}
-          footer={(
-            <>
-              <button className="btn ghost" onClick={() => setAsk(null)} disabled={importing}>取消</button>
-              <button className="btn" onClick={submitAsk} disabled={importing || !askPw.trim()}>
-                {importing ? '解密中…' : '打开预览'}
-              </button>
-            </>
-          )}
-        >
-          <div className="stack">
-            <div className="hint">导出时给这个包设了口令。输入同一口令才能预览与导入——口令不在文件里，错了只能重试。</div>
-            <input
-              type="password"
-              autoComplete="off"
-              value={askPw}
-              onChange={(e) => setAskPw(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') submitAsk(); }}
-              placeholder="导出时设置的口令"
-            />
-          </div>
-        </Modal>
-      ) : null}
+      <ImportModals
+        ask={ask}
+        askPw={askPw}
+        importing={importing}
+        onAskPw={setAskPw}
+        onAskClose={() => { if (!importing) { setAsk(null); setAskPw(''); } }}
+        onAskCancel={() => setAsk(null)}
+        onSubmitAsk={submitAsk}
+        zip={zip}
+        conflict={conflict}
+        onConflict={setConflict}
+        onZipClose={() => { if (!importing) setZip(null); }}
+        onZipCancel={() => setZip(null)}
+        onApplyZip={applyZip}
+        modal={modal}
+        onModalClose={() => setModal(null)}
+      />
 
-      {zip ? (
-        <Modal
-          title={`导入预览 · ${zip.fileName}`}
-          onClose={() => { if (!importing) setZip(null); }}
-          footer={(
-            <>
-              <button className="btn ghost" onClick={() => setZip(null)} disabled={importing}>取消</button>
-              <button className="btn" onClick={applyZip} disabled={importing}>{importing ? '导入中…' : '确认导入'}</button>
-            </>
-          )}
-        >
-          {(() => {
-            const p = zip.preview;
-            return (
-              <div className="stack">
-                <div>
-                  来源：<strong>{p.section.source.title}</strong><span className="muted">（{p.section.source.id}）</span>
-                  {' → '}目标：<strong>{p.section.title}</strong><span className="muted">（{p.section.targetId}）</span>
-                  {p.section.willCreate ? <span className="bad">　将新建栏目</span> : null}
-                </div>
-                <div className="hint">
-                  导出时间 {p.exportedAt || '未知'}　·　{p.withSecrets ? '含凭据明文' : '凭据已打码'}
-                  {p.encrypted ? '　·　已解密（口令已验证）' : ''}
-                </div>
-                <div className="rowgap">
-                  <Tag>条目 {p.entries.total}</Tag>
-                  <Tag>将新增 {p.entries.fresh}</Tag>
-                  {p.entries.conflicts.length ? <span className="tag bad">冲突 {p.entries.conflicts.length}</span> : null}
-                  <Tag>附件 新增 {p.files.new} / 复用 {p.files.reused}（{fmtBytes(p.files.bytes)}）</Tag>
-                </div>
-                {p.section.fieldsToAdd.length ? (
-                  <div className="hint">将补 {p.section.fieldsToAdd.length} 个字段：{p.section.fieldsToAdd.map((f) => f.label).join('、')}</div>
-                ) : null}
-                {p.entries.conflicts.length ? (
-                  <div className="block">
-                    <div className="flabel"><span>冲突明细</span><span className="fkey">撞 = 本地已有同 id 或同标题的条目</span></div>
-                    <div className="conflict-list">
-                      {p.entries.conflicts.map((c) => (
-                        <div key={`${c.id}-${c.existingId}`} className="conflict-row">
-                          <span className="title">{c.title}</span>
-                          <span className="hint">
-                            {c.reason === 'id' ? `同 id 撞上「${c.existingTitle}」` : `同标题撞上「${c.existingTitle}」`}
-                          </span>
-                          {conflict === 'copy' ? <span className="hint ok">→ {c.copyTitle}</span> : null}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
-                {p.entries.conflicts.length ? (
-                  <div className="stack">
-                    <div className="flabel"><span>冲突怎么处理</span></div>
-                    <label className="inline"><input type="radio" checked={conflict === 'skip'} onChange={() => setConflict('skip')} /> 跳过（保留现有）</label>
-                    <label className="inline"><input type="radio" checked={conflict === 'copy'} onChange={() => setConflict('copy')} /> 另存为新条目（标题加「导入」）</label>
-                    <label className="inline"><input type="radio" checked={conflict === 'overwrite'} onChange={() => setConflict('overwrite')} /> 覆盖现有条目的字段</label>
-                  </div>
-                ) : null}
-                {p.warnings.map((w) => <div key={w} className="hint bad">注意：{w}</div>)}
-              </div>
-            );
-          })()}
-        </Modal>
-      ) : null}
+      <FieldModals
+        fieldView={fieldView}
+        fieldEdit={fieldEdit}
+        draft={draft}
+        current={current}
+        sectionTitle={data.section.title}
+        onCloseView={() => setFieldView(null)}
+        onCloseEdit={() => setFieldEdit(null)}
+        onSaved={async () => { if (draft) { await load(draft.id); await reload(); } }}
+      />
 
-      {fieldView && draft ? (
-        <FieldInfoModal
-          entryId={draft.id}
-          def={fieldView.def}
-          value={draft.values?.[fieldView.def.key]}
-          sectionTitle={data?.section.title}
-          entryTitle={current?.title || draft.title}
-          onClose={() => setFieldView(null)}
-        />
-      ) : null}
-
-      {fieldEdit && draft ? (
-        <FieldEditModal
-          entryId={draft.id}
-          def={fieldEdit.def}
-          onClose={() => setFieldEdit(null)}
-          onSaved={async () => { await load(draft.id); await reload(); }}
-        />
-      ) : null}
-
-      {af ? (
-        <Modal
-          title={`添加扩展字段 · ${data?.section.title || ''}`}
-          onClose={() => { if (!afBusy) setAf(null); }}
-          footer={(
-            <>
-              <button className="btn ghost" onClick={() => setAf(null)} disabled={afBusy}>取消</button>
-              <button className="btn" onClick={submitAddField} disabled={afBusy || !af.key.trim()}>
-                {afBusy ? '添加中…' : '添加'}
-              </button>
-            </>
-          )}
-        >
-          <div className="stack">
-            <div className="hint">字段只加在<b>这一条条目</b>上（写时复制，不动栏目模板）；凭据样的键（密码 / 令牌 / 密钥）落盘即密文。</div>
-            <div className="grid">
-              <div className="field">
-                <div className="flabel"><span>key</span><span className="fkey">英文字母开头</span></div>
-                <div className="fctrl"><input value={af.key} onChange={(e) => setAf({ ...af, key: e.target.value })} placeholder="例如 budget" /></div>
-              </div>
-              <div className="field">
-                <div className="flabel"><span>标签</span><span className="fkey">缺省同 key</span></div>
-                <div className="fctrl"><input value={af.label} onChange={(e) => setAf({ ...af, label: e.target.value })} placeholder="例如 预算" /></div>
-              </div>
-              <div className="field">
-                <div className="flabel"><span>类型</span></div>
-                <div className="fctrl">
-                  <select value={af.type} onChange={(e) => setAf({ ...af, type: e.target.value })}>
-                    {(boot?.fieldTypes || []).map((t) => (
-                      <option key={t} value={t}>{boot?.fieldTypeLabels?.[t] ? `${boot.fieldTypeLabels[t]}（${t}）` : t}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-              <div className="field">
-                <div className="flabel"><span>分组</span><span className="fkey">块在页面里的位置</span></div>
-                <div className="fctrl">
-                  <select value={af.group} onChange={(e) => setAf({ ...af, group: e.target.value })}>
-                    {groups.map((g) => <option key={g.id} value={g.id}>{g.title}</option>)}
-                  </select>
-                </div>
-              </div>
-            </div>
-            <div className="field wide">
-              <div className="flabel"><span>初值</span><span className="fkey">可留空，建完再填</span></div>
-              <div className="fctrl">
-                <input
-                  value={af.value}
-                  onChange={(e) => setAf({ ...af, value: e.target.value })}
-                  onKeyDown={(e) => { if (e.key === 'Enter') submitAddField(); }}
-                  placeholder="顺手给个值（选填）"
-                />
-              </div>
-            </div>
-          </div>
-        </Modal>
-      ) : null}
-
-      {modal ? (
-        <Modal title={modal.title} onClose={() => setModal(null)}>
-          {modal.body}
-        </Modal>
-      ) : null}
+      <AddFieldModal
+        af={af}
+        afBusy={afBusy}
+        sectionTitle={data.section.title}
+        groups={groups}
+        fieldTypes={boot?.fieldTypes}
+        fieldTypeLabels={boot?.fieldTypeLabels}
+        onChange={setAf}
+        onClose={() => { if (!afBusy) setAf(null); }}
+        onCancel={() => setAf(null)}
+        onSubmit={submitAddField}
+      />
     </div>
   );
 }
