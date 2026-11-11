@@ -1,0 +1,11 @@
+{
+  "name": "local",
+  "owner": { "name": "nx-sk local" },
+  "plugins": [
+    {
+      "name": "ts-lsp",
+      "source": "./plugins/ts-lsp",
+      "description": "TypeScript/JavaScript language server (typescript-language-server) —— hover / goToDefinition / findReferences / documentSymbol / rename"
+    }
+  ]
+}

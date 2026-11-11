@@ -575,6 +575,16 @@ agent 手册** —— 它写在创建本项目的脚手架 skill `server-cli-web
 | 字段字典只在模板里、栏目不落盘 | 模板后来新增的字段永远不出现在老栏目里（求职没显示上传框），且没有任何报错 | 栏目实例化时**深拷贝**模板字段；模板演进用 `section sync`（只增不改不删）补 |
 | 清单的行只认列 key | 人写的是「密码」，声明的是 `pass` —— agent 按文档写就报错 | 列名**key 与 label 都认**，与顶层 `--set` 同一口径 |
 
+**开发环境：TypeScript LSP**（详见 `docs/dev-lsp.md`）
+
+LSP 由本地 plugin `ts-lsp@local` 提供：hover / 定义跳转 / 引用查找 / 文档符号 / 工作区符号 / 重命名。
+
+| 坑 | 后果 | 正确做法 |
+| --- | --- | --- |
+| 把 `lspServers` 写进 `settings.json` | **不报错，也不生效**——这个键只存在于 plugin manifest | 走 plugin：`marketplace add` → `plugin install`，见 `docs/dev-lsp.md` |
+| 装了 plugin 就在当前会话用它 | 旧会话不热加载新注册的 server，工具报「No LSP server available」 | 开**新会话**再验 |
+| tsserver 索引没建完就看引用数 | 引用数偏少（2 个 vs 预热后 7 个），被误判成「LSP 配错」 | 判断配置对不对看**定义能否跨文件跳转**，不是看引用数 |
+
 ## License
 
 MIT
