@@ -87,3 +87,13 @@ test('kind 清单封闭：LOCATOR_KINDS 与 parse 认的段一致', () => {
   assert.deepEqual([...LOCATOR_KINDS], ['section', 'entry', 'field', 'file']);
   assert.equal(LOCATOR_SCHEME, 'nx-sk://');
 });
+
+test('B4 entryRefText：原三行 CLI 文案逐字不变 + 末尾补一行 locator', async () => {
+  const { entryRefText } = await import('../../src/web/frontend/entryRef.ts');
+  const lines = entryRefText({ id: 'demo', title: '字段样例' }, { id: 'e_1', title: '示例条目' }).split('\n');
+  assert.equal(lines.length, 4);
+  assert.equal(lines[0], 'nx-sk 条目 · 栏目「字段样例」(demo) › 条目「示例条目」(e_1)');
+  assert.equal(lines[1], '读: nx-sk entry get --section demo e_1');
+  assert.equal(lines[2], '改: nx-sk entry update --section demo e_1 --set 字段=值');
+  assert.equal(lines[3], '定位: nx-sk://entry/e_1');
+});

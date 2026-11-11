@@ -1760,3 +1760,81 @@ body.col-resizing, body.col-resizing * { cursor: col-resize !important; user-sel
   min-width: 0; justify-content: flex-end;
 }
 .set-row .set-v .mono { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── #18 侧栏全局资源检索：三类结果分组叠在树上方，无边框、hover 才现色块 ── */
+.sb-results {
+  max-height: 46vh; overflow: auto;
+  padding: 2px 6px 8px;
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+}
+.sb-result-group { margin-top: 4px; }
+.sb-result-title {
+  font-size: 10px; color: var(--mid); letter-spacing: .04em;
+  padding: 4px 6px 2px; text-transform: none;
+}
+.sb-result-row {
+  display: flex; align-items: center; gap: 6px; width: 100%;
+  padding: 3px 6px; border: 0; background: none; cursor: pointer;
+  font: inherit; color: inherit; text-align: left; border-radius: 4px;
+}
+.sb-result-row:hover { background: var(--hover); }
+.sb-result-row .sb-label { flex: 0 1 auto; min-width: 40px; }
+.sb-result-sub { flex: 1; min-width: 0; text-align: right; color: var(--mid); font-size: 10px; }
+
+/* #18 字段块定位高亮：侧栏点字段结果后短暂闪一下（1.6s 自动摘除） */
+.blk-focus, .field.blk-focus {
+  background: var(--hover);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  transition: background .25s ease, box-shadow .25s ease;
+}
+
+/* ── #18 debug（资源引用）：格子 + 悬浮预览 + 检索面板 ── */
+.dbg-field { display: flex; flex-direction: column; gap: 6px; }
+.dbg-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.dbg-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 2px 8px; border-radius: 4px; cursor: pointer;
+  background: none; border: 1px solid var(--line);
+  font-size: 12px; max-width: 260px;
+}
+.dbg-chip:hover { background: var(--hover); }
+.dbg-chip.dead { color: var(--mid); border-style: dashed; }
+.dbg-chip-kind { color: var(--mid); font-size: 10px; }
+.dbg-chip-label { min-width: 0; }
+.dbg-chip-x {
+  border: 0; background: none; cursor: pointer; color: var(--mid);
+  font-size: 13px; line-height: 1; padding: 0 2px; border-radius: 3px;
+}
+.dbg-chip-x:hover { color: var(--ink); background: var(--soft-2); }
+.dbg-add-row { display: flex; align-items: center; gap: 8px; }
+.dbg-pick-panel {
+  border: var(--border); border-radius: 6px; background: var(--paper);
+  padding: 6px; max-height: 300px; overflow: auto;
+}
+.dbg-pick-search { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+.dbg-pick-search input { flex: 1; min-width: 0; }
+.dbg-pick-list { display: flex; flex-direction: column; }
+.dbg-pick-item {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 4px 6px; border: 0; background: none; cursor: pointer;
+  font: inherit; text-align: left; border-radius: 4px;
+}
+.dbg-pick-item:hover { background: var(--hover); }
+.dbg-pick-name { flex: 1; min-width: 0; }
+/* 悬浮预览浮层：Notion peek 的迷你形态（标题 / 内容行 / locator 小字） */
+.dbg-hover {
+  position: fixed; z-index: 1200; width: 300px; max-width: 90vw;
+  background: var(--paper); border: 1px solid var(--line-strong); border-radius: 6px;
+  box-shadow: 0 6px 24px rgba(20, 22, 26, .12);
+  padding: 8px 10px; pointer-events: none;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.dbg-hover-head { display: flex; align-items: center; gap: 6px; }
+.dbg-hover-body { display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
+.dbg-hover-body .dbg-preview-value {
+  font-family: ui-monospace, Consolas, monospace; font-size: 11px;
+  background: var(--soft); border-radius: 4px; padding: 3px 6px;
+  white-space: pre-wrap; word-break: break-all;
+}
+.dbg-hover-loc { color: var(--mid); font-size: 10px; word-break: break-all; }

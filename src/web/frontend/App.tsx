@@ -204,9 +204,10 @@ export default function App() {
             entryMap={entryMap}
             setEntryMap={setEntryMap}
             onGo={go}
-            onOpenEntry={(sid, eid) => {
-              patchUi({ view: sid, entry: eid });
-              window.location.hash = `#/${sid}?entry=${encodeURIComponent(eid)}`;
+            onOpenEntry={(sid, eid, focus) => {
+              // #18：focus = 进入条目后要把哪个字段块滚进视口并短暂高亮（侧栏全局搜索用）
+              patchUi({ view: sid, entry: eid, focus: focus || '' });
+              window.location.hash = eid ? `#/${sid}?entry=${encodeURIComponent(eid)}` : `#/${sid}`;
             }}
           />
         ) : null}
