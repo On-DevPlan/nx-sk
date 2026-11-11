@@ -111,6 +111,24 @@ export default {
       render: (d: Parameters<typeof service.renderEntryAddField>[0]) => service.renderEntryAddField(d),
     },
     {
+      id: 'entry.field-update',
+      cli: ['entry', 'field-update'],
+      http: ['PATCH', '/api/entries/:ref/fields/:key'],
+      summary: '改条目内一个字段的属性（显示名 / 描述）：只写本条目的结构行（写时复制），不动栏目字典与值；改整栏目字典用 section update --set-field',
+      args: ['ref'],
+      flags: {
+        key: { type: 'string', required: true, hint: '字段 key（或中文标签）' },
+        label: { type: 'string', hint: '新的显示名（中文名）' },
+        hint: { type: 'string', hint: '新的描述（空串 = 清空）' },
+        section: { type: 'string', hint: '限定栏目，解决同名歧义' },
+        'dry-run': { type: 'boolean' },
+      },
+      run: (ctx: {
+        ref?: string; key?: unknown; label?: unknown; hint?: unknown; section?: string; 'dry-run'?: boolean;
+      } = {}) => service.updateEntryFieldDef(ctx.ref, ctx),
+      render: (d: Parameters<typeof service.renderEntryUpdateField>[0]) => service.renderEntryUpdateField(d),
+    },
+    {
       id: 'entry.remove-field',
       cli: ['entry', 'remove-field'],
       http: ['DELETE', '/api/entries/:ref/fields/:key'],

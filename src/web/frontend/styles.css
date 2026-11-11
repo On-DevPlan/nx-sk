@@ -404,9 +404,9 @@ label.inline { display: inline-flex; align-items: center; gap: 6px; }
 .blk-head:hover .blk-label { color: var(--ink); }
 .blk-key { margin-left: auto; font-size: 10px; color: var(--soft-2); opacity: 0; transition: opacity .12s; }
 .blk-head:hover .blk-key { opacity: 1; }
-/* 任务 #20：块头字段移除入口——Notion 无边框风，hover 块头才现形（与 .blk-key 同一节奏），
-   静止态不抢正文的注意力；hover × 本身才加深底色 */
-.blk-remove {
+/* 任务 #20/#24：块头字段操作入口（⋯ 更多菜单）——Notion 无边框风，
+   hover 块头才现形（与 .blk-key 同一节奏），静止态不抢正文的注意力 */
+.blk-menu-btn {
   margin-left: 2px;
   width: 18px;
   height: 18px;
@@ -421,8 +421,42 @@ label.inline { display: inline-flex; align-items: center; gap: 6px; }
   opacity: 0;
   transition: opacity .12s, background .12s;
 }
-.blk-head:hover .blk-remove { opacity: 1; }
-.blk-remove:hover { background: var(--hover); color: var(--ink); }
+.blk-head:hover .blk-menu-btn,
+.blk-menu-btn:focus-visible { opacity: 1; }
+.blk-menu-btn:hover { background: var(--hover); color: var(--ink); }
+/* 块根是 overflow:hidden（高度由网格锁着），下拉必须 portal 到 body + fixed */
+.blk-menu {
+  position: fixed;
+  z-index: 1200;
+  width: 168px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  background: var(--paper);
+  border: var(--border);
+  border-radius: var(--radius-btn);
+  box-shadow: 0 6px 20px rgba(20, 22, 26, .12);
+}
+.blk-menu button {
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.blk-menu button:hover { background: var(--hover); }
+.blk-menu button.danger-item { color: var(--danger); }
+/* 字段详情弹窗：定义行 + 只读值预览 */
+.fldinfo { border: var(--border); border-radius: 6px; overflow: hidden; }
+.fldinfo-row { display: flex; gap: 12px; padding: 6px 10px; font-size: 12px; border-top: var(--border); }
+.fldinfo-row:first-child { border-top: 0; }
+.fldinfo-k { flex: 0 0 84px; color: var(--mid); }
+.fldinfo-v { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; word-break: break-all; }
+.fldinfo-loc { font-size: 11px; color: var(--mid); }
+.fldinfo-value { max-height: 220px; font-size: 12px; }
 /* ⠿ 平时也看得见（淡）：完全隐藏的把手等于没有把手 */
 .blk-grip {
   color: var(--mid);
@@ -1813,17 +1847,17 @@ body.col-resizing, body.col-resizing * { cursor: col-resize !important; user-sel
   display: inline-flex; align-items: center; gap: 5px;
   padding: 2px 8px; border-radius: 4px; cursor: pointer;
   background: none; border: 1px solid var(--line);
-  font-size: 12px; max-width: 260px;
+  font-size: 12px; max-width: 320px;
 }
 .dbg-chip:hover { background: var(--hover); }
 .dbg-chip.dead { color: var(--mid); border-style: dashed; }
-.dbg-chip-kind { color: var(--mid); font-size: 10px; }
-.dbg-chip-label { min-width: 0; }
-/* #21 内联数据板：绑定位置的实时值（值变 → reload → resolve-batch 刷新） */
-.dbg-chip-value {
-  color: var(--ink); font-size: 11px; font-family: ui-monospace, Consolas, monospace;
-  background: var(--soft); border-radius: 3px; padding: 0 4px; max-width: 150px;
+/* #21 内联数据板 + #24 验收反馈：格子主文本就是被引用位置的**内容**（不是字段名/类型标签），
+   次文本只放量词（完整度 / 字节 / 条目数） */
+.dbg-chip-main {
+  min-width: 0; max-width: 220px; color: var(--ink);
+  font-family: ui-monospace, Consolas, monospace; font-size: 11.5px;
 }
+.dbg-chip-sub { min-width: 0; color: var(--mid); font-size: 10.5px; }
 .dbg-chip-x {
   border: 0; background: none; cursor: pointer; color: var(--mid);
   font-size: 13px; line-height: 1; padding: 0 2px; border-radius: 3px;

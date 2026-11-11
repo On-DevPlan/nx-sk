@@ -42,13 +42,25 @@ interface SearchHit {
 
 const KIND_LABEL: Record<string, string> = { section: '栏目', entry: '条目', field: '字段', file: '附件' };
 
-/** 内联数据板（#21）：格子上直接显示绑定位置的实时值（截断，全文看悬浮预览）。 */
-function chipValue(r: ResolveInfo): string {
+/**
+ * 内联数据板（#21 + #24 验收反馈「内联值要具体内容，不要字段标签」）：
+ * 格子主文本 = **被引用位置的实时内容**，不是它的名字/类型。
+ *   field → 字段值（空值给「（空）」）；entry → 条目名；file → 文件名；section → 栏目标题。
+ * 次文本 = 只有「内容之外还需要一句量词」时才给（条目完整度 / 附件字节 / 条目数）。
+ */
+function chipMain(r: ResolveInfo): string {
   if (r.kind === 'field') {
-    if (r.value === null || r.value === undefined || r.value === '') return '';
-    const text = typeof r.value === 'object' ? JSON.stringify(r.value) : String(r.value);
-    return text.length > 48 ? `${text.slice(0, 48)}…` : text;
+    const v = r.value;
+    if (v === null || v === undefined || v === '') return '（空）';
+    const text = typeof v === 'object' ? JSON.stringify(v) : String(v);
+    return text.length > 60 ? `${text.slice(0, 60)}…` : text;
   }
+  const title = String(r.title ?? '').trim();
+  if (title) return title;
+  return r.kind === 'file' ? String(r.name ?? '') : '';
+}
+
+function chipSub(r: ResolveInfo): string {
   if (r.kind === 'entry') {
     const c = r.completeness as { ratio?: number } | null;
     return c && typeof c.ratio === 'number' ? `完整度 ${c.ratio}%` : '';
@@ -217,8 +229,8 @@ export function DebugControl({ value, onChange }: ControlProps) {
           {refs.map((loc) => {
             const info = resolved[loc];
             const dead = info === false;
-            const title = info && !dead && info.title ? String(info.title) : loc;
-            const kindLabel = info && !dead ? (KIND_LABEL[String(info.kind)] || '') : '';
+            const main = info && !dead ? chipMain(info) : loc;
+            const sub = info && !dead ? chipSub(info) : '';
             return (
               <span
                 key={loc}
@@ -230,10 +242,9 @@ export function DebugControl({ value, onChange }: ControlProps) {
                 onMouseLeave={() => setHover((h) => (h?.locator === loc ? null : h))}
                 onClick={() => copyLoc(loc)}
               >
-                {kindLabel ? <span className="dbg-chip-kind">{kindLabel}</span> : null}
-                <span className="dbg-chip-label nowrap">{title}</span>
-                {info && !dead && chipValue(info) ? <span className="dbg-chip-value nowrap">{chipValue(info)}</span> : null}
-                {dead ? <span className="tag">已失效</span> : null}
+                <span className="dbg-chip-main nowrap">{main}</span>
+                {sub ? <span className="dbg-chip-sub nowrap">{sub}</span> : null}
+                {dead ? <span className="dbg-chip-sub">已失效</span> : null}
                 <button
                   type="button"
                   className="dbg-chip-x"
@@ -249,7 +260,7 @@ export function DebugControl({ value, onChange }: ControlProps) {
 
       <div className="dbg-add-row">
         <button type="button" className="btn small" onClick={() => setPickerOpen((v) => !v)}>＋ 引用资源</button>
-        <span className="hint">格子内联实时值 · 悬浮看详情 · 点格子复制定位符</span>
+        <span className="hint">格子内联显示内容 · 悬浮看详情 · 点格子复制定位符</span>
       </div>
 
       {pickerOpen ? (
