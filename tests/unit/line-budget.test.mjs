@@ -1,115 +1,193 @@
-// 行数预算白名单的**陈旧性**断言。
+// 单文件行数预算规则的单测：三档边界 + 登记表命中/未命中/陈旧。
 //
-// 白名单（eslint-line-budget.json）是最容易腐烂的东西：
-// 文件拆完了、条目忘了删 → 豁免永久化，没人再看得见。
-// 文件改名了 → 条目指向不存在的路径，豁免失效，报错理由还写着旧路径。
-// 这两条都会让「白名单」变成假的安全感，所以写成断言钉死。
+// 口径与 eslint-rules/line-budget.js 头注释一致：物理行（含空行与注释），
+// 所以这里用 N 行 `void 0;` 造文件，`Array.from(...).join('\n')` 得到的行数正好是 N。
 import assert from 'node:assert/strict';
 import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { RuleTester } from 'eslint';
+import { lineBudgetWarn, lineBudgetError } from '../../eslint-rules/line-budget.js';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const CONFIG_PATH = join(ROOT, 'eslint-line-budget.json');
-
 const config = JSON.parse(await readFile(CONFIG_PATH, 'utf8'));
 
-/** 数文件的「有效行」：与 ESLint max-lines 的默认口径不同，这里排除注释与空行。 */
-async function codeLines(relPath) {
-  const src = await readFile(join(ROOT, relPath), 'utf8');
-  const lines = src.split('\n');
-  let n = 0;
-  let inBlock = false;
-  for (const raw of lines) {
-    const s = raw.trim();
-    if (inBlock) {
-      if (s.includes('*/')) inBlock = false;
-      continue;
-    }
-    if (s === '') continue;
-    if (s.startsWith('/*')) {
-      if (!s.includes('*/')) inBlock = true;
-      continue;
-    }
-    if (s.startsWith('//')) continue;
-    n += 1;
-  }
-  return n;
-}
+const OPTIONS = {
+  warn: config.warn,
+  approve: config.approve,
+  hard: config.hard,
+  registry: config.registry,
+};
 
-/** 与 eslint-rules/line-budget.js 同口径的「总行数」：含注释与空行。 */
+/** N 行源码（不带结尾换行，物理行数正好 N）。 */
+const lines = (n) => Array.from({ length: n }, () => 'void 0;').join('\n');
+
+const SRC = 'C:/proj/nx-sk/src/probe.ts';
+const TEST = 'C:/proj/nx-sk/tests/probe.test.mjs';
+const SCRIPT = 'C:/proj/nx-sk/scripts/probe.mjs';
+
+const entry = (path, { lineCount = 900, max = 950 } = {}) => ({
+  path,
+  lines: lineCount,
+  max,
+  reason: '单测造的数据',
+  by: 'test',
+  at: '2026-11-12',
+});
+
+const ruleTester = new RuleTester({
+  languageOptions: { ecmaVersion: 'latest', sourceType: 'module' },
+});
+
+// ---- 提醒档：>=600 且 <800 报 warn；登记了却回落到 <800 报陈旧 ----
+
+ruleTester.run('line-budget-warn', lineBudgetWarn, {
+  valid: [
+    { code: lines(599), filename: SRC, options: [OPTIONS] },
+    { code: lines(800), filename: SRC, options: [OPTIONS] },
+    { code: lines(1000), filename: SRC, options: [OPTIONS] },
+    {
+      code: lines(800),
+      filename: SRC,
+      options: [{ ...OPTIONS, registry: [entry('src/probe.ts', { lineCount: 800, max: 800 })] }],
+    },
+  ],
+  invalid: [
+    { code: lines(600), filename: SRC, options: [OPTIONS], errors: [{ messageId: 'overWarn' }] },
+    { code: lines(601), filename: SRC, options: [OPTIONS], errors: [{ messageId: 'overWarn' }] },
+    { code: lines(799), filename: SRC, options: [OPTIONS], errors: [{ messageId: 'overWarn' }] },
+    // 目录覆盖：tests / scripts 与 src 同口径
+    { code: lines(600), filename: TEST, options: [OPTIONS], errors: [{ messageId: 'overWarn' }] },
+    { code: lines(600), filename: SCRIPT, options: [OPTIONS], errors: [{ messageId: 'overWarn' }] },
+    // 陈旧登记：落到 800 以下就该删掉登记
+    {
+      code: lines(599),
+      filename: SRC,
+      options: [{ ...OPTIONS, registry: [entry('src/probe.ts')] }],
+      errors: [{ messageId: 'staleEntry' }],
+    },
+    {
+      code: lines(700),
+      filename: SRC,
+      options: [{ ...OPTIONS, registry: [entry('src/probe.ts')] }],
+      errors: [{ messageId: 'staleEntry' }],
+    },
+  ],
+});
+
+// ---- 禁止档：800~999 未登记报错、超上限报错；>=1000 一律报错 ----
+
+ruleTester.run('line-budget-error', lineBudgetError, {
+  valid: [
+    { code: lines(599), filename: SRC, options: [OPTIONS] },
+    { code: lines(799), filename: SRC, options: [OPTIONS] },
+    {
+      code: lines(800),
+      filename: SRC,
+      options: [{ ...OPTIONS, registry: [entry('src/probe.ts', { lineCount: 800, max: 800 })] }],
+    },
+    {
+      code: lines(801),
+      filename: SRC,
+      options: [{ ...OPTIONS, registry: [entry('src/probe.ts', { lineCount: 801, max: 850 })] }],
+    },
+    {
+      code: lines(999),
+      filename: SRC,
+      options: [{ ...OPTIONS, registry: [entry('src/probe.ts', { lineCount: 999, max: 999 })] }],
+    },
+  ],
+  invalid: [
+    { code: lines(800), filename: SRC, options: [OPTIONS], errors: [{ messageId: 'overApprove' }] },
+    { code: lines(801), filename: SRC, options: [OPTIONS], errors: [{ messageId: 'overApprove' }] },
+    { code: lines(999), filename: SRC, options: [OPTIONS], errors: [{ messageId: 'overApprove' }] },
+    // 登记了但涨过 max
+    {
+      code: lines(900),
+      filename: SRC,
+      options: [{ ...OPTIONS, registry: [entry('src/probe.ts', { lineCount: 850, max: 880 })] }],
+      errors: [{ messageId: 'overMax' }],
+    },
+    // 硬禁止：1000 起一律报错，登记也救不了
+    { code: lines(1000), filename: SRC, options: [OPTIONS], errors: [{ messageId: 'overHard' }] },
+    { code: lines(1001), filename: SRC, options: [OPTIONS], errors: [{ messageId: 'overHard' }] },
+    {
+      code: lines(1000),
+      filename: SRC,
+      options: [{ ...OPTIONS, registry: [entry('src/probe.ts', { lineCount: 999, max: 999 })] }],
+      errors: [{ messageId: 'overHard' }, { messageId: 'hardWithEntry' }],
+    },
+  ],
+});
+
+// ---- 登记表本身：路径存在、档位正确、上限合法、陈旧可发现 ----
+
 async function totalLines(relPath) {
   const src = await readFile(join(ROOT, relPath), 'utf8');
   return src.split('\n').length;
 }
 
-test('白名单里的每个 path 都必须真实存在（改名/删除后条目失效）', () => {
-  for (const item of [...config.approved, ...config.deferred]) {
-    assert.ok(item.path.startsWith('src/'), `白名单条目必须写仓库内相对路径（src/...）：${item.path}`);
-    assert.ok(item.reason && item.reason.trim().length > 0, `白名单条目必须写理由：${item.path}`);
+test('阈值固定为 600 / 800 / 1000 且严格递增', () => {
+  assert.equal(config.warn, 600);
+  assert.equal(config.approve, 800);
+  assert.equal(config.hard, 1000);
+});
+
+test('登记表只保留 registry 一张表（不允许 >1000 的豁免通道）', () => {
+  assert.ok(Array.isArray(config.registry), 'registry 必须是数组');
+  assert.ok(!('approved' in config), '旧的 approved 表应已删除');
+  assert.ok(!('deferred' in config), '旧的 deferred 表（>1000 豁免）必须删除');
+});
+
+test('每条登记都必须写全 path / lines / max / reason / by / at', () => {
+  for (const item of config.registry) {
+    assert.ok(/^(src|tests|scripts)\//.test(item.path), `登记路径必须落在生效目录内：${item.path}`);
+    assert.ok(Number.isInteger(item.lines) && item.lines > 0, `lines 必须是正整数：${item.path}`);
+    assert.ok(Number.isInteger(item.max) && item.max > 0, `max 必须是正整数：${item.path}`);
+    assert.ok(item.max < config.hard, `max 必须小于硬禁止档 ${config.hard}：${item.path}`);
+    assert.ok(item.reason && item.reason.trim().length > 0, `必须写理由：${item.path}`);
+    assert.ok(item.by && item.by.trim().length > 0, `必须写登记人：${item.path}`);
+    assert.ok(/^\d{4}-\d{2}-\d{2}$/.test(item.at), `at 必须是 YYYY-MM-DD：${item.path}`);
   }
 });
 
-test('白名单 path 对应的文件必须存在', async () => {
-  for (const item of [...config.approved, ...config.deferred]) {
+test('登记的路径必须真实存在（改名/删除后条目就失效了）', async () => {
+  for (const item of config.registry) {
     let exists = true;
     try {
       await stat(join(ROOT, item.path));
     } catch {
       exists = false;
     }
-    assert.ok(exists, `白名单指向的文件不存在了（已改名或已删除？）：${item.path} —— 请删掉这条记录`);
+    assert.ok(exists, `登记指向的文件不存在：${item.path} —— 请删掉这条`);
   }
 });
 
-test('已降到档位以下的文件必须从白名单里删掉（防止豁免永久化）', async () => {
-  // approved 覆盖的是 801~1000 档；文件一旦自己降到 <= 800，登记就没意义了。
-  for (const item of config.approved) {
+test('登记的文件必须仍在 800~999 档，且不超过登记上限（陈旧登记/上限过期都要报）', async () => {
+  for (const item of config.registry) {
     const total = await totalLines(item.path);
     assert.ok(
-      total > config.approve,
-      `${item.path} 现在只有 ${total} 行（<= ${config.approve}），已不需要 approved 豁免 —— 请删掉白名单里的这条记录`,
+      total >= config.approve,
+      `${item.path} 现在只有 ${total} 行（< ${config.approve}），已不需要登记 —— 请删掉这条`,
+    );
+    assert.ok(
+      total <= item.max,
+      `${item.path} 现在 ${total} 行，超过登记上限 ${item.max} —— 要么拆，要么调高 max 并写理由`,
     );
   }
 });
 
-test('deferred 只允许给「>1000」的存量文件，且必须说明拆分计划', async () => {
-  for (const item of config.deferred) {
-    const total = await totalLines(item.path);
+test('生效目录覆盖 tests / scripts（src 在存量硬超限文件拆完后接入）', async () => {
+  const { default: flat } = await import('../../eslint.config.js');
+  const blocks = flat.filter((b) => b?.rules && 'local/line-budget-error' in b.rules);
+  assert.ok(blocks.length > 0, 'eslint.config.js 里找不到行数预算的接线');
+  const patterns = blocks.flatMap((b) => (Array.isArray(b.files) ? b.files : [b.files]));
+  for (const dir of ['tests', 'scripts']) {
     assert.ok(
-      total > config.hard,
-      `${item.path} 现在只有 ${total} 行（<= ${config.hard}），已不需要 deferred 豁免 —— 请删掉白名单里的这条记录`,
+      patterns.some((p) => String(p).startsWith(`${dir}/`)),
+      `行数预算必须覆盖 ${dir}/**，当前 files：${patterns.join(', ')}`,
     );
-    assert.ok(
-      item.reason.includes('拆'),
-      `${item.path} 的 deferred 理由必须写明拆分计划（含「拆」字），否则它就是一张免死金牌`,
-    );
-  }
-});
-
-test('白名单不得给新文件开口子：>1000 的文件必须先拆，不许直接登记', async () => {
-  // 这条断言的意义是「deferred 是一个有出口的过渡态」：每个 deferred 条目都对应
-  // 一次明确的拆分承诺。文件名以 .new. 之类开头的新文件不该出现在名单里。
-  for (const item of config.deferred) {
-    assert.ok(
-      !/\.(new|tmp|draft)\./.test(item.path),
-      `${item.path} 看起来是新文件/草稿，不该进 deferred 名单`,
-    );
-  }
-});
-
-test('预算档位必须是递增的（warn < approve < hard）', () => {
-  assert.ok(config.warn < config.approve, `warn(${config.warn}) 必须小于 approve(${config.approve})`);
-  assert.ok(config.approve < config.hard, `approve(${config.approve}) 必须小于 hard(${config.hard})`);
-});
-
-test('白名单不得覆盖已经降到提醒档以下的文件（approved/deferred 之外不该有残留）', async () => {
-  // 反向检查：把名单里没登记的大文件列出来，人工确认它们的档位归属正确。
-  // 这里断言的是「名单本身没有漏掉本该登记的」——但这需要遍历整个 src，
-  // 交给 eslint 规则本身更合适（它每行都跑）。本条只验证名单里没有「登记了却已合规」的。
-  for (const item of config.approved) {
-    const code = await codeLines(item.path);
-    assert.ok(code > 0, `${item.path} 读不出有效代码行`);
   }
 });
