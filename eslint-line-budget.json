@@ -23,14 +23,6 @@
   "hard": 1000,
   "registry": [
     {
-      "path": "src/web/frontend/modules/entries/view.tsx",
-      "lines": 946,
-      "max": 946,
-      "reason": "条目面板容器里混着列表、详情表单与栏目导入弹窗。计划拆出 entryDetail.tsx（详情）与 importSection.tsx（导入），容器只留选中态与列表；交互与 hook 顺序保持不动。",
-      "by": "trae",
-      "at": "2026-11-12"
-    },
-    {
       "path": "src/web/frontend/components/fields/shortcutLibrary/ShortcutLibrary.tsx",
       "lines": 819,
       "max": 819,
