@@ -39,6 +39,14 @@
   - demo 播种的 debug 引用同步改为条目级（指向示例条目自身与其名称字段）。
   - 文案随语义更新：「非法引用已忽略」→「引用已忽略」；picker 占位与提示语改口径。
   - 验证：unit **441/441**（coerce 拒结构、sealDebug 拒模板字段+坏链保留、warnings 留档、scope=debug 口径、resolve-batch 形状）/ smoke 137/137 零削弱；真机走查 22/22（Playwright + 本机 Chrome，隔离 home 7876）：格子内联实时值、悬浮预览、picker 无结构命中、改名称保存后格子实时刷新、CLI 混写结构引用被逐层丢弃且 warnings 可见、坏链标灰、resolve-batch 直测、复制 locator 不回归、console/HTTP 零错误。
+- **任务 #22：CLI 面板代理——serve 存活时改走 HTTP 执行，根治 Windows 双进程开库冲突**（残留 mmap / disk I/O error）：
+  - **portfile（`core/panel-port.ts`）**：serve 启动把**真实端口 + pid** 写进 `<home>/serve.json`（顺延端口也不丢），退出时只清自己写的；CLI 发现面板先读档案、校验 pid 存活，缺失/已死再探默认端口 7866。
+  - **认领判据比端口复用更严**：app 名相同 **且 bootstrap 的 storePathRaw 与本 CLI 当前库路径相同** 才代理——`--store` / 环境变量换库、多面板并存（live + 临时 home）都不会被代理到别的库上；报不出库路径的老面板一律不认，宁可直跑。
+  - **`POST /api/cli` 通用分发口**：body `{actionId, ctx, bodyB64?, fileName?}`，服务端按 id 查 ACTIONS 走**同一个 applySpec + run**，错误形状与 handleApi 逐条一致（INVALID_INPUT 同样补用法串）；Origin 纪律同写操作。统一走这个口是为了绕开 GET query 对 array/json/kv flag 的序列化问题。
+  - **runCli 代理分支**：action 有 http 声明、未 `--direct`、未 `--store`、非 raw 下载口、且发现同库面板 → 代理执行；stdout 渲染（本地 action.render）、`--json` 形态、错误文案、exit code 与直跑**完全一致**（ctx 在本地 applySpec 后转发，服务端二次 coerce 幂等）。面板活着但代理失败/超时 → 报错（带端口与 action id），**不静默回退直连**；`--direct` 是显式逃生口。help/version/serve（无 http）与 raw 下载（直跑落盘）保持本地；binaryBody 上传以 base64 随 JSON 代理，本地文件读不到时原样转发让面板侧 service 报与直跑一致的错误。
+  - 观测开关 `NX_SK_CLI_PROXY_DEBUG=1`：stderr 打一行「经面板代理 :端口 actionId」，供冒烟/走查验证路径归属，正常输出零影响。
+  - 一致性测试新增反向断言：每条 http action（raw 除外）的路由必须解析回同一 id、binaryBody 必须带 file flag；`Action.readOnly` 显式豁免 dry-run 检查（#21 的 resolveBatch 同用）。
+  - 验证：unit **459/459**（+proxy.test 10 项：portfile 语义/发现双判据/分发口错误形状/代理与直跑数据等价/kv·array·binaryBody 三形态等价）/ smoke **142/142**（+5 项：serve 在跑→代理执行带端口、--direct 跳过、代理与直跑输出等价、portfile 内容、serve 死后回落直跑）；lint/typecheck/build 全绿。
 
 ## 0.40.0 (2026-11-11)
 
