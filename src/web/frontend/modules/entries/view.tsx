@@ -349,6 +349,37 @@ export default function SectionView({ sectionId: rawId, listHidden = false }: Vi
     }
   });
 
+  // 任务 #20：条目级字段移除。模板字段=脱离（值保留、可恢复，字典与他条不受影响）；
+  // 扩展字段=硬删（值一并删，不可恢复）——两种语义两种确认文案，danger 只给不可恢复那条。
+  const removeField = guard(async (key: string, def: FieldDef) => {
+    if (!draft) return;
+    const isExtension = def.template === false;
+    const label = def.label || key;
+    const ok = await dialog({
+      message: isExtension
+        ? `删除扩展字段「${label}」？值会一并删除，不可恢复`
+        : `从本条目移除「${label}」？（不影响栏目模板与其他条目）`,
+      danger: isExtension,
+      confirmText: isExtension ? '删除字段' : '移除',
+    });
+    if (!ok) return;
+    await api(`/api/entries/${encodeURIComponent(draft.id)}/fields/${encodeURIComponent(key)}`, { method: 'DELETE' });
+    toast(isExtension ? `已删除扩展字段「${label}」` : `已从本条目移除「${label}」`);
+    await load(draft.id);
+    await reload();
+  });
+
+  const restoreField = guard(async (key: string, label: string) => {
+    if (!draft) return;
+    await api(`/api/entries/${encodeURIComponent(draft.id)}/fields/${encodeURIComponent(key)}`, {
+      method: 'DELETE',
+      body: { restore: true },
+    });
+    toast(`已恢复「${label}」到本条目`);
+    await load(draft.id);
+    await reload();
+  });
+
   const addEntry = guard(async () => {
     const label = data?.section.titleLabel || '名称';
     const answer = await dialog({ message: `新建「${data?.section.title}」条目，${label}是？`, input: { placeholder: `例如 ${data?.section.titleField || '名称'}` } });
@@ -673,6 +704,19 @@ export default function SectionView({ sectionId: rawId, listHidden = false }: Vi
                 >＋ 添加字段</button>
               </div>
 
+              {/* 任务 #20：已脱离的模板字段管理条——弱字 chips + 恢复按钮（值一直在，restore 即回） */}
+              {current?.detachedFields?.length ? (
+                <div className="detached-bar">
+                  <span className="hint">已从本条目移除：</span>
+                  {current.detachedFields.map((f) => (
+                    <span key={f.key} className="tag detached-chip" title={`模板字段 ${f.key}：已从本条目脱离，值仍保留`}>
+                      {f.label || f.key}
+                      <button type="button" className="chip-restore" onClick={() => restoreField(f.key, f.label || f.key)}>恢复</button>
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+
               <BlockBoard
                 groups={groups}
                 board={boardView}
@@ -683,6 +727,7 @@ export default function SectionView({ sectionId: rawId, listHidden = false }: Vi
                 entryTitle={current?.title || draft.title}
                 sectionId={sectionId}
                 entryId={draft.id}
+                onRemoveField={removeField}
               />
 
               <div className="rowgap pad">

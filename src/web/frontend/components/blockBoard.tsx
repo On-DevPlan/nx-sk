@@ -52,6 +52,8 @@ interface BlockProps {
   onMeasure: (key: string, px: number) => void;
   dragProps: HTMLAttributes<HTMLDivElement>;
   className?: string;
+  /** 任务 #20：块头的移除入口（未传则不渲染 ×，kvTable 等其它调用点零影响）。 */
+  onRemoveField?: (key: string, def: FieldDef) => void;
 }
 
 /**
@@ -61,7 +63,7 @@ interface BlockProps {
  * ResizeObserver 盯它的盒子——输入多行字、贴图加载完、清单加一行，都会触发重报。
  * 报上去的是「块头 + 块体」需要多少像素，高度换算与是否落盘由面板统一决定。
  */
-function Block({ def, value, onPatch, ctx, onMeasure, dragProps, ...rest }: BlockProps) {
+function Block({ def, value, onPatch, ctx, onMeasure, dragProps, onRemoveField, ...rest }: BlockProps) {
   const bodyRef = useRef<HTMLDivElement>(null);
 
   useLayoutEffect(() => {
@@ -98,12 +100,30 @@ function Block({ def, value, onPatch, ctx, onMeasure, dragProps, ...rest }: Bloc
   return (
     <div {...rest} className={`blk ${rest.className || ''}`} data-block={def.key}>
       {/* 块头整条都是把手：鼠标落在「公司名称」这行任意位置就能拖，不必去戳那个小 ⠿ */}
-      <div className="blk-head" {...dragProps} title="按住这一行拖动：插到别的块上方 / 下方">
+      <div
+        className="blk-head"
+        {...dragProps}
+        // 任务 #20：从 × 上起拖不算拖块（与 panel-head 对按钮的同一守卫口径）
+        onDragStart={(e) => {
+          if ((e.target as HTMLElement).closest('.blk-remove')) { e.preventDefault(); return; }
+          dragProps.onDragStart?.(e);
+        }}
+        title="按住这一行拖动：插到别的块上方 / 下方"
+      >
         <span className="blk-grip" aria-hidden>⠿</span>
         <span className="blk-label nowrap" title={`${def.label}（${def.key}）`}>{def.label}</span>
         {def.sensitive ? <span className="tag bad">密文</span> : null}
         {def.fill && def.fill !== 'normal' ? <span className="tag">{def.fillLabel || def.fill}</span> : null}
         <span className="blk-key mono nowrap">{def.key}</span>
+        {onRemoveField ? (
+          <button
+            type="button"
+            className="blk-remove"
+            title={def.template === false ? `删除扩展字段「${def.label}」（值一并删除，不可恢复）` : `从本条目移除「${def.label}」（不影响栏目模板与其他条目）`}
+            aria-label={`移除字段 ${def.label}`}
+            onClick={(e) => { e.stopPropagation(); onRemoveField(def.key, def); }}
+          >×</button>
+        ) : null}
       </div>
       <div className="blk-body" ref={bodyRef}>
         <FieldControl def={def} value={value} onChange={(v) => onPatch(def.key, v)} ctx={ctx} />
@@ -125,13 +145,15 @@ interface PanelProps {
   onLayouts: (gid: string, layouts: Record<string, GridItem[]>) => void;
   onCollapse: (gid: string, collapsed: boolean) => void;
   onReset: (gid: string) => void;
+  /** 任务 #20：块头移除入口，原样透传给每个 Block。 */
+  onRemoveField?: (key: string, def: FieldDef) => void;
 }
 
 /**
  * 一块面板（= 一个分组）。网格宽度由 useContainerWidth 实测（引擎要按像素算位置）；
  * 父容器变宽（拉左栏、窗口缩放）时它自己会重算。
  */
-function Panel({ group, layoutGroup, index, drag, draft, onPatch, ctx, onLayouts, onCollapse, onReset }: PanelProps) {
+function Panel({ group, layoutGroup, index, drag, draft, onPatch, ctx, onLayouts, onCollapse, onReset, onRemoveField }: PanelProps) {
   const { width, containerRef, mounted } = useContainerWidth();
   const layouts = useMemo<Record<string, GridItem[]>>(() => layoutGroup?.layouts || {}, [layoutGroup]);
   const collapsed = layoutGroup?.collapsed === true;
@@ -246,6 +268,7 @@ function Panel({ group, layoutGroup, index, drag, draft, onPatch, ctx, onLayouts
                     ctx={ctx}
                     onMeasure={onMeasure}
                     dragProps={fieldDrag.dragStartProps(i)}
+                    onRemoveField={onRemoveField}
                   />
                 </div>
               ))}
@@ -268,6 +291,8 @@ export interface BlockBoardProps {
   /** 透传给 source / shortcut 的 peek 头部：「新标签页」深链。 */
   sectionId?: string;
   entryId?: string;
+  /** 任务 #20：块头 × 的回调（模板字段=脱离、扩展字段=硬删，由调用方分文案）。未传则不渲染。 */
+  onRemoveField?: (key: string, def: FieldDef) => void;
 }
 
 /**
@@ -276,7 +301,7 @@ export interface BlockBoardProps {
  * 所以这里可以假定「每个字段在版式里都有一块」。
  */
 export default function BlockBoard({
-  groups, board, onBoard, draft, onPatch, sectionTitle, entryTitle, sectionId, entryId,
+  groups, board, onBoard, draft, onPatch, sectionTitle, entryTitle, sectionId, entryId, onRemoveField,
 }: BlockBoardProps) {
   const mode = board?.mode === 'flow' ? 'flow' : 'grid';
   const ctx = useMemo<BoardContext>(
@@ -367,6 +392,7 @@ export default function BlockBoard({
           onLayouts={setLayouts}
           onCollapse={setCollapsed}
           onReset={resetGroup}
+          onRemoveField={onRemoveField}
         />
       ))}
       {!groups.length ? <div className="hint pad">这个栏目还没有可显示的字段。</div> : null}

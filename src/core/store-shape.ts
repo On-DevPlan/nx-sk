@@ -57,6 +57,18 @@ export interface EntryFieldView {
   meta: Record<string, unknown>;
 }
 
+/**
+ * 任务 #20：条目级「脱离」判据（唯一实现）。
+ *
+ * 模板字段从条目移除 = 行保留、meta 记 `{"detached":1}`；该条目不再渲染/序列化/
+ * 计完整度这个字段，但值仍在 field_data（restore 即回）。
+ * 所有读边界（values / serializeEntry / completeness / 台账 / 资源定位）都问这一个函数，
+ * 而 writeStore 的存量行恢复**不**过滤它（行必须在，否则下次保存会把它当缺行补回来）。
+ */
+export function isDetachedField(row: { meta?: Record<string, unknown> } | null | undefined): boolean {
+  return row?.meta?.detached === 1 || row?.meta?.detached === true;
+}
+
 /** 归一前的宽松输入（历史脏数据）。 */
 interface RawSection {
   id?: unknown;

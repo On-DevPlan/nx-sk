@@ -13,6 +13,7 @@ import { behaviorOf } from './fields/registry.ts';
 import type { FieldDef, TableColumnDef } from '../shared/fields/types.ts';
 import type { SerializedEntry } from '../shared/model.ts';
 import type { EntryFieldView } from './store-shape.ts';
+import { isDetachedField } from './store-shape.ts';
 // 版式（块布局）的对齐规则也只有一份：读出去之前先按当前字段自愈一遍，
 // 面板与 CLI 才看到同一份「现在实际怎么摆」。
 import { groupsForLayout, reconcileLayout } from '../shared/blockLayout.ts';
@@ -35,6 +36,8 @@ export interface ReadField {
   kind?: string;
   fill?: unknown;
   sensitive?: unknown;
+  /** 任务 #20：读路径按条目结构行附加的出身标记（true=模板行，false=扩展行）；存储里不落。 */
+  template?: boolean;
 }
 
 /**
@@ -120,8 +123,15 @@ export function serializeEntry(
   entry: EntryLike,
   { mask = false, decrypt, ownRows }: { mask?: boolean; decrypt?: (blob: unknown) => string; ownRows?: EntryFieldView[] | null } = {},
 ): SerializedEntry {
-  const defs: ReadField[] = ownRows ? ownRows.map((r) => r.spec as unknown as ReadField) : section.fields;
-  const c = completeness(section, entry, ownRows);
+  // 任务 #20：脱离行（meta.detached）不进 defs——不序列化、不渲染、不计完整度；
+  // 单独输出 detachedFields 清单给面板的「已脱离」管理条（restore 入口）。
+  // defs 带上出身标记（template），面板的移除入口据此区分「脱离」与「硬删」文案。
+  const liveRows = ownRows ? ownRows.filter((r) => !isDetachedField(r)) : null;
+  const detachedRows = ownRows ? ownRows.filter((r) => isDetachedField(r)) : [];
+  const defs: ReadField[] = liveRows
+    ? liveRows.map((r) => ({ ...(r.spec as unknown as ReadField), template: r.templateFieldId != null }))
+    : section.fields;
+  const c = completeness(section, entry, liveRows);
   const values: Record<string, unknown> = {};
   for (const def of defs) {
     const raw = entry.values?.[def.key];
@@ -162,7 +172,10 @@ export function serializeEntry(
     values,
     // v3：条目自身的字段定义（有结构行时=行，含扩展字段；没有时回退栏目字典）。
     // 面板的块渲染必须跟着它走——只读字典的话，条目内新加的扩展字段渲染不出来。
+    // 任务 #20：脱离行不在其中（defs 已过滤），每项带 template 出身标记供移除入口分文案。
     entryFields: defs as unknown as FieldDef[],
+    // 任务 #20：从本条目脱离的模板字段清单（值仍住在 field_data，restore 即回）。
+    detachedFields: detachedRows.map((r) => ({ key: r.key, label: r.label })),
   };
 }
 
@@ -176,6 +189,7 @@ export function serializeEntry(
  *
  * v3：传 `ownRows` 时只统计条目**出身模板**的行（templateFieldId 非 NULL）——
  * 扩展字段是「大胆写」写出来的，不该反过来欠用户一个「未填」。
+ * 任务 #20：脱离行（meta.detached）同样不统计——从本条目移除的字段不该再欠一个「未填」。
  */
 export function completeness(
   section: SectionLike | null | undefined,
@@ -183,7 +197,7 @@ export function completeness(
   ownRows?: EntryFieldView[] | null,
 ) {
   const fields: ReadField[] = ownRows
-    ? ownRows.filter((r) => r.templateFieldId != null).map((r) => r.spec as unknown as ReadField)
+    ? ownRows.filter((r) => r.templateFieldId != null && !isDetachedField(r)).map((r) => r.spec as unknown as ReadField)
     : section?.fields || [];
   const counted = fields.filter((d) => !isExcludedField(d));
   const excluded = fields.filter((d) => isExcludedField(d));

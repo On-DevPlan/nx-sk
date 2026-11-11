@@ -9,7 +9,7 @@
 // schema v3（写时复制）：字段解析顺序 = 条目自身结构行 → 栏目字典 → quickAdd 推断。
 // quickAdd **不再登记进字典**——推断出的 def 只用于封装本次值，
 // 写后由 upsertEntryFields 把条目自身的占位行归正（type/label/spec）。
-import { loadStore, mutateStore, entryStructures, upsertEntryFields, type EntryFieldView, type Store, type StoreEntry, type StoreSection } from '../../core/store.ts';
+import { loadStore, mutateStore, entryStructures, upsertEntryFields, detachEntryField, removeEntryFieldRow, isDetachedField, type EntryFieldView, type Store, type StoreEntry, type StoreSection } from '../../core/store.ts';
 import { assertFieldKey } from '../../core/paths.ts';
 import { badInput, conflict, notFound } from '../../core/errors.ts';
 import { SCALAR_FIELD_TYPES, SOURCE_FIELD, SOURCE_GROUP, findKvSection, findSection, inferFieldType, instantiateTemplate, isSensitiveField, looksSecretish, sectionNames } from '../../core/fields.ts';
@@ -176,9 +176,10 @@ function autoTitle(section: StoreSection, values: Record<string, unknown>): stri
   return v === undefined || v === null || v === '' ? '' : String(v);
 }
 
-/** 条目自身行优先、字典兜底的字段定义清单（序列化/台账共用）。 */
+/** 条目自身行优先、字典兜底的字段定义清单（序列化/台账共用）。
+ *  任务 #20：脱离行（meta.detached）不算——值已不进 values，定义也不该出现在任何读出口。 */
 function defsForEntry(sec: StoreSection, ownRows: EntryFieldView[] | null | undefined): FieldDef[] {
-  return ownRows ? ownRows.map((r) => r.spec as unknown as FieldDef) : sec.fields;
+  return ownRows ? ownRows.filter((r) => !isDetachedField(r)).map((r) => r.spec as unknown as FieldDef) : sec.fields;
 }
 
 export async function listEntries({ section, q }: { section?: string; q?: unknown } = {}) {
@@ -427,6 +428,8 @@ export async function fieldDictionary({ section }: { section?: string } = {}) {
       if (e.section !== sec.id) continue;
       for (const r of structures.get(e.id) || []) {
         if (byKey.has(r.key)) continue;
+        // 任务 #20：脱离行不进台账——它已从该条目移除，值也不在 values 里了。
+        if (isDetachedField(r)) continue;
         byKey.set(r.key, r.spec as Record<string, unknown>);
       }
     }
@@ -1177,6 +1180,95 @@ export function renderEntryAddField(d: Awaited<ReturnType<typeof addEntryField>>
   }
   const got = d as Awaited<ReturnType<typeof getEntry>> & { addedField: FieldDef; valueSet: boolean };
   return `已添加扩展字段「${got.addedField.label}」(${got.addedField.key}) · 类型 ${got.addedField.type} · 分组 ${String(got.addedField.group)}${got.valueSet ? ' · 已写入初值' : ''}\n${renderEntryGet(got)}`;
+}
+
+/**
+ * 在**条目自身结构行**里定位一行（任务 #20：返回行本体，不是 spec）。
+ * key 精确优先、其次 label；与 resolveOwnRow 同一口径——**含脱离行**（restore 要用它找到藏着的行）。
+ */
+function findOwnRow(rows: EntryFieldView[], rawKey: unknown): EntryFieldView | null {
+  const key = String(rawKey ?? '').trim();
+  const byKey = rows.filter((r) => r.key === key);
+  if (byKey.length) return byKey[0];
+  const byLabel = rows.filter((r) => String(r.label ?? '') === key);
+  if (byLabel.length > 1) {
+    throw conflict(`字段定位「${key}」在条目自身结构里有 ${byLabel.length} 行命中（${byLabel.map((r) => r.id).join(', ')}），请用键名精确指定`);
+  }
+  return byLabel[0] || null;
+}
+
+/**
+ * entry.remove-field：条目级字段移除（任务 #20，v3 写时复制模型）。
+ *
+ * 三种语义（与栏目字典侧同一条纪律：内置 source 袋不许动）：
+ *   - 扩展行（template_field_id NULL）→ **硬删** entry_fields 行，field_data 随 CASCADE 走，
+ *     值没了就是没了（面板必须先弹确认）。
+ *   - 模板行 → **脱离（detach）**：行保留、meta 记 detached=1；该条目不再渲染/序列化/计完整度
+ *     这个字段，**栏目字典与其他条目不受影响**；值仍住在 field_data。
+ *   - 已脱离 + --restore → 去掉 detached 标记，值原样回来（脱离从不动 field_data）。
+ *
+ * 返回该条目最新 getEntry 形状 + `removed|detached|restored` 标记与 `field` 明细。
+ */
+export async function removeEntryField(ref: unknown, ctx: {
+  key?: unknown; section?: string; restore?: boolean; 'dry-run'?: boolean;
+} = {}) {
+  const store = await loadStore();
+  const target = resolveEntry(store, ref, ctx.section);
+  const sec = mustFindSection(store, target.section);
+  const rows = entryStructures(store).get(target.id) || [];
+  const row = findOwnRow(rows, ctx.key);
+  if (!row) {
+    throw notFound(`条目「${target.title || target.id}」没有字段: ${String(ctx.key ?? '').trim()}`
+      + `（看现有字段: nx-sk entry get ${target.id}；已脱离的用 --restore 恢复）`);
+  }
+  if (row.key === SOURCE_FIELD.key) {
+    throw badInput(`「${SOURCE_FIELD.label}」是每个条目自带的内置字段（与栏目字典同一条纪律：删了下回读又会补回来），不给移除。`);
+  }
+  const detached = isDetachedField(row);
+  const kind: 'template' | 'extension' = row.templateFieldId != null ? 'template' : 'extension';
+  const field = { key: row.key, label: row.label || row.key, kind };
+
+  if (ctx.restore) {
+    if (!detached) throw badInput(`字段「${field.label}」没有被从本条目移除过，无需恢复`);
+    if (ctx['dry-run']) return { status: 'skipped', dryRun: true, entry: target.id, wouldRestore: field };
+    const changed = await detachEntryField(target.id, row.id, false);
+    if (!changed) throw notFound(`找不到条目结构行: ${row.id}`);
+    const got = await getEntry(target.id, { section: sec.id });
+    return { ...got, restored: true, field };
+  }
+  if (detached) {
+    throw conflict(`字段「${field.label}」已从本条目移除（管理条里点「恢复」可找回，值还在）`);
+  }
+  if (ctx['dry-run']) return { status: 'skipped', dryRun: true, entry: target.id, wouldRemove: field };
+  if (kind === 'extension') {
+    const changed = await removeEntryFieldRow(target.id, row.id);
+    if (!changed) throw notFound(`找不到条目结构行: ${row.id}`);
+    const got = await getEntry(target.id, { section: sec.id });
+    return { ...got, removed: true, field };
+  }
+  const changed = await detachEntryField(target.id, row.id, true);
+  if (!changed) throw notFound(`找不到条目结构行: ${row.id}`);
+  const got = await getEntry(target.id, { section: sec.id });
+  return { ...got, detached: true, field };
+}
+
+export function renderEntryRemoveField(d: Awaited<ReturnType<typeof removeEntryField>>) {
+  const x = d as unknown as {
+    status?: string; id?: string; entry?: string; field?: { key: string; label: string; kind: string };
+    wouldRemove?: { key: string; label: string; kind: string }; wouldRestore?: { key: string; label: string; kind: string };
+    removed?: boolean; detached?: boolean; restored?: boolean;
+  };
+  if (x.status === 'skipped') {
+    const w = x.wouldRemove || x.wouldRestore;
+    const act = x.wouldRestore ? '恢复' : (w?.kind === 'extension' ? '硬删（值一并删除，不可恢复）' : '从本条目脱离（值保留，可 --restore）');
+    return `试运行（未落盘）：将${act}条目 ${String(x.entry)} 的字段「${w?.label}」(${w?.key})`;
+  }
+  const head = x.restored
+    ? `已恢复模板字段「${x.field?.label}」(${x.field?.key}) 到本条目，值原样回来`
+    : x.removed
+      ? `已删除扩展字段「${x.field?.label}」(${x.field?.key})——行与值一并删除，不可恢复`
+      : `已从本条目移除模板字段「${x.field?.label}」(${x.field?.key})——值仍保留，用 nx-sk entry remove-field ${x.id} --key ${x.field?.key} --restore 找回`;
+  return `${head}\n${renderEntryGet(d as unknown as Awaited<ReturnType<typeof getEntry>>)}`;
 }
 
 // —— 表格字段（table）的现值 ——

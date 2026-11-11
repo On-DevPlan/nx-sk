@@ -24,6 +24,13 @@
 ### Changed
 
 - **#19 验收反馈**：条目页「字段=值 快填」旁路撤除——条目内加字段只留「＋ 添加字段」正门（弹窗表单）；CLI/agent 的 `--set 未知键` 自动登记通路不受影响，退役的只是这块 UI 与其样式。
+- **任务 #20：条目级字段移除与恢复**（补齐 #15 添加的逆向操作，v3 写时复制模型）：
+  - `entry remove-field <ref> --key <k> [--restore] [--dry-run]`（CLI + `DELETE /api/entries/:ref/fields/:key` 同源）：**扩展字段=硬删**（entry_fields 行删除，field_data 随 CASCADE 走，值没了就是没了）；**模板字段=脱离（detach）**——行保留、meta 记 `{"detached":1}`，该条目不再渲染/序列化/计完整度这个字段，**栏目字典与其他条目零影响**；`--restore` 去掉标记，值原样回来（脱离从不动 field_data）。内置「原始资料」（source）不给删，与字典侧同纪律。
+  - 读边界统一过滤脱离行：`readStore` 的 values、`serializeEntry`（新输出 `detachedFields: [{key,label}]`，entryFields 每项带 `template` 出身标记）、`completeness`、字段台账、资源 locator、section dump 的表格现值、transfer 导出。
+  - **writeStore 防复活**（本轮最容易踩的坑）：存量条目按捕获行原样恢复时，脱离行跳过「values 缺行补模板/占位行」逻辑、值由捕获行原样带回 field_data——删了不会在下次保存时复活，值不会在全量重写中丢失；detach/restore/硬删都推进 rev，陈旧 Store 对象提交撞 BLOCKED 而不是静默覆数据。
+  - 面板：块头 hover 出无边框 `×`（BlockBoard 新可选 prop `onRemoveField`，kvTable 等调用点零影响）——模板字段弹「从本条目移除…（不影响栏目模板与其他条目）」、扩展字段弹 danger「值会一并删除，不可恢复」；add-field-bar 下方新增「已脱离」弱字 chips 管理条，每个带「恢复」按钮。
+  - 契约测试同步：dump 条目键白名单加入 `detachedFields`。
+  - 验证：unit **438/438**（+7 remove-field 专项，含「detach 后连续两次 updateEntry 不复活」）/ smoke 137/137 零削弱；真机走查 17/17（Playwright + 本机 Chrome，隔离 home 7875）：hover 出 ×、移除→块消失+chip、恢复→块与值回来、扩展硬删→块与值都没、刷新持久化、dialog 取消不写、console 零错误。期间发现并修复 1 个真缺陷（writeStore 脱离判据误传 meta 对象，值在全量重写中丢失→restore 变 null）。
 
 ## 0.40.0 (2026-11-11)
 

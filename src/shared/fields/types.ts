@@ -149,6 +149,8 @@ interface FieldDefBase {
   maxItems?: number;
   /** v3 模板默认值：sync 补行 / 新建条目时，该键没给值就落这个（JSON 语义值）。 */
   defaultValue?: unknown;
+  /** 任务 #20：读路径按条目结构行附加的出身标记（true=模板行，false=扩展行）；存储里不落这个键。 */
+  template?: boolean;
 }
 
 /** 标量 / 富内容字段：值是一个标量或字符串数组。 */

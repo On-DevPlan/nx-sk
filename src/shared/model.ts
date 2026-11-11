@@ -56,6 +56,8 @@ export interface SerializedEntry {
   values: Record<string, unknown>;
   /** v3：条目自身的字段定义（结构行优先，回退栏目字典）——面板块渲染的唯一依据。 */
   entryFields?: FieldDef[];
+  /** 任务 #20：从本条目脱离（meta.detached）的模板字段清单——面板管理条与 restore 入口的依据。 */
+  detachedFields?: Array<{ key: string; label: string }>;
   [key: string]: unknown;
 }
 

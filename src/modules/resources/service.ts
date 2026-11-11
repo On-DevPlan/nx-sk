@@ -9,7 +9,7 @@
 // 密文边界：resolve 的字段值**默认打码**（locator 文本是要粘给 agent / 进剪贴板的，
 // 默认吐原文等于给敏感值开了第二个出口）；`--reveal` 才解密出原文。
 import { existsSync } from 'node:fs';
-import { loadStore, entryStructures, type StoreSection, type EntryFieldView } from '../../core/store.ts';
+import { loadStore, entryStructures, isDetachedField, type StoreSection, type EntryFieldView } from '../../core/store.ts';
 import { findSection, isSensitiveField, sectionNames } from '../../core/fields.ts';
 import { parseLocator, formatLocator, locatorAliases, type LocatorParts } from '../../shared/locator.ts';
 import { badInput, notFound } from '../../core/errors.ts';
@@ -175,7 +175,8 @@ export async function resolveLocator(loc: unknown, { reveal = false }: { reveal?
   if (entry) {
     const sec = store.sections.find((s) => s.id === entry.section);
     if (!sec) throw notFound(`条目 ${entry.id} 指向的栏目已不存在: ${entry.section}`);
-    const row: EntryFieldView | undefined = (structures.get(entry.id) || []).find((r) => r.key === key);
+    // 任务 #20：脱离行对本条目已不存在——locator 解不到它（读边界同一口径）。
+    const row: EntryFieldView | undefined = (structures.get(entry.id) || []).find((r) => r.key === key && !isDetachedField(r));
     if (!row) throw notFound(`条目 ${entry.id} 没有字段: ${key}`);
     const def = row.spec as unknown as FieldDef;
     const rawValue = entry.values?.[key];
