@@ -23,14 +23,6 @@
   "hard": 1000,
   "registry": [
     {
-      "path": "src/shared/table.ts",
-      "lines": 995,
-      "max": 995,
-      "reason": "表格公式引擎 + 列/汇总归一 + 计算 + 文本渲染同在一个 shared 纯模块里。计划拆成 table/formula.ts、table/schema.ts、table/compute.ts、table/text.ts，本文件留门面；拆分期间不得再涨。",
-      "by": "trae",
-      "at": "2026-11-12"
-    },
-    {
       "path": "src/web/frontend/modules/entries/view.tsx",
       "lines": 946,
       "max": 946,
