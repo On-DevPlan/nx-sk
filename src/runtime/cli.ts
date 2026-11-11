@@ -6,6 +6,9 @@ import type { Server } from 'node:http';
 import { APP_NAME, DEFAULT_PORT, ENV_STORE_DB, VERSION } from '../core/paths.ts';
 import { badInput, external, toErrorShape } from '../core/errors.ts';
 import { parseDataArg, parseStdinValue } from '../core/argsafe.ts';
+import { clearPanelPortfile, discoverPanelPort, isPidAlive, readPanelPortfile, writePanelPortfile } from '../core/panel-port.ts';
+import { isEnvTruthy } from '../core/serve-port.ts';
+import { PROXY_DEBUG_ENV, proxyRun } from './cli-proxy.ts';
 import { ACTIONS, MODULES, MODULE_TITLES, commandEntry, type CommandEntry } from './registry.ts';
 import { applySpec, argSpecsOf, cliPathsOf, flagSpecsOf, usageOf } from './spec.ts';
 import type { Action, Ctx, ResolvedFlag } from './spec.ts';
@@ -46,6 +49,12 @@ async function cmdServe(ctx: Ctx) {
     if (decision.action === 'reuse') {
       // 自己的面板已经在跑：不重复启动，直接把浏览器指过去。
       const runningUrl = `http://${host}:${desiredPort}`;
+      // 复用也要有端口档案（#22）：只在档案缺失/指向死进程/端口不对时补写（pid 拿不到记 null，
+      // 发现侧靠探测兜底）；活实例自己写的档案**不能覆盖**，否则 pid 校验就名存实亡了。
+      const cur = readPanelPortfile();
+      if (!cur || cur.port !== desiredPort || (cur.pid !== null && !isPidAlive(cur.pid))) {
+        writePanelPortfile(desiredPort, null);
+      }
       say(APP_NAME + ' 已在运行：' + runningUrl);
       say('直接打开浏览器（不重复启动）；如需重启请先停掉旧实例');
       if (OUTPUT_JSON) process.stdout.write(jsonLine(runningUrl, desiredPort));
@@ -59,6 +68,9 @@ async function cmdServe(ctx: Ctx) {
   // --port 0 = 让 OS 挑一个空闲端口（测试用），所以真实端口要回读，不能信入参
   const addr = server.address();
   const realPort = addr && typeof addr === 'object' ? addr.port : desiredPort;
+  // #22：记下真实端口——CLI 代理与后续 serve 复用都先读这份档案，
+  // 顺延过端口（7866 被占→7867…）时才不会「探不到面板就退回直连开库」。
+  writePanelPortfile(realPort, process.pid);
   const url = `http://127.0.0.1:${realPort}`;
   if (OUTPUT_JSON) {
     process.stdout.write(jsonLine(url, realPort));
@@ -77,6 +89,7 @@ async function cmdServe(ctx: Ctx) {
     const stop = () => {
       if (closed) return;
       closed = true;
+      clearPanelPortfile(); // #22：档案随实例走；被 taskkill 硬杀留下的陈旧档案由发现侧的 pid 校验兜底
       server.close(() => done());
       setTimeout(done, 800).unref?.();
     };
@@ -313,11 +326,12 @@ async function emit(action: { render?: (data: unknown, ctx: Ctx) => unknown }, d
 }
 
 export async function runCli(argv: string[]) {
-  const opts: { json: boolean; store: string | null } = { json: false, store: null };
+  const opts: { json: boolean; store: string | null; direct: boolean } = { json: false, store: null, direct: false };
   const tokens: string[] = [];
   for (let i = 0; i < argv.length; i++) {
     const t = argv[i];
     if (t === '--json') { opts.json = true; continue; }
+    if (t === '--direct') { opts.direct = true; continue; } // #22 逃生口：跳过面板代理，本进程直跑
     if (t === '--store') {
       const v = argv[++i];
       if (v === undefined) { process.stderr.write('nx-sk: --store 缺少取值\n'); process.exitCode = 1; return; }
@@ -342,7 +356,21 @@ export async function runCli(argv: string[]) {
     if (!action) throw badInput(`未知命令: ${tried.join(' ')} —— 用 nx-sk help 看全部命令`);
     lastAction = action;
     const ctx = applySpec(action, parseArgs(action, rest));
-    const data = await action.run(ctx, { transport: 'cli' });
+    // #22：面板（serve）活着且认的是**同一个库**时，凡有 http 声明的 action 改走 HTTP 代理执行——
+    // 本进程不再打开 SQLite，根治 Windows 双进程开库冲突。
+    // 不代理：--direct / --store 指库 / 无 http 声明（help/version/serve）/ raw 下载口（直跑落盘）。
+    // 面板在跑但代理失败 → 报错，**不静默回退直连**（那等于把撞库藏进重试）。
+    let data: unknown;
+    const proxyable = Array.isArray(action.http) && action.raw !== true && !opts.direct && !opts.store;
+    const port = proxyable ? await discoverPanelPort() : null;
+    if (port !== null) {
+      if (isEnvTruthy(process.env[PROXY_DEBUG_ENV])) {
+        process.stderr.write(`${APP_NAME}: 经面板代理 :${port} ${action.id}\n`);
+      }
+      data = await proxyRun(action, ctx, port);
+    } else {
+      data = await action.run(ctx, { transport: 'cli' });
+    }
     await emit(action, data, ctx);
   } catch (err) {
     const e = toErrorShape(err);
