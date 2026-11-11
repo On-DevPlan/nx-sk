@@ -39,14 +39,6 @@
       "at": "2026-11-12"
     },
     {
-      "path": "src/modules/sections/service.ts",
-      "lines": 877,
-      "max": 877,
-      "reason": "栏目 CRUD 与字段/分组校验、全部 render 函数混在一起。计划拆出 validate.ts（校验与补丁描述）与 render.ts（渲染），service.ts 只留 CRUD/tree。",
-      "by": "trae",
-      "at": "2026-11-12"
-    },
-    {
       "path": "src/web/frontend/components/fields/shortcutLibrary/ShortcutLibrary.tsx",
       "lines": 819,
       "max": 819,
