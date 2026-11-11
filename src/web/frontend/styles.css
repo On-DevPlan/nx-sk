@@ -105,6 +105,38 @@ body {
 }
 .sb-resizer:hover, .sb-resizer.active { background: var(--soft-2); }
 
+/* ── 栏目属性编辑器（#15）：块式分组面板 + 字段行拖拽，Notion 无边框风 ── */
+.dict { padding: 0 14px 20px; max-width: 1080px; }
+.dict-head { display: flex; align-items: center; gap: 8px; padding: 10px 0; }
+.dict-card { border: var(--border); border-radius: 6px; background: var(--paper); margin-bottom: 12px; }
+.dict-card-title { padding: 10px 12px 2px; font-weight: 600; }
+.dbar { display: flex; gap: 8px; align-items: center; padding: 4px 2px 8px; color: var(--mid); font-size: 11px; }
+/* 一块面板 = 一个分组 */
+.dgrp { border: var(--border); border-radius: 6px; background: var(--paper); margin-bottom: 8px; }
+.dgrp-head { display: flex; align-items: center; gap: 8px; padding: 6px 10px; cursor: grab; border-radius: 6px; }
+.dgrp-head:hover { background: var(--soft); }
+.dgrp.dragging { opacity: .5; }
+.dgrp.drop-before { box-shadow: inset 0 2px 0 var(--ink); }
+.dgrp.drop-after { box-shadow: inset 0 -2px 0 var(--ink); }
+.dgrp-body { padding: 2px 6px 6px; min-height: 30px; border-radius: 0 0 6px 6px; }
+.dgrp-body.drop-into { background: var(--soft); box-shadow: inset 0 0 0 1px var(--ink); }
+.dgrp-empty { padding: 4px 8px; }
+.dgrp-acts { opacity: 0; transition: opacity .12s; }
+.dgrp:hover .dgrp-acts, .dgrp:focus-within .dgrp-acts { opacity: 1; }
+.dgrp.orphans { border-style: dashed; }
+/* 一行 = 一个字段块：只有 ⠿ 把手可拖，输入区不触发 */
+.drow { display: flex; align-items: center; gap: 6px; padding: 3px 6px; border-radius: 6px; position: relative; }
+.drow:hover { background: var(--soft); }
+.drow.dragging { opacity: .45; }
+.drow.drop-before::before, .drow.drop-after::after {
+  content: ''; position: absolute; left: 6px; right: 6px; height: 2px; background: var(--ink);
+}
+.drow.drop-before::before { top: -1px; }
+.drow.drop-after::after { bottom: -1px; }
+.drow .d-label { width: 130px; font-weight: 600; }
+.drow .d-key { flex-shrink: 0; }
+.drow .d-hint { flex: 1; min-width: 90px; }
+
 /* ── 面包屑栏：头部的替代品——收起开关 + 位置 + 刷新，一行 36px，细线压底 ── */
 .crumbs {
   display: flex; align-items: center; gap: 8px;
