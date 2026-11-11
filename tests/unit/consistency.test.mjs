@@ -227,14 +227,17 @@ test('视图里调用的每个 /api/... 都有对应路由（规则本身先反�
   assert.ok(!ROUTES.some((r) => covered(wrong[0], r.path) && r.path === '/api/sections/:ref/dump'), '拼错路径必须被判为未覆盖');
 
   const files = [];
-  for (const id of await listDirs(VIEW_DIR)) {
-    const p = join(ROOT, VIEW_DIR, id, 'view.tsx');
-    if (await readIfExists(p)) files.push({ id, path: p });
-  }
-  const frontendFiles = await readdir(join(ROOT, 'src/web/frontend'), { withFileTypes: true });
-  for (const f of frontendFiles.filter((x) => x.isFile() && x.name.endsWith('.tsx'))) {
-    files.push({ id: f.name, path: join(ROOT, 'src/web/frontend', f.name) });
-  }
+  // 递归扫整个前端目录：视图的 API 调用可能拆在同级组件里（如 sections/dictEditor.tsx），
+  // 只认 view.tsx 等于「把调用挪个文件名就能绕过这条断言」。
+  const walk = async (dir) => {
+    const entries = await readdir(dir, { withFileTypes: true });
+    for (const e of entries) {
+      const p = join(dir, e.name);
+      if (e.isDirectory()) await walk(p);
+      else if (/\.(ts|tsx)$/.test(e.name)) files.push({ id: e.name, path: p });
+    }
+  };
+  await walk(join(ROOT, 'src/web/frontend'));
   assert.ok(files.length >= 6, `应该扫到至少 6 个前端文件，实际 ${files.length}`);
 
   const problems = [];
