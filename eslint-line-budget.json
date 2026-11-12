@@ -21,14 +21,5 @@
   "warn": 600,
   "approve": 800,
   "hard": 1000,
-  "registry": [
-    {
-      "path": "src/web/frontend/components/fields/shortcutLibrary/ShortcutLibrary.tsx",
-      "lines": 819,
-      "max": 819,
-      "reason": "快捷键库容器里混着尺寸/折叠持久化、按键命中查找与预览交互。计划拆出状态 hook 与命中查找，容器只留组合；DOM 与 className 不动。",
-      "by": "trae",
-      "at": "2026-11-12"
-    }
-  ]
+  "registry": []
 }

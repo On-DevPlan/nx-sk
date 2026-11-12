@@ -15,76 +15,19 @@ import { createPortal } from 'react-dom';
 import type { ShortcutGroup, ShortcutItem, ShortcutStroke } from '../../../../../shared/fields/types.ts';
 import Sidebar from './Sidebar.tsx';
 import ShortcutTable from './ShortcutTable.tsx';
-import Keyboard from './Keyboard.tsx';
+import PreviewPane from './PreviewPane.tsx';
+import MappingPopup from './MappingPopup.tsx';
 import FullscreenCanvas from './FullscreenCanvas.tsx';
 import ImportModal from './ImportModal.tsx';
 import type { ImportParseResult } from './importParser.ts';
+import {
+  HOVER_OPEN_DELAY, KEY_HOLD_MS, POPUP_CLOSE_DELAY,
+  PREVIEW_COLLAPSED_KEY, PREVIEW_DEFAULT, PREVIEW_H_KEY,
+  SIDEBAR_DEFAULT, SIDEBAR_W_KEY,
+  loadNumber, loadPreviewCollapsed, newId,
+} from './persistence.ts';
+import { findBindingsByCode, type PopupState } from './bindingHits.ts';
 import './library.css';
-
-const KEY_HOLD_MS = 400;
-const HOVER_OPEN_DELAY = 150;
-const POPUP_CLOSE_DELAY = 200;
-
-const PREVIEW_COLLAPSED_KEY = 'nx-sk-shortcut:previewCollapsed';
-const SIDEBAR_W_KEY = 'nx-sk-shortcut:sidebarW';
-const PREVIEW_H_KEY = 'nx-sk-shortcut:previewH';
-const SIDEBAR_DEFAULT = 280;
-const PREVIEW_DEFAULT = 200;
-
-function loadPreviewCollapsed(): boolean {
-  try {
-    return localStorage.getItem(PREVIEW_COLLAPSED_KEY) === '1';
-  } catch {
-    return false;
-  }
-}
-
-function loadNumber(key: string, fallback: number, min: number, max: number): number {
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return fallback;
-    const n = Number(raw);
-    if (!Number.isFinite(n)) return fallback;
-    return Math.min(max, Math.max(min, n));
-  } catch {
-    return fallback;
-  }
-}
-
-function newId(prefix: string): string {
-  return `${prefix}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
-}
-
-interface PopupState {
-  code: string;
-  rect: DOMRect;
-  hits: BindingHit[];
-}
-
-interface BindingHit {
-  shortcutId: string;
-  groupName: string;
-  comboLabel: string;
-  description: string;
-  condition?: string;
-}
-
-function findBindingsByCode(groups: ShortcutGroup[], code: string): BindingHit[] {
-  const hits: BindingHit[] = [];
-  for (const g of groups) {
-    for (const s of g.shortcuts) {
-      if (!s.combo.some((k) => k.code === code)) continue;
-      hits.push({
-        shortcutId: s.id,
-        groupName: g.name,
-        comboLabel: s.combo.map((k) => k.label).join('+'),
-        description: s.description,
-        ...(s.condition ? { condition: s.condition } : {}),
-      });
-    }
-  }
-  return hits;
-}
 
 interface Props {
   groups: ShortcutGroup[];
@@ -684,99 +627,35 @@ export default function ShortcutLibrary({ groups, onChange }: Props) {
             </div>
           )}
 
-          {!previewCollapsed && (
-            <div
-              className="sl-sl-resize-handle sl-sl-resize-handle--row"
-              role="separator"
-              aria-orientation="horizontal"
-              aria-valuenow={previewHeight}
-              aria-label="调整键盘预览高度"
-              tabIndex={0}
-              onPointerDown={(e) => startDrag('preview', e)}
-              onKeyDown={(e) => onSplitterKeyDown('preview', e)}
-            />
-          )}
-          <section
-            ref={previewRef}
-            className={`sl-sl-preview ${previewCollapsed ? 'is-collapsed' : ''}`}
-            style={previewCollapsed ? undefined : { ['--sl-sl-preview-h' as string]: `${previewHeight}px` }}
-          >
-            <div ref={previewInnerRef} className="sl-sl-panel__inner sl-sl-panel__inner--preview">
-              <div className="sl-sl-preview__head">
-                <span className="sl-sl-preview__title">键盘预览</span>
-                <span className="sl-sl-preview__hint">
-                  {previewCollapsed
-                    ? '已折叠 · 点右侧展开查看按键状态'
-                    : hoveredCodes.size > 0
-                      ? '悬浮在表格行上'
-                      : highlightedCodes.size > 0
-                        ? '高亮的是最近一次录入的按键'
-                        : '在页面上按下任意键试试 →'}
-                </span>
-                <button
-                  className="sl-sl-icon-btn sl-sl-preview__toggle"
-                  title={previewCollapsed ? '展开键盘预览' : '收起键盘预览'}
-                  aria-label={previewCollapsed ? '展开键盘预览' : '收起键盘预览'}
-                  aria-expanded={!previewCollapsed}
-                  onClick={() => setPreviewCollapsed((v) => !v)}
-                >
-                  {previewCollapsed ? '▴' : '▾'}
-                </button>
-              </div>
-              {!previewCollapsed && (
-                <Keyboard
-                  highlightedCodes={highlightedCodes}
-                  hoveredCodes={hoveredCodes}
-                  heldKeys={heldKeys}
-                  boundCodes={boundCodes}
-                  onPress={holdPress}
-                  onRelease={holdRelease}
-                  onKeyHoverEnter={handleHoverEnter}
-                  onKeyHoverLeave={handleHoverLeave}
-                  onDoubleClickKey={handleDoubleClickKey}
-                />
-              )}
-            </div>
-          </section>
+          <PreviewPane
+            previewCollapsed={previewCollapsed}
+            previewHeight={previewHeight}
+            previewRef={previewRef}
+            previewInnerRef={previewInnerRef}
+            setPreviewCollapsed={setPreviewCollapsed}
+            startDrag={startDrag}
+            onSplitterKeyDown={onSplitterKeyDown}
+            highlightedCodes={highlightedCodes}
+            hoveredCodes={hoveredCodes}
+            heldKeys={heldKeys}
+            boundCodes={boundCodes}
+            holdPress={holdPress}
+            holdRelease={holdRelease}
+            handleHoverEnter={handleHoverEnter}
+            handleHoverLeave={handleHoverLeave}
+            handleDoubleClickKey={handleDoubleClickKey}
+          />
         </div>
       </main>
 
-      {longPressPopup && longPressPopupPos ? createPortal(
-        <div
-          ref={popupRef}
-          className="sl-sl-longpress"
-          role="dialog"
-          aria-label={`按键 ${longPressPopup.code} 的映射`}
-          style={{ top: longPressPopupPos.top, left: longPressPopupPos.left }}
-          onPointerDown={(e) => e.stopPropagation()}
-        >
-          <div className="sl-sl-longpress__head">
-            <span className="sl-sl-longpress__title">
-              按键 <code>{longPressPopup.code}</code> 的映射
-            </span>
-            <button className="sl-sl-icon-btn" aria-label="关闭" onClick={handleLongPressClose}>×</button>
-          </div>
-          {longPressPopup.hits.length === 0 ? (
-            <div className="sl-sl-longpress__empty">该键尚未被任何分组使用</div>
-          ) : (
-            <ul className="sl-sl-longpress__list">
-              {longPressPopup.hits.map((h) => (
-                <li key={h.shortcutId} className="sl-sl-longpress__item">
-                  <div className="sl-sl-longpress__row">
-                    <span className="sl-sl-longpress__group">{h.groupName}</span>
-                    <span className="sl-sl-longpress__combo">{h.comboLabel}</span>
-                  </div>
-                  <div className="sl-sl-longpress__desc">
-                    {h.description || <span className="sl-sl-empty">未填写说明</span>}
-                  </div>
-                  {h.condition && <div className="sl-sl-longpress__cond">条件: {h.condition}</div>}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>,
-        document.body,
-      ) : null}
+      {longPressPopup && longPressPopupPos && (
+        <MappingPopup
+          popup={longPressPopup}
+          pos={longPressPopupPos}
+          popupRef={popupRef}
+          onClose={handleLongPressClose}
+        />
+      )}
 
       {hoveredShortcut && rowtipPos ? createPortal(
         <div className="sl-sl-rowtip" role="tooltip" style={{ top: rowtipPos.top, left: rowtipPos.left }}>
