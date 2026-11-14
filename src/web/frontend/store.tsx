@@ -5,6 +5,13 @@ import type { Boot, UiState } from '../../shared/model.ts';
 
 export const LS_KEY = 'nx-sk-ui';
 
+/**
+ * 任务 #30：顶栏「刷新数据」一个入口同时刷新**全局**（bootstrap：侧栏计数 / 设置）
+ * 与**当前页自己的数据**（栏目的 dump）。store 只管 bootstrap，页面级数据各自订阅
+ * 这个事件重拉——避免每个模块都往顶栏塞一份「刷新」按钮。
+ */
+export const REFRESH_EVENT = 'nx-sk:refresh';
+
 // 只持久化**选择**，不持久化**数据**——数据永远从 /api 拉，避免陈旧缓存。
 export const DEFAULT_UI: UiState = {
   // 当前 tab。空串 = **还没做过选择**，此时由 App 回落到 settings.defaultSection

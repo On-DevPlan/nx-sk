@@ -1,36 +1,29 @@
-import type { ChangeEvent, RefObject } from 'react';
 import { Tag } from '../../components/ui.tsx';
 import type { SectionDumpInfo } from './viewTypes.ts';
 
 /**
- * 栏目工具条：标题 / 条数 / 打码开关 / 刷新 / 「更多」菜单 / 隐藏的 zip 选择框 / 新建条目。
+ * 栏目工具条：标题 / 条数 / 打码开关 /（侧栏收起时的）新建条目。
+ * 导出与导入统一收在「导入导出」页（支持整库 / 按栏目 / 按条目勾选），
+ * 这里不再重复摆一份 ZIP 菜单；拖入 ZIP 的快捷导入仍保留。
+ * 刷新也只有顶栏一个入口（任务 #30：顶栏「刷新数据」会连本页 dump 一起重拉），
+ * 这里不再放第二个「刷新」按钮。
+ * 任务 #28：新建条目搬到侧栏栏目行右侧的「＋」；只有侧栏收起、那个「＋」够不着时
+ * 才在这里兜底显示一个按钮（showAdd），两种入口不会同时出现。
  * 纯展示，所有状态与动作都由容器传入。
  */
 export default function SectionToolbar({
   section,
   count,
   mask,
+  showAdd,
   onToggleMask,
-  onRefresh,
-  moreRef,
-  selectedCount,
-  onExport,
-  onCloseMore,
-  zipInput,
-  onZipChange,
   onAddEntry,
 }: {
   section: SectionDumpInfo;
   count: number;
   mask: boolean;
+  showAdd: boolean;
   onToggleMask: () => void;
-  onRefresh: () => void;
-  moreRef: RefObject<HTMLDetailsElement>;
-  selectedCount: number;
-  onExport: (withSecrets: boolean) => void;
-  onCloseMore: () => void;
-  zipInput: RefObject<HTMLInputElement>;
-  onZipChange: (e: ChangeEvent<HTMLInputElement>) => void;
   onAddEntry: () => void;
 }) {
   return (
@@ -43,27 +36,7 @@ export default function SectionToolbar({
         <input type="checkbox" checked={mask} onChange={onToggleMask} />
         打码显示（投屏/截图时用）
       </label>
-      <button className="btn small ghost" onClick={onRefresh}>刷新</button>
-      <details className="more" ref={moreRef}>
-        <summary className="btn small ghost">更多</summary>
-        <div className="more-menu">
-          <button type="button" onClick={() => onExport(true)}>
-            {selectedCount ? `导出选中 ${selectedCount} 条（含凭据）` : '导出 ZIP（含凭据）'}
-          </button>
-          <button type="button" onClick={() => onExport(false)}>
-            {selectedCount ? `导出选中 ${selectedCount} 条（打码）` : '导出 ZIP（打码）'}
-          </button>
-          <button type="button" onClick={() => { onCloseMore(); zipInput.current?.click(); }}>导入 ZIP…</button>
-        </div>
-      </details>
-      <input
-        ref={zipInput}
-        type="file"
-        accept=".zip,application/zip"
-        style={{ display: 'none' }}
-        onChange={onZipChange}
-      />
-      <button className="btn small" onClick={onAddEntry}>新建条目</button>
+      {showAdd ? <button className="btn small" onClick={onAddEntry}>新建条目</button> : null}
     </div>
   );
 }

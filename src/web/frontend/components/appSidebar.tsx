@@ -129,10 +129,12 @@ interface AppSidebarProps {
   onGo: (id: string) => void;
   /** focus = 打开条目后要把哪个字段块滚进视口（#18 侧栏全局搜索定位字段用）。 */
   onOpenEntry: (sectionId: string, entryId: string, focus?: string) => void;
+  /** 任务 #28：栏目行右侧那个「＋」——直接在该栏目下快速建条目，不用先打开栏目。 */
+  onAddEntry: (sectionId: string) => void;
 }
 
 export default function AppSidebar({
-  boot, nav, currentId, entryId, entryMap, setEntryMap, onGo, onOpenEntry,
+  boot, nav, currentId, entryId, entryMap, setEntryMap, onGo, onOpenEntry, onAddEntry,
 }: AppSidebarProps) {
   const [q, setQ] = useState('');
   // 展开态受控：搜索时全展开（只展有命中的分支），清空后回到用户自己的展开态
@@ -376,6 +378,13 @@ export default function AppSidebar({
             <DatabaseOutlined className="sb-icon" />
             <span className="sb-label nowrap">{s.title}</span>
             {typeof count === 'number' ? <span className="count">{count}</span> : null}
+            <button
+              type="button"
+              className="sb-add"
+              title={`在「${s.title}」新建条目`}
+              aria-label={`在「${s.title}」新建条目`}
+              onClick={(e) => { e.stopPropagation(); onAddEntry(s.id); }}
+            >＋</button>
           </span>
         )),
       };
@@ -416,7 +425,7 @@ export default function AppSidebar({
     }));
 
     return [...groupNodes, ...flatNodes, ...toolNodes];
-  }, [nav, entryMap, needle, toolIcon, entryMenu, sectionMenu, viewMenu, groupMenu]);
+  }, [nav, entryMap, needle, toolIcon, entryMenu, sectionMenu, viewMenu, groupMenu, onAddEntry]);
 
   // 搜索时把有命中的分支全展开；此时受控展开态临时接管
   const searchExpanded = useMemo<Key[] | null>(() => {

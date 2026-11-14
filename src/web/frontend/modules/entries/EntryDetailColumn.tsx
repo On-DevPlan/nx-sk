@@ -28,6 +28,7 @@ export default function EntryDetailColumn({
   onPatchField,
   onDiscard,
   onRemoveEntry,
+  onOpenHistory,
 }: {
   data: SectionDump;
   draft: Draft | null;
@@ -47,6 +48,8 @@ export default function EntryDetailColumn({
   onPatchField: (key: string, value: unknown) => void;
   onDiscard: () => void;
   onRemoveEntry: () => void;
+  /** 任务 #27：打开本条目全字段变化时间线。 */
+  onOpenHistory: () => void;
 }) {
   return (
     <div className="col">
@@ -56,18 +59,18 @@ export default function EntryDetailColumn({
         <div className="card">
           {/* 顶栏固定在窗口右上角：长栏目滚到一半也能看见「保存」——
               否则改完一个字段要翻到表单最底点保存，翻页越多越容易漏保存。 */}
+          {/* 任务 #29：面包屑只留窗口顶栏那一条，这里不再重复「栏目 › 条目」；
+              原来挂在这条面包屑上的「点击复制定位」挪成一个常显的 ⧉ 按钮，功能不丢。 */}
           <div className="colhead sticky-head">
-            <span
-              className="crumb grow nowrap"
-              title="点击复制条目定位（栏目›条目 + id + CLI 命令，贴给 agent 即可修改）"
+            <span className="muted mono nowrap">{draft.id}</span>
+            <button
+              type="button"
+              className="head-copy"
+              title="复制条目定位（栏目›条目 + id + CLI 命令，贴给 agent 即可修改）"
+              aria-label="复制条目定位"
               onClick={() => onCopyRef(current || draft)}
-            >
-              <span className="crumb-sec">{data.section.title}</span>
-              <span className="crumb-sep">›</span>
-              <span className="crumb-ent">{current?.title || draft.title}</span>
-              <span className="crumb-copy" aria-hidden>⧉</span>
-            </span>
-            <span className="muted mono">{draft.id}</span>
+            >⧉</button>
+            <span className="grow" />
             {current ? <Tag kind={current.missing.length ? '' : 'strong'}>完整度 {current.completeness.ratio}%</Tag> : null}
             {dirtyCount ? (
               <>
@@ -127,6 +130,7 @@ export default function EntryDetailColumn({
           <div className="rowgap pad">
             <button className="btn" onClick={onSave} disabled={!dirtyCount}>保存{dirtyCount ? `（${dirtyCount} 处改动）` : ''}</button>
             <button className="btn ghost" onClick={onDiscard} disabled={!dirtyCount}>放弃改动</button>
+            <button className="btn ghost" onClick={onOpenHistory}>变化历史</button>
             <button className="btn ghost" onClick={onRemoveEntry}>删除条目</button>
             {current?.missing.length ? (
               <span className="hint">模板建议里还有 {current.missing.length} 项没填（不影响使用）：{current.missing.slice(0, 5).map((m) => m.label).join('、')}{current.missing.length > 5 ? '…' : ''}</span>
