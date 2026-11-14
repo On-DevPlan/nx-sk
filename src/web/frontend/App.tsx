@@ -7,7 +7,8 @@ import { MenuUnfoldOutlined, ReloadOutlined } from '@ant-design/icons';
 import { SECTION_VIEW, VIEWS } from './registry.ts';
 import type { ViewProps } from './registry.ts';
 import { ErrorBoundary, Toasts, DialogHost } from './components/ui.tsx';
-import { useStore } from './store.tsx';
+import { useStore, REFRESH_EVENT } from './store.tsx';
+import { api } from './api/client.ts';
 import { normalizeViewId, resolveActiveView } from './activeView.ts';
 import AppSidebar from './components/appSidebar.tsx';
 import type { EntryLite } from './components/appSidebar.tsx';
@@ -72,7 +73,7 @@ interface CurrentView {
 }
 
 export default function App() {
-  const { boot, bootError, ui, patchUi, reload } = useStore();
+  const { boot, bootError, ui, patchUi, reload, toast, dialog } = useStore();
   // 侧栏收起：Notion 的面板开关——收起后内容区独占，面包屑左侧的开关负责展开
   const [collapsed, setCollapsed] = useState(loadCollapsed);
   const toggleCollapsed = useCallback(() => {
@@ -155,6 +156,13 @@ export default function App() {
     window.location.hash = `#/${id}`;
   }, [patchUi]);
 
+  // 任务 #30：「刷新数据」只留这一个入口——先重拉 bootstrap（侧栏计数 / 设置），
+  // 再广播一次让当前页把自己那份数据也重拉（栏目页订阅 REFRESH 事件刷新 dump）。
+  const refreshAll = useCallback(() => {
+    void reload();
+    window.dispatchEvent(new Event(REFRESH_EVENT));
+  }, [reload]);
+
   // 当前条目的标题（面包屑第三级用）；侧栏还没加载过这个栏目就没有
   const entryTitle = useMemo(() => {
     if (!ui.entry) return '';
@@ -192,6 +200,39 @@ export default function App() {
     return items;
   }, [current, groupName, entryTitle, go]);
 
+  // 任务 #28：「新建条目」从栏目工具条挪到侧栏——每个栏目行右侧一个「＋」，
+  // 点它不必先打开栏目：读一次该栏目的 dump 拿到名字标签/名字字段 → 问名字 →
+  // POST 建条目 → 侧栏缓存补一条（树里立刻可见）→ 直接跳到新条目。
+  // 侧栏收起时侧栏上的「＋」看不见，由工具条的「新建条目」兜底（见 SectionToolbar 的 showAdd）。
+  const addEntryInSection = useCallback(async (sid: string) => {
+    try {
+      const dump = await api<{ section: { title: string; titleLabel?: string; titleField?: string } }>(
+        `/api/sections/${encodeURIComponent(sid)}/dump`,
+      );
+      const sec = dump.section;
+      const label = sec.titleLabel || '名称';
+      const answer = await dialog({
+        message: `在「${sec.title}」新建条目，${label}是？`,
+        input: { placeholder: `例如 ${sec.titleField || '名称'}` },
+      });
+      if (!answer) return;
+      const name = String(answer);
+      const body: { section: string; title: string; set?: Record<string, string> } = { section: sid, title: name };
+      if (sec.titleField) body.set = { [sec.titleField]: name };
+      const created = await api<{ id: string; title: string }>('/api/entries', { method: 'POST', body });
+      setEntryMap((m) => ({ ...m, [sid]: [...(m[sid] || []), { id: created.id, title: created.title }] }));
+      toast(`已新建：${created.title}`);
+      patchUi({ view: sid, entry: created.id, focus: '' });
+      window.location.hash = `#/${encodeURIComponent(sid)}?entry=${encodeURIComponent(created.id)}`;
+      // 这个栏目可能本来就开着：sectionId 没变，SectionView 不会重新 load，
+      // 而手里的 dump 是创建之前的——广播一次让它重拉，新条目才进 entries。
+      window.dispatchEvent(new Event(REFRESH_EVENT));
+      await reload();
+    } catch (e) {
+      toast((e as Error)?.message || String(e), 'bad');
+    }
+  }, [dialog, patchUi, reload, toast]);
+
   return (
     <ConfigProvider theme={ANTD_THEME}>
       <div className={`app ${collapsed ? 'sb-collapsed' : ''}`}>
@@ -204,6 +245,7 @@ export default function App() {
             entryMap={entryMap}
             setEntryMap={setEntryMap}
             onGo={go}
+            onAddEntry={addEntryInSection}
             onOpenEntry={(sid, eid, focus) => {
               // #18：focus = 进入条目后要把哪个字段块滚进视口并短暂高亮（侧栏全局搜索用）
               patchUi({ view: sid, entry: eid, focus: focus || '' });
@@ -228,7 +270,7 @@ export default function App() {
               <Breadcrumb items={crumbs} />
             ) : <span className="crumb muted">正在装载…</span>}
             <span className="grow" />
-            <button className="btn small ghost" onClick={() => reload()} title="重新拉取全部数据">
+            <button className="btn small ghost" onClick={refreshAll} title="重新拉取全部数据（含当前页）">
               <ReloadOutlined /> 刷新数据
             </button>
           </div>
@@ -246,7 +288,7 @@ export default function App() {
               <ErrorBoundary key={current.id}>
                 <Suspense fallback={<div className="pad muted">加载中…</div>}>
                   {current.kind === 'section'
-                    ? <SectionPane sectionId={current.id} listHidden={listHidden} />
+                    ? <SectionPane sectionId={current.id} listHidden={listHidden} sidebarCollapsed={collapsed} />
                     : <ToolPane view={current} />}
                 </Suspense>
               </ErrorBoundary>
@@ -262,9 +304,9 @@ export default function App() {
 }
 
 /** 栏目视图的动态挂载点：共用 entries 模块的视图，把 sectionId 传进去。 */
-function SectionPane({ sectionId, listHidden }: { sectionId: string; listHidden: boolean }) {
+function SectionPane({ sectionId, listHidden, sidebarCollapsed }: { sectionId: string; listHidden: boolean; sidebarCollapsed: boolean }) {
   const View = SECTION_VIEW;
-  return <View sectionId={sectionId} listHidden={listHidden} />;
+  return <View sectionId={sectionId} listHidden={listHidden} sidebarCollapsed={sidebarCollapsed} />;
 }
 
 /** 工具页的动态挂载点：component 在注册表里必有，这里只为收窄类型。 */

@@ -104,7 +104,7 @@ export async function buildSectionZip(ref: unknown, { entryIds, passphrase, incl
     `条目：${entries.length}　附件：${fileRecords.length}`,
     `凭据：包内为明文，保护靠口令`,
     '',
-    '导入：在面板对应栏目点「更多 → 导入 ZIP」，或',
+    '导入：把本 ZIP 拖进面板对应栏目页，或到「导入导出」页导入，或',
     `  nx-sk transfer import ${section.id} --file <本文件> --dry-run   # 先预览`,
     '',
     'manifest.json 是数据本体；attachments/ 是附件原件。',

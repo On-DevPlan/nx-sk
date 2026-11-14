@@ -9,6 +9,11 @@ export interface ViewProps {
    * （列表列与它的拖拽线一起隐藏，编辑器独占正文宽度）。由 App 计算后传入。
    */
   listHidden?: boolean;
+  /**
+   * 任务 #28：侧栏收起时侧栏栏目行上的「＋」不可见，栏目页的工具条要留一个
+   * 「新建条目」兜底；侧栏展开时不再重复摆第二个新建入口。
+   */
+  sidebarCollapsed?: boolean;
 }
 
 export interface ViewDef {
