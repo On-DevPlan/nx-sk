@@ -32,6 +32,7 @@ import type { Conn, Row } from './driver.ts';
 import type { Store, StoreEntry, StoreSection, EntryFieldView } from '../store-shape.ts';
 import { STORE_VERSION, isDetachedField } from '../store-shape.ts';
 import { POINTER_KINDS, entryFieldId, fieldDataId, fieldTargetKey } from './identity.ts';
+import { cleanupOrphanHistory, recordFieldChanges, sameStoredValue, type FieldValueChange } from './history.ts';
 import type { FieldDef } from '../../shared/fields/types.ts';
 
 /** 读出来的「未过 normalize 的 json 形状」+ 当时的 rev + 条目自身结构行（v3）。 */
@@ -213,6 +214,11 @@ export function writeStore(db: Conn, store: Store, { expectedRev = null, declare
       list.push(r);
       capturedByEntry.set(String(r.entry_id), list);
     }
+    // 任务 #27：字段值历史的 diff 基线——重建前把「旧值文本」按结构行 id 记下来。
+    const oldValues = new Map<string, string>();
+    for (const r of capturedRows) {
+      if (r.data_value != null) oldValues.set(String(r.id), String(r.data_value));
+    }
     // 分组 declared：原地保留（新出现的分组才算「声明」；自愈行由导入 hint 或读路径决定）。
     const declaredBefore = new Map<string, number>();
     for (const g of conn.all('SELECT section_id, id, declared FROM groups')) {
@@ -290,6 +296,8 @@ export function writeStore(db: Conn, store: Store, { expectedRev = null, declare
     const structures = new Map<string, EntryFieldView[]>();
     const dictBySection = new Map<string, FieldDef[]>();
     for (const s of store.sections) dictBySection.set(s.id, (s.fields || []) as unknown as FieldDef[]);
+    // 任务 #27：本次写入后的值文本（按结构行 id）——写完与 oldValues diff。
+    const newValues = new Map<string, string>();
 
     for (const e of store.entries) {
       const captured = capturedByEntry.get(e.id) || [];
@@ -336,6 +344,7 @@ export function writeStore(db: Conn, store: Store, { expectedRev = null, declare
                 createdAt: r.data_created_at == null ? (e.createdAt || at) : String(r.data_created_at),
                 updatedAt: r.data_updated_at == null ? (e.updatedAt || at) : String(r.data_updated_at),
               });
+              newValues.set(String(r.id), String(r.data_value));
             }
           }
         }
@@ -380,9 +389,31 @@ export function writeStore(db: Conn, store: Store, { expectedRev = null, declare
           createdAt: times?.created || e.createdAt || at,
           updatedAt: times?.updated || e.updatedAt || at,
         });
+        newValues.set(rowId, JSON.stringify(value));
       }
 
       structures.set(e.id, rows);
+    }
+
+    // ── 4.5 字段值历史（任务 #27）──
+    // 先清掉「字段行已消失」的历史（等价于 v5 之前的 CASCADE 语义；v5 没有外键），
+    // 再对本次真实变化（含清空）追加版本。首次建库/导入（curRev === 0）不记——
+    // 初始数据不是「改动」，全量灌一遍历史只会制造噪声。
+    cleanupOrphanHistory(conn);
+    if (curRev > 0) {
+      const changes: FieldValueChange[] = [];
+      for (const [id, next] of newValues) {
+        const prev = oldValues.get(id) ?? null;
+        if (!sameStoredValue(prev, next)) changes.push({ entryFieldId: id, prev, next });
+      }
+      for (const [id, prev] of oldValues) {
+        if (newValues.has(id)) continue;
+        // 行还在、值没了 = 显式清空；整行没了（扩展字段硬删）不记（历史已随行清掉）。
+        if (conn.get('SELECT 1 AS x FROM entry_fields WHERE id = :id', { id })) {
+          changes.push({ entryFieldId: id, prev, next: null });
+        }
+      }
+      if (changes.length) recordFieldChanges(conn, changes, { at });
     }
 
     // ── 5. 资源行 + inline 边 ──
@@ -547,6 +578,8 @@ export function deleteEntryFieldRow(db: Conn, entryId: string, rowId: string): b
     if (!r) return false;
     const at = nowIso();
     conn.run('DELETE FROM entry_fields WHERE id = :id', { id: rowId });
+    // v5 没有外键，历史随结构行一起显式删（行没了，版本不该留）。
+    conn.run('DELETE FROM field_history WHERE entry_field_id = :id', { id: rowId });
     conn.run("UPDATE attachments SET deleted_at = :at, updated_at = :at WHERE kind = 'field' AND target_key = :id AND deleted_at IS NULL", { at, id: rowId });
     setRev(conn, getRev(conn) + 1, at);
     return true;

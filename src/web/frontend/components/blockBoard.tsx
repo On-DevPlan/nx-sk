@@ -45,10 +45,12 @@ export type BoardContext = {
   entryId?: string;
 };
 
-/** 块头「⋯」菜单的三个动作（任务 #24 验收反馈：不再只给一个 ×）。 */
+/** 块头「⋯」菜单的动作（任务 #24 的三个 + 任务 #27 的变化历史）。 */
 export interface FieldActions {
   /** 查看这个字段：定义 + 当前值 + 定位符（只读）。 */
   view: (key: string, def: FieldDef) => void;
+  /** 任务 #27：看这个字段的历史版本并恢复。 */
+  history: (key: string, def: FieldDef) => void;
   /** 编辑这个字段的属性（显示名 / 描述）——只作用于本条目。 */
   edit: (key: string, def: FieldDef) => void;
   /** 删除 / 从本条目移除（语义由调用方按 template 判定）。 */
@@ -100,7 +102,7 @@ function BlockMenu({ def, actions }: { def: FieldDef; actions: FieldActions }) {
     if (!b) return;
     // 菜单宽 168：右缘对齐按钮；下方放不下就翻到按钮上方
     const left = Math.max(8, Math.min(b.right - 168, window.innerWidth - 176));
-    const top = b.bottom + 120 > window.innerHeight ? Math.max(8, b.top - 112) : b.bottom + 4;
+    const top = b.bottom + 160 > window.innerHeight ? Math.max(8, b.top - 152) : b.bottom + 4;
     setAt({ x: left, y: top });
   };
 
@@ -112,7 +114,7 @@ function BlockMenu({ def, actions }: { def: FieldDef; actions: FieldActions }) {
         ref={btnRef}
         type="button"
         className="blk-menu-btn"
-        title="字段操作：查看 / 编辑 / 删除"
+        title="字段操作：查看 / 历史 / 编辑 / 删除"
         aria-label={`字段操作 ${def.label}`}
         aria-haspopup="menu"
         onClick={(e) => { e.stopPropagation(); toggle(); }}
@@ -120,6 +122,7 @@ function BlockMenu({ def, actions }: { def: FieldDef; actions: FieldActions }) {
       {at ? createPortal(
         <div className="blk-menu" style={{ left: at.x, top: at.y }} role="menu" aria-label={`字段操作 ${def.label}`}>
           <button type="button" role="menuitem" onClick={() => pick(() => actions.view(def.key, def))}>查看字段</button>
+          <button type="button" role="menuitem" onClick={() => pick(() => actions.history(def.key, def))}>变化历史…</button>
           <button type="button" role="menuitem" onClick={() => pick(() => actions.edit(def.key, def))}>编辑字段属性…</button>
           <button
             type="button"

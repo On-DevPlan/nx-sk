@@ -18,3 +18,7 @@ export {
   addSourceItem, ensureSourceFields, getSource, listSource, removeSourceItem,
   renderSourceChange, renderSourceGet, renderSourceList, updateSourceItem,
 } from './source.ts';
+export {
+  getEntryHistory, getFieldHistory, restoreFieldVersion,
+  renderEntryHistory, renderFieldHistory, renderFieldRestore,
+} from './history.ts';

@@ -4,6 +4,104 @@
 
 ## [Unreleased]
 
+**任务 #28：「新建条目」从栏目工具条挪到侧栏——每个栏目行右侧一个「＋」。**
+
+### Changed
+
+- 侧栏栏目行计数后面新增「＋」（悬停/键盘聚焦才显形，`title` 是「在「X」新建条目」）：
+  不用先打开栏目，点它直接在那个栏目下建条目——读一次该栏目 dump 拿名字标签/名字字段 →
+  弹窗问名字 → `POST /api/entries`（名字同时写进名字字段）→ 侧栏缓存乐观补一条 →
+  跳到新条目；省掉一次打开栏目的往返。
+- 栏目工具条的「新建条目」改为兜底：只在**侧栏收起**（`sidebarCollapsed`，侧栏的「＋」够不着）
+  时出现，两种入口不会同时出现。`ViewProps` 因此新增可选 `sidebarCollapsed`。
+- 顺手修掉一个被这次入口暴露的老问题：`SectionView.load` 的闭包里读的是挂载时的 `ui.entry`
+  （deps 刻意不含它），当新建条目落在**已打开**的栏目里（sectionId 没变、组件不重挂）时，
+  重拉 dump 会「兜底选中 entries[0]」，把刚建好的条目踢走。改成用 ref 取最新 `ui.entry`，
+  并在创建后广播一次 `REFRESH_EVENT` 让当前栏目重拉 dump。
+
+### 验证
+
+- lint 0 error（6 条 600 行提醒）· typecheck 通过 · unit **472/472** · build 成功 · smoke **142/142**
+- 真机走查（Chrome headless + 独立 walk28 沙箱 home，15 项断言全过）：悬停显形、title 文案、
+  侧栏展开时工具条无重复「新建条目」、弹窗文案带栏目名、创建后跳转并选中新条目、
+  名称字段同值、侧栏树立刻可见、刷新后仍在库里、侧栏收起后兜底按钮出现/展开后消失、无 console 报错
+- 走查只动了自己新建的测试条目（结束时已删除），未触碰其它数据
+
+**任务 #30：栏目工具条的「刷新」与顶栏「刷新数据」合并成一个入口。**
+
+### Changed
+
+- 刷新只在顶栏留一个「刷新数据」：点它先重拉 `bootstrap`（侧栏计数 / 设置），再广播
+  `REFRESH_EVENT`（`store.tsx` 导出），栏目页收到后重拉自己的 `/dump`——原来工具条那个
+  「刷新」删掉，两个按钮做的事现在合成了一步。
+- 事件广播不绑定具体模块：工具页（设置 / 导入导出）没有订阅者，点刷新只做 bootstrap 重拉。
+
+### 验证
+
+- lint 0 error（6 条 600 行提醒）· typecheck 通过 · unit **472/472** · build 成功 · smoke **142/142**
+- 真机走查（Chrome headless）：全页只剩 1 个「刷新」类按钮；点它同时发出 `/api/bootstrap`
+  与 `/api/sections/accounts/dump` 两个请求，刷新后仍选中原条目且内容不变；设置页点刷新无报错。
+
+**任务 #29：条目详情里重复的面包屑合并为一条。**
+
+### Changed
+
+- 条目详情卡片头不再重复「栏目 › 条目」这条面包屑（窗口顶栏已经有了「分组 › 栏目 › 条目」）；
+  原先挂在这条面包屑上的「点击复制定位」改为顶栏常显的 `⧉` 按钮，复制文本与 toast 文案不变，
+  `.crumb-sec/-sep/-ent/-copy` 四条只为它存在的样式一并删除。
+
+### 验证
+
+- lint 0 error（6 条 600 行提醒）· typecheck 通过 · unit **472/472** · build 成功 · smoke **142/142**
+- 真机走查（Chrome headless，1440×950）：全页只剩一条 antd 面包屑，卡片头无 `›`、保留 id 与
+  `⧉`；点 `⧉` 出现「已复制条目定位」toast，剪贴板内容为 `nx-sk 条目 · 栏目「平台账号」…`
+- 已知未做：`D:\a_js` 下仍无法新建文件（git 提交与 patch 落盘受阻），见回报
+
+**任务 #27：字段值历史版本 + 条目变化时间线 + 单字段恢复 + 保留策略设置。**
+
+### Added
+
+- schema v5：新增 `field_history`（`entry_field_id` + 单调 `rev` + 值快照 + `op/source/at`）。
+  **无外键**——`writeStore` 是全量重写，CASCADE 会把历史一起清空；改为重建后清理
+  `entry_field_id NOT IN (SELECT id FROM entry_fields)` 的孤儿历史。
+- 写入侧 diff（`repo.ts`）：只对「值真的变了」的字段追加历史；同值重写（布局保存、
+  自动保存空转）不产生版本；清空记 `op='clear'`；首次建库/导入（rev 0）不记噪声。
+- CLI：`entry field-history <条目> --key <字段>`（rev 倒序 + 当前值）、
+  `entry history <条目>`（全字段变化时间线，按时间倒序）、
+  `entry field-restore <条目> --key <字段> --rev <版本号>`（恢复；`--dry-run` 预览）。
+- HTTP：`GET /api/entries/:ref/fields/:key/history`、`GET /api/entries/:ref/history`、
+  `POST /api/entries/:ref/fields/:key/restore`。
+- 面板：块头「⋯」新增「变化历史…」弹窗（版本列表 + 恢复此版）；条目底部新增
+  「变化历史」按钮（本条目全字段时间线，旧值 → 新值）。恢复会自动重读条目与 bootstrap。
+- 设置：`historyMode`（count/time）、`historyCount`（默认 50，1–1000）、`historyDays`
+  （默认 90，1–3650）；保存后立即全库裁剪存量历史。设置页「默认行为」新增「字段历史保留」行。
+- `docs/field-history.md` 更新为实现版：schema、diff、恢复语义、保留策略、里程碑状态与
+  初稿差异（合并窗口未采用、无外键、无标题历史）。
+
+### 验证
+
+- lint 0 error（7 条 600 行提醒，其中 `core/db/repo.ts` 660 行含本次历史 diff 接线）
+- typecheck 通过 · unit **472/472**（+6 历史专项；迁移测试对齐当前版本与 12 张表）·
+  build 成功 · smoke **142/142**
+- CLI 真机走查（隔离 home）：建条目 → 改值 → `entry field-history` 看到 v1/v2、
+  `entry history` 时间线按时间倒序、`field-restore --rev 1` 写回旧值并追加 restore 版本；
+  `--dry-run` 不改值；v4 库首次打开自动升 v5、原有数据与历史起点正常。
+
+**任务 #26：设置里新增「编辑后自动保存」偏好；字段历史版本机制设计稿。**
+
+### Added
+
+- 设置项 `autoSaveFields`（默认**关**，`setting set --key autoSaveFields --value 是|否` 与设置页「默认行为」同源）：开启后，条目编辑停手 800ms 自动保存，不再依赖用户记得点「保存」。
+  - 复用同一条保存链（`PATCH /api/entries/:id` → 重读 dump → 刷新 bootstrap），不新增接口；改动计数、`beforeunload` 提醒、手动保存/放弃改动按钮全部原样保留。
+  - 关闭时（默认）完全走旧路径，行为与之前逐字一致。
+  - `save` 每渲染都是新函数，自动保存用 ref 取最新一版并做 800ms 防抖；组件卸载/切条目时清计时器，不会跨条目串写。
+- `docs/field-history.md`：字段级历史版本设计稿——schema v5 `field_history` 表（`rev` 单调版本号 + 值快照）、`writeStore` 写入侧 diff（全量重写不能无脑追加）、5 分钟合并窗口抵抗自动保存噪声、CLI/HTTP/面板三处入口、恢复语义（恢复也进历史、可再撤销）、保留策略与里程碑。
+
+### 验证
+
+- lint 0 error（7 条 600 行提醒，其中 `entries/view.tsx` 618 行含本任务新增的自动保存逻辑）/ typecheck / unit **466/466**（+3：默认关、布尔/CLI 字符串归一、PATCH 语义与 renderSettings 是/否）/ build / smoke **142/142**。
+- 真机走查（隔离 home + 本机 Chrome）：设置页「默认行为」勾选 → 顶部「保存」→ 落盘 `autoSaveFields=true`；回条目页改字段停手约 1s，改动自动落盘（保存按钮回落为禁用，刷新后新值仍在）；关闭偏好后用同样操作等 2 秒，仍是「1 处改动未保存」且服务端值未变（旧手动流程零变化）。
+
 **任务 #25（#24 的再验收反馈）：修「条目内自建字段不触发保存」的真根因 + 悬浮直接渲染被引用字段整块。**
 
 ### Fixed

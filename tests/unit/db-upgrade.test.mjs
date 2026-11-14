@@ -25,7 +25,8 @@ async function copyDb(src, dst) {
   }
 }
 
-test('版本落后升级：真 v2 库一路升到当前版（v4），migrate/ 里先留 pre-v2-to-v4 快照，数据完好', async () => {
+test('版本落后升级：真 v2 库一路升到当前版（v5），migrate/ 里先留 pre-v2-to-v5 快照，数据完好', async () => {
+  const { CURRENT_SCHEMA_VERSION } = await import('../../src/core/db/version.ts');
   // v3 起 entries 没有 values 列、边表挂 entry_field_id——「把 v3 库的版本号改回 0」
   // 不再等于「模拟旧版库」（v3.sql 的 ALTER/CREATE 会在已升级的库上炸）。
   // 所以这里用裸 SQL 造一份**真正的 v2 库**（migrate to:2 + 手写 v2 形状的行），
@@ -57,7 +58,7 @@ test('版本落后升级：真 v2 库一路升到当前版（v4），migrate/ �
   assert.equal(s2.sections.length, 1, '升级后数据仍在');
   assert.equal(s2.entries[0].values.a, '1');
   assert.equal(s2.entries[0].values.ghost, '2', '不在字典的键要落成扩展行并原样读回');
-  const snaps = (await fsp.readdir(join(homeB, 'migrate'))).filter((f) => /-pre-v2-to-v4\.db$/.test(f));
+  const snaps = (await fsp.readdir(join(homeB, 'migrate'))).filter((f) => new RegExp(`-pre-v2-to-v${CURRENT_SCHEMA_VERSION}\\.db$`).test(f));
   assert.equal(snaps.length, 1, `migrate/ 应有一份升级前快照：${snaps.join(', ')}`);
 
   // 快照本身是可退回的完整 v2 库（values 列还在）

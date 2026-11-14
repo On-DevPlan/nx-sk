@@ -90,6 +90,10 @@ export default function SettingsView() {
       body: {
         set: {
           defaultSection: form.defaultSection,
+          autoSaveFields: !!form.autoSaveFields,
+          historyMode: form.historyMode || 'count',
+          historyCount: form.historyCount ?? 50,
+          historyDays: form.historyDays ?? 90,
           ...nav.configToPayload(navCfg),
         },
       },
@@ -183,23 +187,83 @@ export default function SettingsView() {
           ) : null}
 
           {active === 'default' ? (
-            <div className="set-row">
-              <div className="set-k">
-                <span className="name">默认栏目</span>
-                <span className="desc">打开面板时落在哪</span>
+            <>
+              <div className="set-row">
+                <div className="set-k">
+                  <span className="name">默认栏目</span>
+                  <span className="desc">打开面板时落在哪</span>
+                </div>
+                <div className="set-v">
+                  <select value={form.defaultSection || ''} onChange={(e) => setForm({ ...form, defaultSection: e.target.value })}>
+                    <option value="">（第一个栏目）</option>
+                    {sections.map((s) => <option key={s.id} value={s.id}>{s.title}（{s.id}）</option>)}
+                    {/* 历史值指向已删栏目：留着看得见（而不是被悄悄改成第一项），
+                        保存时后端会拒绝并提示现有栏目 */}
+                    {form.defaultSection && !sections.some((s) => s.id === form.defaultSection) ? (
+                      <option value={form.defaultSection}>{form.defaultSection}（栏目已不存在）</option>
+                    ) : null}
+                  </select>
+                </div>
               </div>
-              <div className="set-v">
-                <select value={form.defaultSection || ''} onChange={(e) => setForm({ ...form, defaultSection: e.target.value })}>
-                  <option value="">（第一个栏目）</option>
-                  {sections.map((s) => <option key={s.id} value={s.id}>{s.title}（{s.id}）</option>)}
-                  {/* 历史值指向已删栏目：留着看得见（而不是被悄悄改成第一项），
-                      保存时后端会拒绝并提示现有栏目 */}
-                  {form.defaultSection && !sections.some((s) => s.id === form.defaultSection) ? (
-                    <option value={form.defaultSection}>{form.defaultSection}（栏目已不存在）</option>
-                  ) : null}
-                </select>
+
+              {/* 任务 #26：忘记保存丢数据——开启后条目编辑走防抖自动保存（仍是同一个保存链路） */}
+              <div className="set-row">
+                <div className="set-k">
+                  <span className="name">编辑后自动保存</span>
+                  <span className="desc">改完字段停手约 1 秒自动保存；关闭时按「保存」才写入</span>
+                </div>
+                <div className="set-v">
+                  <label className="rowgap">
+                    <input
+                      type="checkbox"
+                      checked={!!form.autoSaveFields}
+                      onChange={(e) => setForm({ ...form, autoSaveFields: e.target.checked })}
+                    />
+                    <span>{form.autoSaveFields ? '已开启' : '已关闭'}</span>
+                  </label>
+                </div>
               </div>
-            </div>
+
+              {/* 任务 #27：字段值历史保留策略——按条数或按时间，保存后立即裁剪存量历史 */}
+              <div className="set-row">
+                <div className="set-k">
+                  <span className="name">字段历史保留</span>
+                  <span className="desc">每个字段的变化版本怎么留：最近 N 版 / 最近 N 天（改完立即生效）</span>
+                </div>
+                <div className="set-v rowgap">
+                  <select
+                    value={form.historyMode || 'count'}
+                    onChange={(e) => setForm({ ...form, historyMode: e.target.value === 'time' ? 'time' : 'count' })}
+                  >
+                    <option value="count">最近 N 版</option>
+                    <option value="time">最近 N 天</option>
+                  </select>
+                  {(form.historyMode || 'count') === 'time' ? (
+                    <label className="rowgap">
+                      <input
+                        type="number"
+                        min={1}
+                        max={3650}
+                        value={form.historyDays ?? 90}
+                        onChange={(e) => setForm({ ...form, historyDays: Number(e.target.value) })}
+                      />
+                      <span>天</span>
+                    </label>
+                  ) : (
+                    <label className="rowgap">
+                      <input
+                        type="number"
+                        min={1}
+                        max={1000}
+                        value={form.historyCount ?? 50}
+                        onChange={(e) => setForm({ ...form, historyCount: Number(e.target.value) })}
+                      />
+                      <span>版</span>
+                    </label>
+                  )}
+                </div>
+              </div>
+            </>
           ) : null}
 
           {active === 'storage' ? (

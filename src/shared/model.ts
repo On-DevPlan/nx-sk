@@ -71,6 +71,14 @@ export interface NavGroup {
 export interface Settings {
   defaultSection: string;
   navGroups: NavGroup[];
+  /** 任务 #26：编辑字段后防抖自动保存（默认关；关 = 只走手动保存，行为与之前一致）。 */
+  autoSaveFields?: boolean;
+  /** 任务 #27：字段历史的保留方式——count=每个字段只留最近 N 版；time=只留最近 N 天。 */
+  historyMode?: 'count' | 'time';
+  /** 按条数保留时每个字段最多留多少版（默认 50）。 */
+  historyCount?: number;
+  /** 按时间保留时留最近多少天（默认 90）。 */
+  historyDays?: number;
   /** 入口不显示的栏目 id（`#/栏目` 直达仍可用）。 */
   navHidden?: string[];
   /** 平铺区的显示顺序；没列进去的按栏目自身 order 跟在后面。 */

@@ -12,6 +12,7 @@ await useTempHome('nx-sk-v4-');
 
 const { openRaw } = await import('../../src/core/db/driver.ts');
 const { migrate, setMeta, getMeta, schemaVersion } = await import('../../src/core/db/migrator.ts');
+const { CURRENT_SCHEMA_VERSION } = await import('../../src/core/db/version.ts');
 const { readStore } = await import('../../src/core/db/repo.ts');
 const identity = await import('../../src/core/db/identity.ts');
 
@@ -117,11 +118,12 @@ test('② 迁移后未知类型不再被 DB 拒绝（加类型不改库的正向
   db.close();
 });
 
-test('③ 幂等：已到 v4 的库重跑等于空转', () => {
+test('③ 幂等：已到当前版本的库重跑等于空转', () => {
   const { db } = buildV3MemoryDb();
-  migrate(db, { to: 4 });
+  // v4 之后还会有 v5/v6…：这里对齐「当前版本」，否则每次加 schema 都会误报
+  migrate(db, { to: CURRENT_SCHEMA_VERSION });
   assert.deepEqual(migrate(db), [], '第二次不该再执行任何步骤');
-  assert.equal(schemaVersion(db), 4);
+  assert.equal(schemaVersion(db), CURRENT_SCHEMA_VERSION);
   const names = db.all("SELECT name FROM sqlite_master WHERE type = 'table'").map((r) => r.name);
   assert.ok(!names.includes('fields_new') && !names.includes('entry_fields_new'), '重建的临时表必须已消失');
   db.close();

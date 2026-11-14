@@ -129,6 +129,50 @@ export default {
       render: (d: Parameters<typeof service.renderEntryUpdateField>[0]) => service.renderEntryUpdateField(d),
     },
     {
+      id: 'entry.history',
+      cli: ['entry', 'history'],
+      http: ['GET', '/api/entries/:ref/history'],
+      summary: '一个条目的全字段变化时间线（按时间倒序，含旧值 → 新值与版本号）',
+      args: ['ref'],
+      flags: {
+        section: { type: 'string', hint: '限定栏目，解决同名歧义' },
+        limit: { type: 'number', hint: '最多列多少条（默认 100，上限 500）' },
+      },
+      run: (ctx: { ref?: string; section?: string; limit?: unknown } = {}) => service.getEntryHistory(ctx.ref, ctx),
+      render: (d: Parameters<typeof service.renderEntryHistory>[0]) => service.renderEntryHistory(d),
+    },
+    {
+      id: 'entry.field-history',
+      cli: ['entry', 'field-history'],
+      http: ['GET', '/api/entries/:ref/fields/:key/history'],
+      summary: '单个字段的历史版本（rev 倒序）与当前值；版本号用于 field-restore',
+      args: ['ref'],
+      flags: {
+        key: { type: 'string', required: true, hint: '字段 key（或中文标签）' },
+        section: { type: 'string', hint: '限定栏目，解决同名歧义' },
+        limit: { type: 'number', hint: '最多列多少版（默认 50，上限 500）' },
+      },
+      run: (ctx: { ref?: string; key?: unknown; section?: string; limit?: unknown } = {}) => service.getFieldHistory(ctx.ref, ctx.key, ctx),
+      render: (d: Parameters<typeof service.renderFieldHistory>[0]) => service.renderFieldHistory(d),
+    },
+    {
+      id: 'entry.field-restore',
+      cli: ['entry', 'field-restore'],
+      http: ['POST', '/api/entries/:ref/fields/:key/restore'],
+      summary: '把字段恢复到某个历史版本：写回旧值并记一条 restore 历史（恢复也能再撤销）',
+      args: ['ref'],
+      flags: {
+        key: { type: 'string', required: true, hint: '字段 key（或中文标签）' },
+        rev: { type: 'number', required: true, hint: '目标版本号（entry field-history 里看）' },
+        section: { type: 'string', hint: '限定栏目，解决同名歧义' },
+        'dry-run': { type: 'boolean' },
+      },
+      run: (ctx: {
+        ref?: string; key?: unknown; rev?: unknown; section?: string; 'dry-run'?: boolean;
+      } = {}) => service.restoreFieldVersion(ctx.ref, ctx.key, ctx),
+      render: (d: Parameters<typeof service.renderFieldRestore>[0]) => service.renderFieldRestore(d),
+    },
+    {
       id: 'entry.remove-field',
       cli: ['entry', 'remove-field'],
       http: ['DELETE', '/api/entries/:ref/fields/:key'],
