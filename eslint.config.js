@@ -94,7 +94,7 @@ export default [
     files: ['src/core/**/*.{js,ts}'],
     rules: {
       'no-restricted-imports': ['error', { patterns: [
-        { group: ['../modules/**', '../runtime/**', '../web/**'],
+        { group: ['**/modules/**', '**/runtime/**', '**/web/**'],
           message: 'core 是最底层，不得依赖 modules / runtime / web。' },
       ] }],
     },
@@ -141,8 +141,7 @@ export default [
         { group: ['node:*'], message: '前端不能引用 Node 内置模块。' },
         {
           group: [
-            '**/modules/*/index.{js,ts}',
-            '**/modules/*/service.{js,ts}',
+            '**/modules/**',
             '**/runtime/**',
             '**/core/**',
           ],
