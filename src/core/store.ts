@@ -12,6 +12,7 @@
 import { dbFile, storeFile } from './paths.ts';
 import { openAndBootstrap } from './db/bootstrap.ts';
 import { readStore, writeStore, upsertEntryFieldRows, propagateSectionTemplate, setEntryFieldDetached, deleteEntryFieldRow, updateEntryFieldDef } from './db/repo.ts';
+import { pruneAllHistory, readEntryHistory, readFieldHistory, restoreFieldVersion, readRetention } from './db/history.ts';
 import { fileHasContent } from './db/migrator.ts';
 import { setDefaultDb, tx } from './db/tx.ts';
 import { normalize, type Store, type EntryFieldView } from './store-shape.ts';
@@ -192,4 +193,32 @@ export async function syncEntryStructures(sectionId: string): Promise<{ entries:
 /** 存储存在吗：DB 有内容，或旧 store.json 还在等着被导入。 */
 export async function storeExists(): Promise<boolean> {
   return fileHasContent(dbFile()) || fileHasContent(storeFile());
+}
+
+// —— 任务 #27：字段值历史（面板 / CLI 共用同一条读路径）——
+
+/** 单个字段的历史（rev 倒序）+ 当前值文本；字段不存在返回 null。 */
+export async function fieldHistoryOf(entryId: string, key: string, limit = 50) {
+  return readFieldHistory(ensureDb(), entryId, key, limit);
+}
+
+/** 一个条目的全字段变化时间线（按时间倒序）。 */
+export async function entryHistoryOf(entryId: string, limit = 100) {
+  return readEntryHistory(ensureDb(), entryId, limit);
+}
+
+/** 恢复到某字段的某个版本（追加 op='restore' 历史，可再撤销）。 */
+export async function restoreEntryFieldValue(entryId: string, key: string, rev: number) {
+  return restoreFieldVersion(ensureDb(), entryId, key, rev);
+}
+
+/** 设置里改了保留策略后立即生效（也可在启动时调）。 */
+export async function pruneHistoryNow(): Promise<number> {
+  const conn = ensureDb();
+  return tx((db) => pruneAllHistory(db), { db: conn });
+}
+
+/** 当前保留策略（设置页展示 / CLI 诊断用）。 */
+export async function currentHistoryRetention() {
+  return readRetention(ensureDb());
 }

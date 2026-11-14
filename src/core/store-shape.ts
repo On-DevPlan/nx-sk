@@ -102,6 +102,12 @@ export function defaultSettings(): StoreSettings {
     // 头部导航分组：[{ title, sections: [栏目 id…] }]，数组顺序 = 显示顺序。
     // 缺省空数组 = 全部栏目平铺（保持老行为）；栏目建得多了再在设置页收拢。
     navGroups: [],
+    // 任务 #26：默认关——自动保存是可选偏好，老 store 读一次就补上这个键。
+    autoSaveFields: false,
+    // 任务 #27：字段历史默认每个字段留最近 50 版；切 time 则按天数裁。
+    historyMode: 'count',
+    historyCount: 50,
+    historyDays: 90,
   };
 }
 

@@ -32,6 +32,7 @@ export const DIRECT_EDGES: MigrationStep[] = [
   { from: 1, to: 2, file: 'v2.sql', title: '挂载收敛到条目字段：重建 entry_attach（去 role=source）、删 section_attach/field_attach' },
   { from: 2, to: 3, file: 'v3.sql', title: '动态结构/写时复制：entry_fields + field_data 拆行，values 列退役，边挂 entry_field_id', apply: applyV3 },
   { from: 3, to: 4, file: 'v4.sql', title: '字段类型去 DB CHECK：加新类型不再需要 schema 迁移（合法性由运行时 validateFieldDef/behaviorOf 保证）', apply: applyV4 },
+  { from: 4, to: 5, file: 'v5.sql', title: '字段值历史：新增 field_history（单调 rev + 值快照 + op/source/at，无外键）' },
 ];
 
 const keyOf = (from: number, to: number) => `${from}->${to}`;

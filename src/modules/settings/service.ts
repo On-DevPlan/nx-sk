@@ -1,12 +1,12 @@
 // settings 是**基础模块**：允许被其它模块单向只读依赖（见 eslint 互依禁列——它故意不在里面）。
 // 设置的唯一读写入口在这里，别绕过去直接改 store.settings。
-import { loadStore, mutateStore } from '../../core/store.ts';
+import { loadStore, mutateStore, pruneHistoryNow } from '../../core/store.ts';
 import type { Store, StoreSettings } from '../../core/store.ts';
 import { findSection } from '../../core/fields.ts';
 import { badInput, notFound } from '../../core/errors.ts';
 import { dbFile, displayPath } from '../../core/paths.ts';
 
-export const SETTING_KEYS = ['defaultSection', 'navGroups', 'navHidden', 'navOrder'];
+export const SETTING_KEYS = ['defaultSection', 'navGroups', 'navHidden', 'navOrder', 'autoSaveFields', 'historyMode', 'historyCount', 'historyDays'];
 
 interface SettingSchemaItem {
   type: string;
@@ -14,6 +14,8 @@ interface SettingSchemaItem {
   coerce?: (value: unknown, store: Store) => unknown;
   listed?: boolean;
   enum?: string[];
+  min?: number;
+  max?: number;
 }
 
 const SCHEMA: Record<string, SettingSchemaItem> = {
@@ -27,6 +29,12 @@ const SCHEMA: Record<string, SettingSchemaItem> = {
   navGroups: { type: 'json', hint: '头部导航分组：[{title, sections:[栏目id…]}]，数组顺序 = 显示顺序', coerce: coerceNavGroups },
   navHidden: { type: 'json', hint: '头部隐藏的栏目 id（入口不显示，`#/栏目` 直达仍可用）', coerce: coerceNavHidden },
   navOrder: { type: 'json', hint: '平铺区的显示顺序（栏目 id 数组；没列进去的按栏目自身顺序跟在后面）', coerce: coerceNavOrder },
+  // 任务 #26：编辑字段后防抖自动保存（默认否）。面板与 CLI 读同一份值。
+  autoSaveFields: { type: 'boolean', hint: '编辑字段后自动保存（800ms 防抖；否 = 只走手动保存）' },
+  // 任务 #27：字段历史的保留方式（默认每个字段最近 50 版）。改完立即裁剪存量历史。
+  historyMode: { type: 'string', enum: ['count', 'time'], hint: '字段历史保留方式：count = 只留最近 N 版；time = 只留最近 N 天' },
+  historyCount: { type: 'number', min: 1, max: 1000, hint: '按条数保留：每个字段最多留多少版（默认 50）' },
+  historyDays: { type: 'number', min: 1, max: 3650, hint: '按时间保留：留最近多少天（默认 90）' },
 };
 
 export function settingsSchema() {
@@ -159,6 +167,14 @@ function coerceSetting(key: string, value: unknown, store: Store) {
     throw badInput(`设置项 ${key} 需要是/否，收到 ${JSON.stringify(value)}`);
   }
   const str = String(value);
+  if (s.type === 'number') {
+    const n = Number(value);
+    if (value === '' || !Number.isFinite(n)) throw badInput(`设置项 ${key} 需要一个数字，收到 ${JSON.stringify(value)}`);
+    const int = Math.trunc(n);
+    if (s.min !== undefined && int < s.min) throw badInput(`设置项 ${key} 不能小于 ${s.min}（收到 ${int}）`);
+    if (s.max !== undefined && int > s.max) throw badInput(`设置项 ${key} 不能大于 ${s.max}（收到 ${int}）`);
+    return int;
+  }
   if (s.enum && !s.enum.includes(str)) throw badInput(`设置项 ${key} 只能是 ${s.enum.join(' / ')}`);
   return str;
 }
@@ -185,7 +201,10 @@ export async function updateSettings({ set, key, value, 'dry-run': dryRun }: { s
     for (const [k, v] of Object.entries(resolved)) { before[k] = settings[k]; settings[k] = v; }
     return { before, after: { ...resolved } };
   }) as { before: Record<string, unknown>; after: Record<string, unknown> };
-  return { status: 'ok', set: result.after, before: result.before, path: displayPath(dbFile()) };
+  // 任务 #27：保留策略改完立即对存量历史生效（不必等下一次写入才发现「说好的 5 版还是 500 版」）。
+  let pruned = 0;
+  if (Object.keys(resolved).some((k) => k.startsWith('history'))) pruned = await pruneHistoryNow();
+  return { status: 'ok', set: result.after, before: result.before, pruned, path: displayPath(dbFile()) };
 }
 
 export function renderSettings(data: {

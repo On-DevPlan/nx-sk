@@ -18,8 +18,11 @@
  * 枚举约束（加新字段类型不再需要 schema 迁移）；类型合法性由运行时保证：
  * validateFieldDef 在定义写入点拒绝未知类型，behaviorOf 按 FIELD_TYPES 分派行为，
  * shared/fields/types.ts 仍是类型清单的唯一权威。
+ * v5（2026-11-12）：字段值历史——新增 field_history（entry_field_id + 单调 rev + 值快照 +
+ * op/source/at）。不建外键（全量重写会 CASCADE 清空，见 v5.sql 注释），
+ * 由 writeStore 在重建后清理真正消失字段的历史；写入侧做 diff，只记真实变化。
  */
-export const CURRENT_SCHEMA_VERSION = 4;
+export const CURRENT_SCHEMA_VERSION = 5;
 
 /**
  * 运行时最低 Node 版本。

@@ -179,6 +179,41 @@ test('renderSettings 仍然列出 defaultSection（带校验器但不是「结�
   assert.match(settings.renderSettings(d), /defaultSection/);
 });
 
+// —— autoSaveFields（任务 #26：编辑后自动保存偏好）——
+
+test('autoSaveFields：默认关闭，老 store（没有这个键）读一次自动补 false', async () => {
+  assert.equal(defaultSettings().autoSaveFields, false, '缺省 = 手动保存（保持老行为）');
+  assert.equal(normalize({ settings: { defaultSection: 'x' } }).settings.autoSaveFields, false);
+  assert.equal((await loadStore()).settings.autoSaveFields, false);
+});
+
+test('autoSaveFields：布尔值 / CLI 字符串写法都认，且只改这一项（PATCH 语义）', async () => {
+  const on = await settings.updateSettings({ set: { autoSaveFields: true } });
+  assert.equal(on.set.autoSaveFields, true);
+  assert.equal((await loadStore()).settings.autoSaveFields, true);
+
+  for (const v of ['否', 'false', '0', 'no', '']) {
+    const r = await settings.updateSettings({ key: 'autoSaveFields', value: v });
+    assert.equal(r.set.autoSaveFields, false, `CLI 写法 ${JSON.stringify(v)} 应归一成 false`);
+  }
+  const yes = await settings.updateSettings({ key: 'autoSaveFields', value: '是' });
+  assert.equal(yes.set.autoSaveFields, true);
+
+  // 只动 autoSaveFields：其它设置项原样保留
+  const before = (await loadStore()).settings.defaultSection;
+  await settings.updateSettings({ set: { autoSaveFields: false } });
+  assert.equal((await loadStore()).settings.defaultSection, before, 'PATCH 不得顺带改别的设置项');
+  assert.equal((await loadStore()).settings.autoSaveFields, false);
+});
+
+test('renderSettings 用「是/否」展示 autoSaveFields', async () => {
+  await settings.updateSettings({ set: { autoSaveFields: true } });
+  const text = settings.renderSettings(await settings.getSettings());
+  assert.match(text, /autoSaveFields\s+是/, '布尔项要渲染成是/否，不是 true/false');
+  await settings.updateSettings({ set: { autoSaveFields: false } });
+  assert.match(settings.renderSettings(await settings.getSettings()), /autoSaveFields\s+否/);
+});
+
 test('store 不存在：首次读取即落盘，重复读取 id 稳定（否则每次请求都重播种 → 保存 404）', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'nx-sk-seed-'));
   process.env.NX_SK_HOME = dir;

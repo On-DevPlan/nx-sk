@@ -12,17 +12,17 @@ const { planMigrationPath, DIRECT_EDGES } = await import('../../src/core/db/migr
 const { CURRENT_SCHEMA_VERSION } = await import('../../src/core/db/version.ts');
 const { tx } = await import('../../src/core/db/tx.ts');
 
-test('空库 → 当前版本：建齐表并走完 v1+v2+v3+v4，版本写进 meta.schema_version 与 PRAGMA user_version', () => {
+test('空库 → 当前版本：建齐表并走完 v1…v5，版本写进 meta.schema_version 与 PRAGMA user_version', () => {
   const db = openRaw(':memory:');
   assert.equal(countTables(db), 0);
   const applied = migrate(db, { from: 0 });
-  assert.deepEqual(applied, [1, 2, 3, 4]);
+  assert.deepEqual(applied, [1, 2, 3, 4, 5]);
   assert.equal(schemaVersion(db), CURRENT_SCHEMA_VERSION);
   assert.equal(userVersion(db), CURRENT_SCHEMA_VERSION);
   assert.equal(getMeta(db, 'schema_version'), String(CURRENT_SCHEMA_VERSION));
   const names = db.all("SELECT name FROM sqlite_master WHERE type = 'table'").map((r) => r.name);
   for (const t of ['meta', 'settings', 'ui_state', 'sections', 'groups', 'fields', 'entries',
-    'attachments', 'entry_fields', 'field_data', 'entry_attach']) {
+    'attachments', 'entry_fields', 'field_data', 'entry_attach', 'field_history']) {
     assert.ok(names.includes(t), `缺表 ${t}`);
   }
   // v2 裁决：结构级边表必须已退役，role=source 必须被 CHECK 拒绝
@@ -53,7 +53,7 @@ test('migrate 幂等：已到当前版本的库重跑等于空转', () => {
   migrate(db, { from: 0 });
   assert.deepEqual(migrate(db), [], '第二次不该再执行任何步骤');
   assert.equal(schemaVersion(db), CURRENT_SCHEMA_VERSION);
-  assert.equal(countTables(db), 11);
+  assert.equal(countTables(db), 12);
   db.close();
 });
 
