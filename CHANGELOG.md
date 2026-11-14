@@ -2,7 +2,7 @@
 
 本文件格式参考 [Keep a Changelog](https://keepachangelog.com/)，中文正文。
 
-## [Unreleased]
+## [0.41.0] - 2026-11-14
 
 **任务 #33（#28 的验收反馈）：侧栏「＋」对齐到栏目行最右边。**
 
