@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { DragEvent as ReactDragEvent, ReactNode } from 'react';
 import { api } from '../../api/client.ts';
 import { useStore } from '../../store.tsx';
-import { CliHints, Empty, Modal, Tag } from '../../components/ui.tsx';
+import { Empty, Modal, Tag } from '../../components/ui.tsx';
 import { checkZipFile, fmtBytes, postZip } from '../../api/zip.ts';
 import DictEditor from './dictEditor.tsx';
 import type { FieldDef } from '../../../../shared/fields/types.ts';
@@ -485,8 +485,6 @@ export default function SectionsView() {
         栏目 = 一组同构条目 + 一份字段字典。树里一条 = 一个栏目（文件夹），展开是它的条目；
         勾选可以跨栏目，一次删完。删栏目会连带它的条目——要留底先在「导出导入」页导一份。
       </div>
-
-      <CliHints module="sections" />
 
       {dragDepth > 0 ? <div className="drop-mask"><div>松开导入为新栏目</div></div> : null}
 

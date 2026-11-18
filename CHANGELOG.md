@@ -8,6 +8,8 @@
 
 ### Changed
 
+- **页面底部的「同构 CLI 命令」提示整块移除（任务 #41）**：条目、栏目、附件、导出导入、设置等页
+  不再在底部列出 `nx-sk entry …` 命令串，界面只留操作本身；`CliHints` 组件与其样式一并删掉。
 - **随包 skill 合并成一个（任务 #38）**：原先并列分发的四个用户向 skill（`sk-needdo` /
   `sk-source` / `sk-pdf` / `sk-thesis`）收进唯一入口 `nx-sk`，`assets/` 下只剩一个可分发目录。
   组织方式照 nv-kv 的 asset skill：**A 序列 = 用户场景 SOP**（`A01-填一条信息` … `A09-搬走一个栏目`）、

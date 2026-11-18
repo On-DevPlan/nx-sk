@@ -3,7 +3,6 @@ import type { DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent } from 
 import { api } from '../../api/client.ts';
 import { checkZipFile, isNeedPassphraseError, postZip } from '../../api/zip.ts';
 import { useStore, REFRESH_EVENT } from '../../store.tsx';
-import { CliHints } from '../../components/ui.tsx';
 import type { BoardGroup } from '../../components/blockBoard.tsx';
 import { reconcileLayout, sameLayout } from '../../../../shared/blockLayout.ts';
 import type { BlockLayout } from '../../../../shared/blockLayout.ts';
@@ -530,8 +529,6 @@ export default function SectionView({ sectionId: rawId, listHidden = false, side
           onOpenHistory={() => setEntryHistoryOpen(true)}
         />
       </div>
-
-      <CliHints module="entries" />
 
       {dragDepth > 0 ? (
         <div className="drop-mask"><div>松开导入栏目 ZIP</div></div>

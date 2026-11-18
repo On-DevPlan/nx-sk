@@ -1,5 +1,4 @@
 import TransferPanel from '../../components/transferPanel.tsx';
-import { CliHints } from '../../components/ui.tsx';
 
 // 「导出导入」页 = 取数据的唯一入口：选栏目（全选即整库）→ 设口令 → 下载；
 // 把包拖回来解密导入。页面只有这一个面板。
@@ -18,8 +17,6 @@ export default function ExportView() {
       </div>
 
       <TransferPanel />
-
-      <CliHints module="transfer" />
     </>
   );
 }

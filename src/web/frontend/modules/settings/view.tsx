@@ -6,7 +6,7 @@ import {
 } from '@ant-design/icons';
 import { api } from '../../api/client.ts';
 import { useStore } from '../../store.tsx';
-import { CliHints, Copyable, Tag } from '../../components/ui.tsx';
+import { Copyable, Tag } from '../../components/ui.tsx';
 import * as nav from '../../components/navModel.ts';
 import NavManager from './navManager.tsx';
 import type { Settings } from '../../../../shared/model.ts';
@@ -313,7 +313,6 @@ export default function SettingsView() {
                   <Copyable className="mono" text={`nx-sk serve --port ${panelPort}`}>{`nx-sk serve --port ${panelPort}`}</Copyable>
                 </div>
               </div>
-              <CliHints module="settings" />
             </>
           ) : null}
 

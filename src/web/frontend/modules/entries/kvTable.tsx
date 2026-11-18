@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../../api/client.ts';
 import { useStore } from '../../store.tsx';
-import { CliHints, Copyable, Empty } from '../../components/ui.tsx';
+import { Copyable, Empty } from '../../components/ui.tsx';
 
 /**
  * KV 表格：`kv: true` 栏目的**唯一**编辑界面。
@@ -171,8 +171,6 @@ export default function KvTable({ sectionId, sectionTitle }: { sectionId: string
         改值：直接在「值」列改完按回车（或点开别处）即保存。改键名同理。
         值以密文落盘，这里显示的是原文；要打码勾上方那个框。删除前自动整库快照。
       </div>
-
-      <CliHints module="entries" />
     </>
   );
 }
