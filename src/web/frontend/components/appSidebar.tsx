@@ -413,19 +413,8 @@ export default function AppSidebar({
       .filter((s) => !needle || hit(s.title) || (entryMap[s.id] || []).some((e) => hit(e.title)))
       .map(sectionNode);
 
-    const toolNodes: DataNode[] = nav.tools.map((t) => ({
-      key: `v:${t.id}`,
-      isLeaf: true,
-      title: withCtx(viewMenu(t), (
-        <span className="sb-row" title={t.title}>
-          {toolIcon(t.id)}
-          <span className="sb-label nowrap">{t.title}</span>
-        </span>
-      )),
-    }));
-
-    return [...groupNodes, ...flatNodes, ...toolNodes];
-  }, [nav, entryMap, needle, toolIcon, entryMenu, sectionMenu, viewMenu, groupMenu, onAddEntry]);
+    return [...groupNodes, ...flatNodes];
+  }, [nav, entryMap, needle, entryMenu, sectionMenu, groupMenu, onAddEntry]);
 
   // 搜索时把有命中的分支全展开；此时受控展开态临时接管
   const searchExpanded = useMemo<Key[] | null>(() => {
@@ -439,6 +428,14 @@ export default function AppSidebar({
     walk(treeData);
     return keys;
   }, [treeData, needle]);
+
+  // 工具页（栏目 / 附件 / 导出导入 / 设置）固定在侧栏底部：它们不是内容层级的一部分，
+  // 挂在树里会跟栏目混在一起，越用越难找（#42）。搜索时按标题过滤，没命中就不占位。
+  const visibleTools = useMemo(() => {
+    const term = needle;
+    if (!term) return nav.tools;
+    return nav.tools.filter((t) => t.title.toLowerCase().includes(term));
+  }, [nav.tools, needle]);
 
   // 选中态：当前栏目 / 工具页 / 当前条目（侧栏与主区域双向同步的锚点）
   const selectedKeys = useMemo(() => {
@@ -533,6 +530,27 @@ export default function AppSidebar({
           loadedKeys={loadedKeys}
         />
       </div>
+
+      {/* 底部工具区：与栏目树分开，常驻在存储信息上方 */}
+      {visibleTools.length ? (
+        <nav className="sb-tools" aria-label="工具">
+          {visibleTools.map((t) => (
+            <div key={t.id}>
+              {withCtx(viewMenu(t), (
+                <button
+                  type="button"
+                  className={`sb-tool${currentId === t.id ? ' on' : ''}`}
+                  title={t.title}
+                  onClick={() => onGo(t.id)}
+                >
+                  {toolIcon(t.id)}
+                  <span className="sb-label nowrap">{t.title}</span>
+                </button>
+              ))}
+            </div>
+          ))}
+        </nav>
+      ) : null}
 
       {/* 底部：存储位置——原头部右侧的元信息搬到这里，弱化成一行可复制的小字 */}
       {boot ? (
