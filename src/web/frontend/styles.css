@@ -83,6 +83,20 @@ body {
 .sb-head .ver { font-size: 10px; color: var(--mid); background: var(--soft-2); border-radius: 999px; padding: 1px 8px; line-height: 1.7; }
 .sb-search { padding: 4px 10px 6px; }
 .sb-tree { flex: 1; min-height: 0; overflow: auto; padding: 0 6px 8px; }
+/* 侧栏底部工具区（#42）：与栏目树分开，一条按钮一行，当前页高亮 */
+.sb-tools {
+  display: flex; flex-direction: column; gap: 1px;
+  padding: 6px 6px 4px;
+  border-top: var(--border);
+}
+.sb-tool {
+  display: flex; align-items: center; gap: 7px; width: 100%;
+  border: 0; background: transparent; border-radius: 6px;
+  padding: 3px 8px; font: inherit; color: inherit; font-size: var(--fs-core);
+  text-align: left; cursor: pointer;
+}
+.sb-tool:hover { background: var(--hover); }
+.sb-tool.on { background: var(--hover); color: var(--ink); }
 .sb-foot {
   padding: 6px 12px 8px;
   border-top: var(--border);
