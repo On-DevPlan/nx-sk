@@ -6,6 +6,7 @@ await useTempHome();
 
 const service = await import('../../src/modules/sections/service.ts');
 const { mergeTemplate } = await import('../../src/core/fields.ts');
+const { boardGroupsOf, groupKeysOf } = await import('../../src/shared/fields/structure.ts');
 const { renderSectionChange } = await service;
 
 // 回归：`removed` 在两条路径上**形状不同**——removeSection 给的是对象
@@ -51,11 +52,13 @@ test('remove 的对象形状仍走删除分支（别把修复改过头）', () =
 // **不会回溯**到已建栏目，老栏目里看不到上传入口。section sync 用来补这个缺口。
 
 test('mergeTemplate 只增不改：补进缺失字段、保留已有定义与自定义字段', () => {
+  // 0.42：组是字段（type='group' + keys），栏目侧与模板侧都只有 fields。
   const section = {
-    groups: [{ id: 'a', title: '自定义标题A' }, { id: 'z', title: '自定义组' }],
     fields: [
-      { key: 'f1', label: '我自己改过的标签', type: 'text', group: 'a' },
-      { key: 'custom', label: '自定义字段', type: 'text', group: 'z' },
+      { key: 'a', label: '自定义标题A', type: 'group', keys: ['f1'] },
+      { key: 'f1', label: '我自己改过的标签', type: 'text' },
+      { key: 'z', label: '自定义组', type: 'group', keys: ['custom'] },
+      { key: 'custom', label: '自定义字段', type: 'text' },
     ],
   };
   const template = {
@@ -67,24 +70,25 @@ test('mergeTemplate 只增不改：补进缺失字段、保留已有定义与自
   };
   const r = mergeTemplate(section, template);
   // 已有字段的定义（label）与位置不动
-  assert.equal(r.fields[0].key, 'f1');
-  assert.equal(r.fields[0].label, '我自己改过的标签');
+  const leaves = r.fields.filter((f) => f.type !== 'group');
+  assert.equal(leaves[0].key, 'f1');
+  assert.equal(leaves[0].label, '我自己改过的标签');
   // 自定义字段保留
   assert.ok(r.fields.some((f) => f.key === 'custom'));
-  // 新字段被补进来
-  assert.deepEqual(r.addedFields, ['f2']);
+  // 新字段被补进来（组也是字段，所以新增组 b 自己也在 addedFields 里）
+  assert.deepEqual(r.addedFields, ['b', 'f2']);
   assert.deepEqual(r.addedGroups, ['b']);
   // 分组：模板顺序优先（a、b），栏目已有的沿用自身标题，自定义分组 z 附在后面
-  assert.deepEqual(r.groups.map((g) => g.id), ['a', 'b', 'z']);
-  assert.equal(r.groups[0].title, '自定义标题A');
+  assert.deepEqual(boardGroupsOf(r.fields).map((g) => g.id), ['a', 'b', 'z']);
+  assert.equal(boardGroupsOf(r.fields)[0].title, '自定义标题A');
 });
 
 test('mergeTemplate 字段插到「模板序前驱」之后，不会被甩到末尾', () => {
   const section = {
-    groups: [{ id: 'g', title: 'g' }],
     fields: [
-      { key: 'x1', type: 'text', group: 'g' },
-      { key: 'x3', type: 'text', group: 'g' },
+      { key: 'g', label: 'g', type: 'group', keys: ['x1', 'x3'] },
+      { key: 'x1', type: 'text' },
+      { key: 'x3', type: 'text' },
     ],
   };
   const template = {
@@ -96,7 +100,9 @@ test('mergeTemplate 字段插到「模板序前驱」之后，不会被甩到末
     ],
   };
   const r = mergeTemplate(section, template);
-  assert.deepEqual(r.fields.map((f) => f.key), ['x1', 'x2', 'x3']);
+  // 字典顺序：组字段在前，成员按合并后的 keys 顺序（新增的 x2 被并进 g 的 keys）
+  assert.deepEqual(r.fields.map((f) => f.key), ['g', 'x1', 'x2', 'x3']);
+  assert.deepEqual(groupKeysOf(r.fields.find((f) => f.key === 'g')), ['x1', 'x2', 'x3']);
 });
 
 test('section sync 把模板新增的 file 字段/分组补给老栏目，且可重复执行', async () => {
@@ -174,8 +180,10 @@ test('renderSectionChange 覆盖 sync / upToDate 分支', () => {
 
 test('mergeTemplate 报告漂移：同名字段定义不同就列出来，但栏目侧定义不动', () => {
   const section = {
-    groups: [{ id: 'a', title: 'A' }],
-    fields: [{ key: 'f1', label: '我改过的', type: 'text', group: 'a' }],
+    fields: [
+      { key: 'a', label: 'A', type: 'group', keys: ['f1'] },
+      { key: 'f1', label: '我改过的', type: 'text' },
+    ],
   };
   const template = {
     groups: [{ id: 'a', title: 'A' }],
@@ -188,11 +196,11 @@ test('mergeTemplate 报告漂移：同名字段定义不同就列出来，但栏
   assert.ok(r.changedFields[0].diff.includes('label'), JSON.stringify(r.changedFields[0]));
   assert.ok(r.changedFields[0].diff.includes('hint'), JSON.stringify(r.changedFields[0]));
   // 栏目侧原样保留（同步绝不覆盖用户改过的定义）
-  assert.equal(r.fields[0].label, '我改过的');
+  assert.equal(r.fields.find((f) => f.key === 'f1').label, '我改过的');
 });
 
 test('mergeTemplate：等价定义不算漂移（fill 缺省 = normal、options 缺失 = 空）', () => {
-  const section = { groups: [], fields: [{ key: 'x', label: 'X', type: 'text', group: 'g' }] };
+  const section = { fields: [{ key: 'g', type: 'group', keys: ['x'], label: 'g' }, { key: 'x', label: 'X', type: 'text' }] };
   const template = { groups: [], fields: [{ key: 'x', label: 'X', type: 'text', group: 'g', fill: 'normal', options: [] }] };
   assert.deepEqual(mergeTemplate(section, template).changedFields, []);
 });
@@ -264,7 +272,7 @@ test('add-group：建分组；重复 id 冲突而不是覆盖', async () => {
   const r = await service.updateSection('structsec', { 'add-group': { id: 'g2', title: '二组' } });
   assert.equal(r.status, 'ok');
   const s = await service.getSection('structsec');
-  assert.deepEqual(s.groupList.map((g) => g.id), ['g1', 'g2', 'source']);
+  assert.deepEqual(s.groupList.map((g) => g.id), ['g1', 'g2', 'sourceGroup']);
   assert.equal(s.groupList.find((g) => g.id === 'g2').title, '二组');
   await assert.rejects(
     service.updateSection('structsec', { 'add-group': { id: 'g2', title: '又来' } }),
@@ -305,7 +313,7 @@ test('remove-group：非空分组拦下来并报出字段；内置「原始资�
     service.updateSection('structsec', { 'remove-group': 'reach' }),
     /分组 reach 里还有 1 个字段：b/,
   );
-  await assert.rejects(service.updateSection('structsec', { 'remove-group': 'source' }), /内置分组/);
+  await assert.rejects(service.updateSection('structsec', { 'remove-group': 'sourceGroup' }), /内置分组/);
   await assert.rejects(service.updateSection('structsec', { 'remove-group': 'nope' }), /分组不存在/);
 
   // 搬走字段后就能删了
@@ -356,7 +364,7 @@ test('renderSectionChange：结构改动按条打印，而不是只说「fields,
 test('bootstrap 下发 builtin：面板据此把「原始资料」标成不可删', async () => {
   const { bootstrapInfo } = await import('../../src/modules/system/service.ts');
   const boot = await bootstrapInfo();
-  assert.equal(boot.builtin.group, 'source');
+  assert.equal(boot.builtin.group, 'sourceGroup');
   assert.equal(boot.builtin.field, 'source');
 });
 

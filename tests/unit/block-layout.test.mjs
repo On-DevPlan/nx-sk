@@ -89,13 +89,15 @@ test('reconcileLayout：删掉的字段不留空块，新字段接到组尾，�
 
 test('reconcileLayout：分组增删跟着走，空分组不占位', () => {
   const layout = { v: 1, mode: 'grid', panels: ['b', 'a'], groups: {} };
-  const groups = [
-    { id: 'a', fields: [F('a1', 'text', 'a')] },
-    { id: 'b', fields: [F('b1', 'text', 'b')] },
-    { id: 'c', fields: [F('c1', 'text', 'c')] },
-    { id: 'empty', fields: [] },
+  // 0.42：组是字段（type='group' + keys），版式只从这份字典推导
+  const G = (key, keys) => ({ key, label: key, type: 'group', keys });
+  const fields = [
+    G('a', ['a1']), F('a1', 'text', 'a'),
+    G('b', ['b1']), F('b1', 'text', 'b'),
+    G('c', ['c1']), F('c1', 'text', 'c'),
+    G('empty', []),
   ];
-  const out = L.reconcileLayout(layout, L.groupsForLayout({ groups, fields: groups.flatMap((g) => g.fields) }));
+  const out = L.reconcileLayout(layout, L.groupsForLayout({ fields }));
   assert.deepEqual(out.panels, ['b', 'a', 'c'], '存的顺序优先，新组接尾，空组不出现');
   assert.ok(out.groups.b.layouts.lg.length === 1);
 });

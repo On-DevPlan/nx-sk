@@ -1,6 +1,6 @@
 import { loadStore, mutateStore, type Store, type StoreEntry } from '../../core/store.ts';
 import { badInput, notFound } from '../../core/errors.ts';
-import { SOURCE_FIELD, SOURCE_GROUP } from '../../core/fields.ts';
+import { ensureSourceBuiltin } from '../../core/fields.ts';
 import { nowIso } from '../../core/ids.ts';
 import * as att from '../../core/attachments.ts';
 import { mdImageIds, rewriteMdImages } from '../../core/mdimages.ts';
@@ -232,8 +232,8 @@ export async function ensureSourceFields({ 'dry-run': dryRun }: { 'dry-run'?: bo
     for (const id of added) {
       const sec = s.sections.find((x) => x.id === id);
       if (!sec) continue;
-      if (!sec.groups.some((g) => g.id === SOURCE_GROUP.id)) sec.groups.push({ ...SOURCE_GROUP });
-      if (!sec.fields.some((f) => f.key === SOURCE_FIELD.key)) sec.fields.push({ ...SOURCE_FIELD });
+      // 0.42：袋子是「组字段 + source 字段」两件套，规则只此一份（ensureSourceBuiltin）。
+      sec.fields = ensureSourceBuiltin(sec.fields as any, { kv: sec.kv }) as typeof sec.fields;
       sec.updatedAt = nowIso();
     }
   });

@@ -43,7 +43,9 @@ test('带 version 的 store.json：导入 + 改名留证，无数据迁移记录
   const files = await listDir(dir);
   assert.ok(!files.includes('store.json'), 'store.json 应从原位置挪走');
   assert.equal(hasImported(files).length, 1, `应留一份 imported 证据：${files.join(', ')}`);
-  assert.equal(migrationNote(), null, 'v3 数据没有形状迁移，不该出迁移记录');
+  // 0.42：v3 → v4 是「分组折成字段」的形状迁移，导入时必须留 from→to 记录
+  const note3 = migrationNote();
+  assert.ok(note3 && note3.from === 3 && note3.to === 4, 'v3 的分组形状要迁成组字段，并留迁移记录');
   assert.equal(corruptNote(), null);
 
   // 第二次读：走 DB，不再导入、不再多留证据
@@ -76,7 +78,7 @@ test('不带 version 的 store.json：按 v1 处理，过 normalize 迁移并留
   assert.equal(store.entries[0].values.value, 'sk-old');
 
   const note = migrationNote();
-  assert.ok(note && note.from === 1 && note.to === 3, '没有 version 就当 v1 迁：from→to 都要有');
+  assert.ok(note && note.from === 1 && note.to === 4, '没有 version 就当 v1 迁：from→to 都要有');
   const files = await listDir(dir);
   const ev = hasImported(files);
   assert.equal(ev.length, 1);

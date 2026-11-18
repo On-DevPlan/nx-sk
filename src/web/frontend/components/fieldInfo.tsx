@@ -45,7 +45,7 @@ export function FieldInfoModal({ entryId, def, value, sectionTitle, entryTitle, 
     ['显示名', def.label || def.key],
     ['字段 key', def.key],
     ['类型', def.type],
-    ['分组', def.group || '—'],
+    ['分组', (def as { group?: string }).group || '—'],
     ['来源', origin],
     ['填写策略', def.fillLabel || def.fill || 'normal'],
   ];

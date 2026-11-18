@@ -17,6 +17,7 @@ import { isDetachedField } from './store-shape.ts';
 // 版式（块布局）的对齐规则也只有一份：读出去之前先按当前字段自愈一遍，
 // 面板与 CLI 才看到同一份「现在实际怎么摆」。
 import { groupsForLayout, reconcileLayout } from '../shared/blockLayout.ts';
+import { boardGroupsOf, isGroupDef, structureOf } from '../shared/fields/structure.ts';
 export { isBlank, isStoredEmpty } from './values.ts';
 export { displaySensitive } from './sensitive.ts';
 
@@ -56,7 +57,7 @@ export interface SectionLike {
   kv: boolean;
   titleField: string | null;
   titleLabel: string;
-  groups: unknown;
+  // 0.42：分组不是栏目级字段——组是 `fields` 里 type='group' 的一条（keys 引用成员）。
   layout?: unknown;
   fields: ReadField[];
 }
@@ -128,9 +129,23 @@ export function serializeEntry(
   // defs 带上出身标记（template），面板的移除入口据此区分「脱离」与「硬删」文案。
   const liveRows = ownRows ? ownRows.filter((r) => !isDetachedField(r)) : null;
   const detachedRows = ownRows ? ownRows.filter((r) => isDetachedField(r)) : [];
-  const defs: ReadField[] = liveRows
+  const rawDefs: ReadField[] = liveRows
     ? liveRows.map((r) => ({ ...(r.spec as unknown as ReadField), template: r.templateFieldId != null }))
     : section.fields;
+  // 归属（`group`）是**推导**出来的：组=字段之后，结构只住在组字段的 keys 里，
+  // 但笔者的读侧（面板块、`entry get`）一直要「这条字段属于哪组」。字典里找不到的
+  // 扩展字段按不变量归根组——与 normalizeStructure 的孤儿处理同一口径。
+  const view = structureOf(section.fields as unknown as FieldDef[]);
+  const fallbackGroup = view.roots[0];
+  // 组字段（type='group'）只是容器：它没有值，也不该作为「一行字段」出现在表单/读侧。
+  // 组标题由 `groups`（boardGroupsOf）下发、面板按块渲染；这里滤掉组行，否则每个块里
+  // 会多出一行指向自己的组标题，`entry get` 也会打印一条没有值的字段。
+  const defs: ReadField[] = rawDefs
+    .filter((d) => !isGroupDef(d as unknown as FieldDef))
+    .map((d) => ({
+      ...d,
+      group: view.parentOf.get(String(d.key)) || fallbackGroup,
+    }) as ReadField);
   const c = completeness(section, entry, liveRows);
   const values: Record<string, unknown> = {};
   for (const def of defs) {
@@ -199,8 +214,10 @@ export function completeness(
   const fields: ReadField[] = ownRows
     ? ownRows.filter((r) => r.templateFieldId != null && !isDetachedField(r)).map((r) => r.spec as unknown as ReadField)
     : section?.fields || [];
-  const counted = fields.filter((d) => !isExcludedField(d));
-  const excluded = fields.filter((d) => isExcludedField(d));
+  // 组字段是**容器**不是值：它没有可填的内容，不能进分母（否则一个空组能凭空把完成度拉低）。
+  const valued = fields.filter((d) => !isGroupDef(d) && d.type !== 'group');
+  const counted = valued.filter((d) => !isExcludedField(d));
+  const excluded = valued.filter((d) => isExcludedField(d));
   const missing: ReadField[] = [];
   let filled = 0;
   for (const def of counted) {
@@ -225,6 +242,7 @@ export function dumpSection(
   { mask = false, decrypt, structures }: { mask?: boolean; decrypt?: (blob: unknown) => string; structures?: Map<string, EntryFieldView[]> } = {},
 ) {
   const mine = entries.filter((e) => e.section === section.id);
+  const parentOf = structureOf(section.fields as any).parentOf;
   return {
     section: {
       id: section.id,
@@ -237,7 +255,8 @@ export function dumpSection(
       titleLabel: section.titleLabel,
       fields: section.fields.length,
     },
-    groups: section.groups,
+    // 分组清单由字段推导（组=字段）：对外仍给 {id,title}，CLI/面板的读法不变。
+    groups: boardGroupsOf(section.fields as any).map((g) => ({ id: g.id, title: String(g.title) })),
     // 正文版式：分组面板的顺序、每块的位置/宽度/高度（按断点）。字段增删后在这里
     // 对齐一次，所以读到的永远能直接渲染——不会出现「引用了已删字段的空块」。
     layout: reconcileLayout(section.layout, groupsForLayout(section)),
@@ -245,7 +264,9 @@ export function dumpSection(
       key: x.key,
       label: x.label,
       type: x.type,
-      group: x.group,
+      // 归属是推导出来的（组字段的 keys 决定谁在哪组），字段定义里不再有 group 键。
+      group: parentOf.get(x.key) || undefined,
+      keys: Array.isArray((x as { keys?: unknown }).keys) ? ((x as { keys?: string[] }).keys as string[]) : undefined,
       hint: x.hint || '',
       options: x.options || null,
       // 结构清单的列（子字段）必须跟着字典出去，否则面板渲染不出列、agent 不知道行里该有什么键

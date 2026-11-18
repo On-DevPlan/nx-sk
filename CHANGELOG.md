@@ -2,6 +2,51 @@
 
 本文件格式参考 [Keep a Changelog](https://keepachangelog.com/)，中文正文。
 
+## [未发布] 0.42（任务 #36）
+
+**「组」从栏目级结构变成一种字段类型：底层只有 field。**
+
+### Changed
+
+- **模型**：`section.groups[]` 与 `field.group` 一起退役。组是 `type: 'group'` 的字段，
+  用 `keys` 引用同栏目其他字段（组成员还能是另一个组字段 → 支持嵌套）。
+  面板/CLI 的「分组」措辞与操作名（`add-group` / `rename-group` / `move-group` /
+  `remove-group`、`--group`）**全部保留**，只是底层落成一条字段。
+- **唯一实现** `src/shared/fields/structure.ts`（零依赖、前后端共用）：
+  `isGroupDef` / `groupKeysOf` / `structureOf` / `groupOfField` / `normalizeStructure` /
+  `boardGroupsOf` / `freeGroupKey`。归一化的五步不变量（key 去重 → 成员必须存在且非自己 →
+  每字段至多一个父、断环 → 孤儿归根组 → `keys` 按父关系写回）读路径与写路径共用一份。
+- **模板**：作者态仍是 `groups[] + f(...group)`（写手友好），落到存储时由
+  `templateFieldDefs()` 折成组字段 + 普通字段；KV 模板不生成组（它是一张表）。
+  组 key 与成员字段 key 撞名时自动改名（`source` → `sourceGroup`，`education` → `educationGroup`），
+  否则同 key 空间会丢掉成员字段。
+- **写入**：`section update` 的全部结构操作改走 `src/modules/sections/structure.ts`
+  的纯函数算子；「只给 `groups`」= 按 key 对齐改名重排，「只给 `fields`」= 按成员归属重建组。
+- **读出口**：`section get` 的 `fieldList`、`section dump`、`entry get` 的 `entryFields`
+  都在原样字段上**补一个派生的 `group`**（归属组 key）与组字段自己的 `keys`；
+  `groupList` 仍下发 `{id,title}`，agent 与面板的读法不变。
+- **版式**：`groupsForLayout()` 只从 `section.fields` 推导，面板块的分组语义不变。
+
+### DB（schema v5 → v6，一次迁移，无运行时兼容）
+
+- 新增 `v6.sql` + `v6-apply.ts`：捕获 groups / fields / entry_fields / field_data / entry_attach →
+  每组折成组字段行（撞 key 加 `Group` 后缀，孤儿归 `root`）→ 重建 fields（组行在前、叶子按原 sort）→
+  重建 entry_fields（存量行 spec 去 `group`，每条再补组行）→ 换表重建索引 → `DROP TABLE groups`。
+- 迁移前自动整库快照（`~/nx-sk/migrate/<时间>-pre-v5-to-v6.db`）。
+- `STORE_VERSION` 4（JSON 侧）：`store.json` 里旧形状的分组在**首启导入那一次**折成组字段，
+  之后的读写只认新形状。
+
+### Fixed
+
+- 完整度不再把组字段计入分母（容器没有可填的值）。
+- `validateFieldDef` 的早退（一次重构误加 `return`）修掉——它会让类型专属校验整段失效。
+
+### 验证
+
+- lint 0 error · typecheck 通过 · unit **472/472** · build 成功 · smoke **142/142**
+- 真实库（13 栏目 / 57 条目）跑通 5→6：`groups` 表已删、各栏目组与字段一一对上，
+  `section get` 的分组渲染与迁移前一致
+
 ## [0.41.0] - 2026-11-14
 
 **任务 #33（#28 的验收反馈）：侧栏「＋」对齐到栏目行最右边。**

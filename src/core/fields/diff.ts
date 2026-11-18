@@ -1,41 +1,22 @@
-// 栏目结构对比与合并：分组补全、字段漂移、模板增量合并。
+// 栏目结构对比与合并：分组推导、字段漂移、模板增量合并。
+//
+// 0.42 起「分组」不再是一份数组：组是 type='group' 的字段（shared/fields/structure.ts）。
+// 所以这里不再有 syncSectionGroups——字段引用与组声明本来就是同一份数据，不会分叉。
 
 import type { FieldDef } from '../../shared/fields/types.ts';
-import type { StoreSection, SectionGroup } from '../store.ts';
+import { boardGroupsOf, groupKeysOf, isGroupDef, structureOf } from '../../shared/fields/structure.ts';
+import type { StoreSection } from '../store.ts';
 import type { FieldTemplateDef } from './templates.ts';
+import { templateFieldDefs } from './templates.ts';
 
-/** 由「字段定义 + 值」推导栏目的分组结构，供 render/面板用。 */
-export function groupFields(fields: Array<{ group?: string }> | null | undefined) {
-  const order: string[] = [];
-  const map = new Map<string, unknown[]>();
-  for (const x of fields || []) {
-    const g = x.group || 'other';
-    if (!map.has(g)) { map.set(g, []); order.push(g); }
-    map.get(g)!.push(x);
-  }
-  return order.map((id) => ({ id, fields: map.get(id) }));
+/** 由字段字典推导面板分组（顶层组 + 直接成员），供 render/面板用。 */
+export function groupFields(fields: readonly FieldDef[] | null | undefined) {
+  return boardGroupsOf(fields || []).map((g) => ({ id: g.id, title: g.title, fields: g.fields }));
 }
 
-/**
- * 分组声明的**唯一补全规则**：字段引用了未声明的分组 → 追加 `{ id, title: id }`。
- *
- * 背景（servers 栏目事故）：CLI 的分组渲染从字段**推导**（groupFields），
- * 面板却读**声明数组**（section.groups）——`--fields` 引用了 `--groups`
- * 没声明的分组时，两端分叉，面板整个字段表单消失而 CLI 看起来一切正常。
- * 所以「分组声明 ⊇ 字段引用」必须是不变量，在 normalize（读写唯一收口）
- * 和 section add 的草稿上调用同一个函数，规则就不可能有第二份。
- */
-export function syncSectionGroups<G extends { id: string; title: string }, F extends { key: string; group?: string }>(
-  groups: G[] | null | undefined,
-  fields: F[] | null | undefined,
-): Array<G | { id: string; title: string }> {
-  const out: Array<G | { id: string; title: string }> = [...(groups || [])];
-  const declared = new Set(out.map((g) => g.id));
-  for (const f of fields || []) {
-    const gid = f.group || 'other';
-    if (!declared.has(gid)) { declared.add(gid); out.push({ id: gid, title: gid }); }
-  }
-  return out;
+/** 字段所属组的 key（不在任何组里 = undefined）；面板/CLI 显示成员归属用。 */
+export function groupKeyOf(fields: readonly FieldDef[] | null | undefined, key: string): string | undefined {
+  return structureOf(fields || []).parentOf.get(key);
 }
 
 /**
@@ -48,14 +29,15 @@ export function syncSectionGroups<G extends { id: string; title: string }, F ext
 // entrylist 的子字段也要参与漂移对比：清单列是结构的一部分，模板把「密码」列标了
 // sensitive 而栏目里没有，这种差异必须报出来——否则密文边界在两份定义间悄悄分叉。
 // table 的列与统计行同理：列类型（勾选/下拉/数字）和公式改了，值的样子就变了。
-const FIELD_CMP_KEYS = ['label', 'type', 'group', 'hint', 'options', 'maxItems', 'sensitive', 'fill', 'fields', 'columns', 'totals'];
+// 0.42：`group` 换成了组字段的 `keys`——组也是字段，成员的增删同样是结构漂移。
+const FIELD_CMP_KEYS = ['label', 'type', 'keys', 'hint', 'options', 'maxItems', 'sensitive', 'fill', 'fields', 'columns', 'totals'];
 
 /** 字段比较用的读取侧形状（只声明参与漂移对比的键）。 */
 interface LooseField {
   key?: unknown;
   label?: unknown;
   type?: unknown;
-  group?: unknown;
+  keys?: unknown;
   hint?: unknown;
   options?: unknown;
   maxItems?: unknown;
@@ -75,7 +57,7 @@ function normalizedFieldDef(f: LooseField | null | undefined): Record<string, un
   return {
     label: String(f?.label ?? f?.key ?? ''),
     type: f?.type || 'text',
-    group: f?.group || 'other',
+    keys: Array.isArray(f?.keys) ? f.keys.map(String) : [],
     hint: f?.hint ? String(f.hint) : '',
     options: Array.isArray(options) ? options.map(String) : [],
     maxItems: Number.isFinite(maxItems) ? maxItems : null,
@@ -103,63 +85,74 @@ export function fieldDrift(sectionField: LooseField | null | undefined, template
 }
 
 /**
- * 模板增量合并：把模板里**尚未出现在栏目**的分组与字段补进去（只增，绝不改/删）。
+ * 模板增量合并：把模板里**尚未出现在栏目**的字段（含组字段）补进去（只增，绝不改/删）。
  *
  * 为什么需要它：栏目实例化时字段字典是**深拷贝**（见 instantiateTemplate），
  * 从此「栏目自己的字段集独立演化」。于是模板后续新增的字段（例如给求职加
- * 「附件资料」组的 4 个 `file` 字段）**不会回溯**到已经存在的栏目——
+ * 「附件资料」组里的 4 个 `file` 字段）**不会回溯**到已经存在的栏目——
  * 面板按栏目自己的字典渲染，老栏目里就永远看不到上传入口。
  *
  * 合并规则（尽量少动用户数据）：
- *   - 分组：按模板顺序排列；栏目已有的分组**沿用栏目自己的定义**（标题可能被改过），
- *     模板没有的自定义分组原顺序附在后面。
- *   - 字段：栏目已有的字段原样保留（含用户改过的 label/hint/fill）；缺的模板字段
- *     插到「模板顺序里它前一个字段」之后，未在模板中的自定义字段保持原位。
+ *   - 字段：栏目已有的字段原样保留（含用户改过的 label/hint/fill/key 顺序）；
+ *     缺的模板字段插到「模板顺序里它前一个字段」之后，未在模板中的自定义字段保持原位。
+ *   - 组：模板新增的组成员要**并进**栏目里同名组字段的 keys（否则新字段会变成孤儿）；
+ *     模板新增的组本身也按模板顺序补一条组字段。
+ *   - 「原始资料」袋不在模板里（由 ensureSourceBuiltin 收口），合并时不碰。
  *
  * 另外回传 `changedFields`：**同名字段定义已分叉**的清单（只报告，绝不自动改）。
  * 光有「只增不改」的话，模板改了默认 label/hint 是**完全无声**的 ——
  * 用户会以为「同步过了 = 跟模板一致」，实际不一致。把差异摆出来，改不改由人定。
  */
 export function mergeTemplate(section: StoreSection | null | undefined, template: FieldTemplateDef | null | undefined) {
-  const existingGroups: SectionGroup[] = section?.groups || [];
   const existingFields: FieldDef[] = section?.fields || [];
-  const groupById = new Map(existingGroups.map((g) => [g.id, g] as const));
-  const fieldKeys = new Set(existingFields.map((f) => f.key));
-  const fieldByKeyMap = new Map(existingFields.map((f) => [f.key, f] as const));
+  if (!template) return { fields: existingFields, addedGroups: [], addedFields: [], changedFields: [] };
+  const tplFields = templateFieldDefs(template);
+  const existingByKey = new Map(existingFields.map((f) => [f.key, f] as const));
+  const tplOrder = new Map(tplFields.map((f, i) => [f.key, i] as const));
 
-  const groups: SectionGroup[] = [];
-  const seenGroup = new Set<string>();
-  for (const g of template?.groups || []) {
-    groups.push(groupById.get(g.id) || { ...g });
-    seenGroup.add(g.id);
-  }
-  for (const g of existingGroups) if (!seenGroup.has(g.id)) groups.push(g);
-  const addedGroups = (template?.groups || []).filter((g) => !existingGroups.some((x) => x.id === g.id)).map((g) => g.id);
-
-  const tplOrder = new Map((template?.fields || []).map((f, i) => [f.key, i] as const));
-  const fields = [...existingFields];
+  // 1. 字段增量（组字段也走同一条：先当字段插进去，下面再决定 keys）
+  const fields: FieldDef[] = [...existingFields];
   const addedFields: string[] = [];
+  const addedGroups: string[] = [];
   const changedFields: Array<{ key: string; diff: string[] }> = [];
-  for (const tf of template?.fields || []) {
-    if (fieldKeys.has(tf.key)) {
-      // 同名 = 定义归栏目；只算差异用于提示
-      const diff = fieldDrift(fieldByKeyMap.get(tf.key), tf);
-      if (diff.length) changedFields.push({ key: tf.key, diff });
+  for (const tf of tplFields) {
+    const hit = existingByKey.get(tf.key);
+    if (hit) {
+      if (!isGroupDef(tf)) {
+        const diff = fieldDrift(hit, tf);
+        if (diff.length) changedFields.push({ key: tf.key, diff });
+      }
       continue;
     }
-    // 插到第一个「模板序更靠后」的既有字段之前；找不到就追加到末尾
     const ti = tplOrder.get(tf.key) as number;
     let insertAt = fields.length;
     for (let i = 0; i < fields.length; i += 1) {
       const oi = tplOrder.get(fields[i].key);
       if (oi !== undefined && oi > ti) { insertAt = i; break; }
     }
-    fields.splice(insertAt, 0, { ...tf });
-    fieldKeys.add(tf.key);
+    fields.splice(insertAt, 0, { ...tf } as FieldDef);
+    existingByKey.set(tf.key, tf as FieldDef);
     addedFields.push(tf.key);
+    if (isGroupDef(tf)) addedGroups.push(tf.key);
   }
 
-  return { groups, fields, addedGroups, addedFields, changedFields };
+  // 2. 组成员的增量：模板的组成员并入栏目同名组（组标题、顺序都沿用栏目自己的）
+  const tplGroups = new Map(tplFields.filter(isGroupDef).map((g) => [String(g.key), groupKeysOf(g)] as const));
+  for (let i = 0; i < fields.length; i += 1) {
+    const f = fields[i];
+    if (!isGroupDef(f)) continue;
+    const tplKeys = tplGroups.get(String(f.key));
+    if (!tplKeys) continue;
+    const keys = groupKeysOf(f);
+    // 模板里的成员按**模板顺序**排（新字段要落在它模板序的位置上），
+    // 栏目自己的额外成员留在后面——只增不改，但不打乱模板给的次序。
+    const merged: string[] = [];
+    for (const k of tplKeys) if (existingByKey.has(k) && !merged.includes(k)) merged.push(k);
+    for (const k of keys) if (!merged.includes(k)) merged.push(k);
+    fields[i] = { ...f, keys: merged } as FieldDef;
+  }
+
+  return { fields, addedGroups, addedFields, changedFields };
 }
 
 export function fieldByKey(section: Pick<StoreSection, 'fields'> | null | undefined, key: unknown): FieldDef | null {

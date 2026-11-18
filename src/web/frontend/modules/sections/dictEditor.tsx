@@ -16,7 +16,7 @@ import { useStore } from '../../store.tsx';
 import { Tag } from '../../components/ui.tsx';
 import { reorderAt, useListDrag } from '../../components/listDrag.tsx';
 import type { FieldDef, FieldType, SubFieldDef, TableColumnDef } from '../../../../shared/fields/types.ts';
-import type { SectionFull } from './view.tsx';
+import type { FieldRow, SectionFull } from './view.tsx';
 
 /** 列编辑行（entrylist 的字段列 / table 的表格列，面板侧用字符串维护 options）。 */
 interface ColRow {
@@ -187,7 +187,7 @@ export default function DictEditor({ sectionId, initial, types, labels, builtin,
     try { e.dataTransfer.setData('text/plain', key); } catch { /* 个别环境不给 setData */ }
     setDragKey(key);
   }, []);
-  const rowOver = useCallback((e: ReactDragEvent<HTMLElement>, f: FieldDef) => {
+  const rowOver = useCallback((e: ReactDragEvent<HTMLElement>, f: FieldRow) => {
     if (!dragKey || dragKey === f.key) return;
     e.preventDefault();
     e.stopPropagation(); // 别让冒泡把面板空白区的落点盖上来
@@ -226,11 +226,11 @@ export default function DictEditor({ sectionId, initial, types, labels, builtin,
     const next = [...rest];
     next.splice(idx, 0, { ...moved, group: t.group });
     // 只比较「顺序 + 归属」签名：原地放回不写库
-    const sig = (a: FieldDef[]) => a.map((f) => `${f.key}@${f.group || 'other'}`).join('|');
+    const sig = (a: FieldRow[]) => a.map((f) => `${f.key}@${f.group || 'other'}`).join('|');
     if (sig(next) === sig(fields)) return;
     void patch({ fields: next });
   }, [dragKey, drop, fields, endField, patch]);
-  const rowCls = (f: FieldDef) => `drow${dragKey === f.key ? ' dragging' : ''}${
+  const rowCls = (f: FieldRow) => `drow${dragKey === f.key ? ' dragging' : ''}${
     dragKey && drop && drop.key === f.key ? (drop.after ? ' drop-after' : ' drop-before') : ''}`;
   const bodyCls = (gid: string) => `dgrp-body${dragKey && drop && drop.key === null && drop.group === gid ? ' drop-into' : ''}`;
 

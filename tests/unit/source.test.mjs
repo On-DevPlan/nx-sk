@@ -24,7 +24,9 @@ test('每个模板实例化后都自带「原始资料」袋（KV 表除外）',
     assert.ok(src, `${id} 应有 source 字段`);
     assert.equal(src.key, 'source');
     assert.equal(src.fill, 'optional', '暂存区不该计入完整度');
-    assert.ok(inst.groups.some((g) => g.id === 'source'), `${id} 应有 source 分组`);
+    const srcGroup = inst.fields.find((f) => f.type === 'group' && String(f.key) === 'sourceGroup');
+    assert.ok(srcGroup, `${id} 应有「原始资料」组字段`);
+    assert.deepEqual(srcGroup.keys, ['source'], '袋子组成员就是 source');
   }
   // KV 栏目是「一行一个键值对」，加字段就散了
   const kv = instantiateTemplate('secret', { id: 'k' });
@@ -104,7 +106,7 @@ test('自定义栏目（带 --fields/--groups）也自带 source 袋；source en
   assert.ok(src, '自定义栏目自带 source 字段（--fields 不会把袋冲掉）');
   assert.equal(src.key, 'source');
   assert.equal(src.fill, 'optional');
-  assert.ok(got.groupList.some((g) => g.id === 'source'), '分组也自带');
+  assert.ok(got.groupList.some((g) => g.id === 'sourceGroup'), '分组也自带');
 
   // ensure：都已自带，幂等（added 为空，cus 记为已有）
   const r = await entries.ensureSourceFields();
@@ -204,13 +206,13 @@ test('存量栏目缺 source 时 normalize 读一次即自愈（KV 表不加）'
   const db = openRaw(dbFile());
   try {
     db.run("DELETE FROM fields WHERE section_id = 'oldsec' AND key = 'source'");
-    db.run("DELETE FROM groups WHERE section_id = 'oldsec' AND id = 'source'");
+    db.run("DELETE FROM fields WHERE section_id = 'oldsec' AND type = 'group' AND key = 'sourceGroup'");
   } finally { db.close(); }
 
   const store = await sections.listSections();
   const sec = store.sections.find((s) => s.id === 'oldsec');
-  assert.equal(sec.fields, 2, '归一后自带 source 字段');
-  assert.equal(sec.groups, 2, '归一后自带 source 分组');
+  assert.equal(sec.fields, 4, '归一后自带 source 字段（main 组 + a + 原始资料组 + source）');
+  assert.equal(sec.groups, 2, '归一后自带「原始资料」组');
 });
 
 

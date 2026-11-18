@@ -1,6 +1,7 @@
 // 栏目（section）的 CLI 人读渲染：只把 service 的读侧结果排成文本，不碰存储。
 import { groupFields } from '../../core/fields.ts';
 import { formatValue } from '../../core/render.ts';
+import type { FieldDef } from '../../shared/fields/types.ts';
 // 只借返回类型（Parameters/ReturnType 的读侧形状），类型导入在运行时被擦除，
 // 因此与 service.ts 之间不构成运行时循环。
 import type { dump, getSection, listSections, listTemplates, tree } from './service.ts';
@@ -29,7 +30,7 @@ export function renderSectionGet(d: Awaited<ReturnType<typeof getSection>>) {
     `字段:   ${d.fields} 个 / ${d.groups} 组 · 条目 ${d.entries} 条`,
     `名称字段: ${d.titleField || '（未设）'}`,
   ];
-  for (const g of groupFields(d.fieldList)) {
+  for (const g of groupFields(d.fieldList as unknown as FieldDef[])) {
     const gtitle = d.groupList.find((x) => x.id === g.id)?.title || g.id;
     lines.push('', `${gtitle}（${g.id}）`);
     for (const x of ((g.fields || []) as Array<{ key: string; label: string; sensitive?: boolean; hint?: string }>)) {

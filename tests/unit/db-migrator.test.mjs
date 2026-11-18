@@ -12,16 +12,16 @@ const { planMigrationPath, DIRECT_EDGES } = await import('../../src/core/db/migr
 const { CURRENT_SCHEMA_VERSION } = await import('../../src/core/db/version.ts');
 const { tx } = await import('../../src/core/db/tx.ts');
 
-test('空库 → 当前版本：建齐表并走完 v1…v5，版本写进 meta.schema_version 与 PRAGMA user_version', () => {
+test('空库 → 当前版本：建齐表并走完 v1…v6，版本写进 meta.schema_version 与 PRAGMA user_version', () => {
   const db = openRaw(':memory:');
   assert.equal(countTables(db), 0);
   const applied = migrate(db, { from: 0 });
-  assert.deepEqual(applied, [1, 2, 3, 4, 5]);
+  assert.deepEqual(applied, [1, 2, 3, 4, 5, 6]);
   assert.equal(schemaVersion(db), CURRENT_SCHEMA_VERSION);
   assert.equal(userVersion(db), CURRENT_SCHEMA_VERSION);
   assert.equal(getMeta(db, 'schema_version'), String(CURRENT_SCHEMA_VERSION));
   const names = db.all("SELECT name FROM sqlite_master WHERE type = 'table'").map((r) => r.name);
-  for (const t of ['meta', 'settings', 'ui_state', 'sections', 'groups', 'fields', 'entries',
+  for (const t of ['meta', 'settings', 'ui_state', 'sections', 'fields', 'entries',
     'attachments', 'entry_fields', 'field_data', 'entry_attach', 'field_history']) {
     assert.ok(names.includes(t), `缺表 ${t}`);
   }
@@ -29,6 +29,8 @@ test('空库 → 当前版本：建齐表并走完 v1…v5，版本写进 meta.s
   for (const gone of ['section_attach', 'field_attach']) {
     assert.ok(!names.includes(gone), `${gone} 应已被 v2 删除`);
   }
+  // v6 裁决：groups 表退役（分组就是字段）
+  assert.ok(!names.includes('groups'), 'groups 表应已被 v6 删除');
   // v3 裁决：values 列退役（entries 不再带它），边表挂 entry_field_id（不再有 field_key）
   const entryCols = db.all("SELECT name FROM pragma_table_info('entries')").map((r) => r.name);
   assert.ok(!entryCols.includes('values'), 'v3 的 entries 不该再有 values 列');
@@ -53,7 +55,7 @@ test('migrate 幂等：已到当前版本的库重跑等于空转', () => {
   migrate(db, { from: 0 });
   assert.deepEqual(migrate(db), [], '第二次不该再执行任何步骤');
   assert.equal(schemaVersion(db), CURRENT_SCHEMA_VERSION);
-  assert.equal(countTables(db), 12);
+  assert.equal(countTables(db), 11);
   db.close();
 });
 

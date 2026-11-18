@@ -4,7 +4,7 @@ import { newId } from '../ids.ts';
 import type { StoreSection, StoreEntry } from '../store.ts';
 import { DEMO_TPL, instantiateTemplate } from './templates.ts';
 
-export { SOURCE_FIELD, SOURCE_GROUP, ensureSourceBuiltin } from './source-bag.ts';
+export { SOURCE_FIELD, SOURCE_GROUP, SOURCE_GROUP_KEY, ensureSourceBuiltin } from './source-bag.ts';
 
 /**
  * 首次运行（store 文件不存在）时播种的东西：**只有一个**「字段样例」栏目。

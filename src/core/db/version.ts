@@ -21,8 +21,11 @@
  * v5（2026-11-12）：字段值历史——新增 field_history（entry_field_id + 单调 rev + 值快照 +
  * op/source/at）。不建外键（全量重写会 CASCADE 清空，见 v5.sql 注释），
  * 由 writeStore 在重建后清理真正消失字段的历史；写入侧做 diff，只记真实变化。
+ * v6（2026-11-18，0.42）：分组变成字段——删 groups 表、fields 去 group_id；
+ * 每个分组折成 fields 里 type='group' 的一行（spec 的 keys 引用同栏目其他字段），
+ * 条目结构行也补上组行。底层只剩 field 一种结构（见 migrations/v6-apply.ts）。
  */
-export const CURRENT_SCHEMA_VERSION = 5;
+export const CURRENT_SCHEMA_VERSION = 6;
 
 /**
  * 运行时最低 Node 版本。

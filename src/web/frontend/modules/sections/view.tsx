@@ -42,6 +42,14 @@ interface TemplateRow {
   fields: number;
 }
 
+/**
+ * 字段的**读侧形状**：服务端在字典原样之外补了两个派生键——
+ *   · `group`：它属于哪个组（组字段的 keys 决定，见 shared/fields/structure.ts）；
+ *   · `keys`：组字段自己的成员清单。
+ * 面板据此渲染分组与拖拽落点，不需要自己再推一遍结构。
+ */
+export type FieldRow = FieldDef & { group?: string; keys?: string[] };
+
 /** `/api/sections/:id` 的栏目全量（属性编辑器的数据源）。 */
 export interface SectionFull {
   id: string;
@@ -53,7 +61,7 @@ export interface SectionFull {
   template?: string | null;
   kv?: boolean;
   groupList?: Array<{ id: string; title: string }>;
-  fieldList?: FieldDef[];
+  fieldList?: FieldRow[];
 }
 
 interface CreateFormData {

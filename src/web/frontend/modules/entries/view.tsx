@@ -170,7 +170,11 @@ export default function SectionView({ sectionId: rawId, listHidden = false, side
     // v3：块渲染跟随**条目自身的字段行**（含条目内添加的扩展字段）；
     // 没有行数据（旧数据/兜底）才回退栏目字典。
     const defs = current?.entryFields?.length ? current.entryFields : data.fields;
-    return data.groups.map((g) => ({ ...g, fields: defs.filter((f) => f.group === g.id) })).filter((g) => g.fields.length);
+    // 归属是服务端推导好的（`group` 指向组字段的 key）；组字段自己作为块出现时
+    // 就是一条小标题（GroupControl），不经这里分组。
+    return data.groups
+      .map((g) => ({ ...g, fields: defs.filter((f) => (f as { group?: string }).group === g.id) }))
+      .filter((g) => g.fields.length);
   }, [data, current]);
 
   // —— 正文版式（块布局）——

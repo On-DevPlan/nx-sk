@@ -12,6 +12,7 @@
 export const FIELD_TYPES = [
   'text', 'textarea', 'number', 'date', 'month', 'bool', 'select', 'tags',
   'entrylist', 'table', 'source', 'secret', 'file', 'md', 'shortcut', 'debug',
+  'group',
 ] as const;
 
 export type FieldType = (typeof FIELD_TYPES)[number];
@@ -39,6 +40,7 @@ export const FIELD_TYPE_LABELS: Record<FieldType, string> = {
   file: '附件',
   md: '图文（可贴图）',
   debug: '资源引用（可检索）',
+  group: '分组（容器，引用其他字段）',
 };
 
 export type FillPolicy = 'normal' | 'optional' | 'avoid';
@@ -140,7 +142,9 @@ interface FieldDefBase {
   key: string;
   label: string;
   type: FieldType;
-  group: string;
+  // 0.42：字段不再带 `group`——「组」本身就是一个字段（type='group'），
+  // 通过 GroupFieldDef.keys 引用同栏目里的其他字段。层级这条信息只住在字段之间，
+  // 不再有「栏目上的 groups 数组」这第二份结构（见 shared/fields/structure.ts）。
   hint?: string;
   sensitive?: boolean;
   fill?: FillPolicy;
@@ -192,7 +196,21 @@ export interface RefDoc {
   warnings?: string[];
 }
 
-export type FieldDef = ScalarFieldDef | EntryListFieldDef | TableFieldDef | DebugFieldDef;
+/**
+ * group（分组容器）：值没有意义（`{}`/空），它引用**同栏目里的其他字段 key**。
+ *
+ * 设计取舍：成员本身仍然是一条独立的字段（值按 key 存、可以单独参与完整度/序列化），
+ * 组只是「这条字段属于哪一块面板、跟谁排在一起」的声明——所以底层只有 field 这一种结构，
+ * 层级是字段之间的引用关系，不是栏目上的第二份数组。
+ * `keys` 可嵌套（组里再放组）；每个非 group 字段**必须**恰好归属一个组，
+ * 由 `normalizeStructure()` 在归一化里收口（见 shared/fields/structure.ts）。
+ */
+export interface GroupFieldDef extends FieldDefBase {
+  type: 'group';
+  keys: string[];
+}
+
+export type FieldDef = ScalarFieldDef | EntryListFieldDef | TableFieldDef | DebugFieldDef | GroupFieldDef;
 
 /** 字段值的宽松联合：历史数据与导入包可能带各种形态，读取侧必须照单全收。 */
 export type FieldValue =

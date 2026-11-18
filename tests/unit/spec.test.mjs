@@ -5,7 +5,7 @@ import { useTempHome } from '../helpers.mjs';
 await useTempHome();
 
 const { applySpec, argSpecsOf, cliPathsOf, compileRoute, compareRoutes, flagSpecsOf, usageOf } = await import('../../src/runtime/spec.ts');
-const { loadStore, migrationNote, normalize } = await import('../../src/core/store.ts');
+const { loadStore, migrationNote, normalize, STORE_VERSION } = await import('../../src/core/store.ts');
 const { FIELD_TYPES, seedEntries, seedSections } = await import('../../src/core/fields.ts');
 const { computeTable } = await import('../../src/shared/table.ts');
 
@@ -168,7 +168,7 @@ test('v1 → v3 迁移：密钥栏目缩成 KV 表，旧值不删，且留迁移
 
   const migrated = await loadStore();
   const sec = migrated.sections.find((x) => x.id === 'secret');
-  assert.equal(migrated.version, 3, '迁移后版本号必须落到当前版本，否则每次读都会重跑');
+  assert.equal(migrated.version, STORE_VERSION, '迁移后版本号必须落到当前版本，否则每次读都会重跑');
   assert.deepEqual(sec.fields.map((f) => f.key), ['value'], '字典缩成单字段 KV');
   assert.equal(sec.kv, true, 'v3：栏目标上 kv 标记（面板据此渲染表格）');
   assert.equal(sec.titleField, null);
@@ -177,7 +177,7 @@ test('v1 → v3 迁移：密钥栏目缩成 KV 表，旧值不删，且留迁移
   assert.equal(migrated.entries[0].values.provider, 'OpenAI');
 
   const note = migrationNote();
-  assert.ok(note && note.from === 1 && note.to === 3, '迁移要留可展示的记录（from → to 都要有）');
+  assert.ok(note && note.from === 1 && note.to === STORE_VERSION, '迁移要留可展示的记录（from → to 都要有）');
   const snap = await fsp.readFile(note.snapshotRaw, 'utf8');
   assert.equal(JSON.parse(snap).version, 1, '留证文件必须是**迁移前**的原始文件，否则退回也没用');
 
@@ -196,7 +196,7 @@ test('v1 → v3 迁移：密钥栏目缩成 KV 表，旧值不删，且留迁移
 test('没有栏目可迁时不会瞎迁，版本号照常落到当前', () => {
   const s = normalize({ version: 2, settings: {}, sections: [], entries: [] });
   assert.equal(s._migration, undefined);
-  assert.equal(s.version, 3);
+  assert.equal(s.version, STORE_VERSION);
 });
 
 test('v2 → v3：误当字段用的键值搬进值列，多余字段收掉，旧键不删', () => {

@@ -53,7 +53,7 @@ export async function bootstrapInfo() {
     fieldTypeLabels: FIELD_TYPE_LABELS,
     // 每个非 KV 栏目自带的「原始资料」分组与字段：面板要在结构上把它们标成**不可删**
     // （删了下回读又会被补回来，等于删了个寂寞）。常量在 core/fields.js，这里只做下发。
-    builtin: { group: SOURCE_GROUP.id, field: SOURCE_FIELD.key },
+    builtin: { group: SOURCE_GROUP.key, field: SOURCE_FIELD.key },
     corrupt: corruptNote(),
     migration: migrationNote(),
     commands,

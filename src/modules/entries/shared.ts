@@ -6,6 +6,7 @@ import { behaviorOf } from '../../core/fields/registry.ts';
 import { sealOf } from '../../core/fields/seal/index.ts';
 import { sealScalar } from '../../core/fields/seal/common.ts';
 import type { FieldDef } from '../../shared/fields/types.ts';
+import { isGroupDef } from '../../shared/fields/structure.ts';
 
 export function mustFindSection(store: Store, ref: unknown): StoreSection {  const s = findSection(store, ref);
   if (!s) throw notFound(`找不到栏目: ${ref} —— 现有: ${sectionNames(store)}`);
@@ -94,8 +95,10 @@ export function inferExtensionField(section: StoreSection, rawKey: unknown, rawV
     key,
     label: key,
     type: type as FieldDef['type'],
-    group: section.groups?.[0]?.id || section.fields?.[0]?.group || 'other',
-  } as FieldDef;
+    // 归属：优先落进栏目的第一个组（组=字段，取字典里第一条 group 字段）。
+    // 归一化时若该组不存在会自动归到根组，所以这里给一个「像样但不强制」的值。
+    group: (section.fields as Array<{ key: string; type?: string }>)?.find((f) => f.type === 'group')?.key || 'root',
+  } as FieldDef & { group: string };
 }
 
 /**
@@ -158,5 +161,8 @@ export function autoTitle(section: StoreSection, values: Record<string, unknown>
 /** 条目自身行优先、字典兜底的字段定义清单（序列化/台账共用）。
  *  任务 #20：脱离行（meta.detached）不算——值已不进 values，定义也不该出现在任何读出口。 */
 export function defsForEntry(sec: StoreSection, ownRows: EntryFieldView[] | null | undefined): FieldDef[] {
-  return ownRows ? ownRows.filter((r) => !isDetachedField(r)).map((r) => r.spec as unknown as FieldDef) : sec.fields;
+  const defs = ownRows ? ownRows.filter((r) => !isDetachedField(r)).map((r) => r.spec as unknown as FieldDef) : sec.fields;
+  // 组字段是容器，没有值：读侧（values / fieldTypes / entryFields / tables、附件引用）
+  // 只认叶子字段。组标题由 groups 下发，别让它混进「一行字段」的口径里。
+  return defs.filter((d) => !isGroupDef(d));
 }
