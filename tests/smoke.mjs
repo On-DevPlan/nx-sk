@@ -393,8 +393,8 @@ function isCipher(v) { return !!v && typeof v === 'object' && typeof v.ct === 's
 step('导入后 secret 落盘仍是密文（已用本机 vaultKey 重新加密）',
   !!entryB && isCipher(entryB));
 
-const skillGet = await cliJson(['skill', 'get', 'nx-sk', '10-sections-entries', '--dry-run']);
-step('skill get --json 是四元', skillGet.skillName === 'nx-sk' && skillGet.ref === 'references/10-sections-entries.md'
+const skillGet = await cliJson(['skill', 'get', 'nx-sk', 'A01-填栏目与写条目', '--dry-run']);
+step('skill get --json 是四元', skillGet.skillName === 'nx-sk' && skillGet.ref === 'references/A01-填栏目与写条目.md'
   && skillGet.contentBytes > 1000 && typeof skillGet.install.status === 'string');
 
 const skillHuman = await cli(['skill', 'get', 'nx-sk', '--dry-run']);
@@ -404,22 +404,24 @@ step('skill get 人类模式是三段拼接', skillHuman.out.startsWith('# === n
 const refEscape = await cliError(['skill', 'get', 'nx-sk', '../package.json']);
 step('skill get 拒绝路径穿越', refEscape.code === 'INVALID_INPUT');
 
-// sk-pdf：PDF → 图文 SOP 的配套 skill。它带**可执行脚本**，坏了用户才发现得了，
-// 所以这里钉住「随包分发 + 脚本在 + SKILL.md 里提到的脚本真的存在」。
+// 合并后的单一 skill：A 序列（场景 SOP）+ B 序列（格式与字段），脚本随包走。
+// 钉住「只有一个 skill + 两序列 ref 取得到 + 脚本真的在」——拆散或改名都会在这里红。
 const skillList = await cliJson(['skill', 'list']);
-const pdfSkill = skillList.skills.find((s) => s.name === 'sk-pdf');
-step('sk-pdf 随包分发', !!pdfSkill && pdfSkill.hasSkillMd === true, pdfSkill ? `refs: ${pdfSkill.refs.join(', ')}` : '未找到');
+step('assets 下只有一个可分发的 skill', skillList.skills.length === 1 && skillList.skills[0].name === 'nx-sk',
+  `skills: ${skillList.skills.map((s) => s.name).join(', ')}`);
 
-const pdfGet = await cliJson(['skill', 'get', 'sk-pdf', '--dry-run']);
-step('sk-pdf 可取全文', pdfGet.skillName === 'sk-pdf' && pdfGet.contentBytes > 2000);
+const pdfGet = await cliJson(['skill', 'get', 'nx-sk', 'A07-PDF转图文SOP', '--dry-run']);
+step('A 序列可单独取（PDF SOP）', pdfGet.skillName === 'nx-sk' && pdfGet.ref === 'references/A07-PDF转图文SOP.md'
+  && pdfGet.contentBytes > 1000);
 
 const { existsSync } = await import('node:fs');
-const scriptDir = join(ROOT, 'assets', 'sk-pdf', 'scripts');
-step('sk-pdf 的抽取脚本随包存在',
-  existsSync(join(scriptDir, 'pdf_probe.py')) && existsSync(join(scriptDir, 'pdf_extract.py')));
+const scriptDir = join(ROOT, 'assets', 'nx-sk', 'scripts');
+step('A07 的抽取脚本与论文模板随包存在',
+  existsSync(join(scriptDir, 'pdf_probe.py')) && existsSync(join(scriptDir, 'pdf_extract.py'))
+    && existsSync(join(ROOT, 'assets', 'nx-sk', 'templates', '毕业论文模板-设计开发类.docx')));
 
-const pdfRef = await cliJson(['skill', 'get', 'sk-pdf', '30-pitfalls', '--dry-run']);
-step('sk-pdf 的踩坑文档可单独取', pdfRef.ref === 'references/30-pitfalls.md' && pdfRef.contentBytes > 1000);
+const bRef = await cliJson(['skill', 'get', 'nx-sk', 'B02-字段类型与格式', '--dry-run']);
+step('B 序列可单独取（字段格式）', bRef.ref === 'references/B02-字段类型与格式.md' && bRef.contentBytes > 1000);
 
 // 软链模式（shim）：目标是项目源码的软链，改完立刻生效；三态照旧
 const linkDir = join(home, 'skills-link');
@@ -613,3 +615,4 @@ const titles = finalList.entries.map((e) => e.title).sort();
 step('CLI 与 HTTP 写进的是同一份数据', finalList.count === 2 && titles.join('|') === 'HTTP造的数据|本机面板造的', titles.join(' / '));
 
 process.stdout.write(`\n冒烟通过：${passed} 项断言，全部在临时目录 ${home} 内完成\n`);
+

@@ -330,7 +330,7 @@ test('assets/<skill>/ 里的每条命令都真实存在（单向断言：防 age
     const spans = codeSpans(src);
     for (const m of spans.matchAll(/nx-sk\s+([a-z][a-z0-9-]*)(?:\s+([a-z][a-z0-9-]*))?/g)) {
       // 命令必须出现在行首或表格单元/行内代码的开头；
-      // 否则 "nx-sk skill get nx-sk references/20-secrets.md" 里的第二个 nx-sk 会被当成命令
+      // 否则 "nx-sk skill get nx-sk references/A04-密钥与凭据.md" 里的第二个 nx-sk 会被当成命令
       let k = m.index - 1;
       while (k >= 0 && spans[k] === ' ') k--;
       const prev = k < 0 ? '\n' : spans[k];
@@ -354,7 +354,8 @@ test('SKILL.md 的 ref 路由表 ↔ references/ 目录双向对账', async () =
   // 不看「文档提到的 ref 文件是否存在」。agent 会照着 SKILL.md 去取，然后拿到 NOT_FOUND。
   const skillDir = join(ROOT, 'assets', 'nx-sk');
   const skillMd = await readFile(join(skillDir, 'SKILL.md'), 'utf8');
-  const named = [...skillMd.matchAll(/`(\d\d-[a-z0-9-]+)`/g)].map((m) => m[1]);
+  // 合并后的 ref 名是「<序列><两位序号>-<中文动作>」：A01-填栏目与写条目 / B02-字段类型与格式。
+  const named = [...skillMd.matchAll(/`([AB]\d\d-[\w\u4e00-\u9fff]+)`/g)].map((m) => m[1]);
   assert.ok(named.length >= 4, `SKILL.md 的 ref 路由表只解析出 ${named.length} 条，断言可能失效`);
 
   const refDir = join(skillDir, 'references');
@@ -401,10 +402,16 @@ test('已迁走的开发规范不许重新出现在 assets/nx-sk/（文档漂移
   assert.ok(!/`40-extend`/.test(skillMd),
     'SKILL.md 路由表里还留着 40-extend —— 文件已迁走，agent 照它取只会拿到 NOT_FOUND');
 
-  // 编号仍要连续、唯一（跳号通常意味着删了一个没重排，或复制粘贴写错序号）
-  const nums = files.map((n) => Number(n.slice(0, 2)));
-  assert.deepEqual(nums, [...nums].sort((a, b) => a - b), 'ref 文件名前缀应按编号升序');
-  assert.equal(new Set(nums).size, nums.length, `ref 编号有重复: ${nums.join(', ')}`);
+  // 编号仍要连续、唯一（跳号通常意味着删了一个没重排，或复制粘贴写错序号）。
+  // 现在是双序列：A01–A09（场景 SOP）、B01–B03（知识），各自按序且不重复。
+  const checkSeq = (letter) => {
+    const nums = files.filter((n) => n.startsWith(letter)).map((n) => Number(n.slice(1, 3)));
+    assert.deepEqual(nums, [...nums].sort((a, b) => a - b), `${letter} 序列的 ref 应按序号升序`);
+    assert.equal(new Set(nums).size, nums.length, `${letter} 序列的 ref 序号有重复: ${nums.join(', ')}`);
+    assert.deepEqual(nums, nums.map((_, i) => i + 1), `${letter} 序列的 ref 序号必须从 01 连续到 ${String(nums.length).padStart(2, '0')}`);
+  };
+  checkSeq('A');
+  checkSeq('B');
 });
 
 /**
@@ -583,3 +590,4 @@ test('视图写请求的 body 键必须声明过（applySpec 会静默丢掉未�
   assert.ok(checked >= 8, `扫到的 body 键太少（${checked}），断言可能失效`);
   assert.deepEqual(problems, [], `视图发了未声明的 body 键（会被 applySpec 静默丢掉）:\n${problems.join('\n')}`);
 });
+

@@ -175,7 +175,7 @@ pnpm test                                    # 五连：lint / typecheck / build
 | --- | --- |
 | `docs/design-intent.md` | 字段注册表与「前端只消费 shared」的边界描述 |
 | `docs/behavior-parity.md` | 新控件的行为/文案对账行；走查记录补一条 |
-| `assets/nx-sk/references/15-special-fields.md` | **用户向**：类型是什么、值形状、CLI 怎么写 |
+| `assets/nx-sk/references/B02-字段类型与格式.md` | **用户向**：类型是什么、值形状、CLI 怎么写 |
 | `CHANGELOG.md` | 用户可见变化 |
 
 `tests/unit/consistency.test.mjs` 会校验文档里出现的命令真实存在；不要在文档里编命令。
@@ -242,4 +242,5 @@ pnpm test
 **读侧**：`fieldListOf()`（`src/modules/sections/common.ts`）与 `dumpSection` 会在字段上补
 **派生的** `group`（归属）并展开成「组 → 成员」的显示顺序。面板依赖这个派生键，
 但它**不落盘**——别在写入路径里把它当存储字段。
+
 

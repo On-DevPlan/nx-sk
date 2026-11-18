@@ -310,7 +310,7 @@ const THESIS_FIELDS = [
   // —— 附件：论文与相关材料 ——
   f('thesisDoc', '论文正文', 'file', 'attach', { fill: 'optional', hint: '当前版本的 docx/pdf' }),
   f('proposalDoc', '开题报告', 'file', 'attach', { fill: 'optional' }),
-  f('templateDoc', '格式模板', 'file', 'attach', { fill: 'optional', hint: 'assets/sk-thesis/templates/ 下的模板' }),
+  f('templateDoc', '格式模板', 'file', 'attach', { fill: 'optional', hint: 'assets/nx-sk/templates/ 下的模板' }),
   f('specDoc', '规范原文（本类）', 'file', 'attach', { fill: 'optional', hint: '设计开发类那份（带批注）' }),
   f('specDocFull', '规范全文', 'file', 'attach', { fill: 'optional', hint: '含管理类 / 设计开发类 / 算法理论类的完整版' }),
   f('coverScan', '封面与签字页', 'file', 'attach', { fill: 'optional', hint: '导师签字、答辩记录等扫描件' }),
@@ -538,7 +538,7 @@ const TEMPLATES: Record<string, FieldTemplateDef> = {
     label: '毕业论文',
     description:
       '按信息工程学院 2022 版规范（设计开发类）整理的论文档案：页面 / 字体 / 图表 / 参考文献等'
-      + '硬指标逐条可查，另带交稿自检清单。模板 docx 见 assets/sk-thesis/。',
+      + '硬指标逐条可查，另带交稿自检清单。模板 docx 见 assets/nx-sk/templates/。',
     titleField: 'thesisTitle',
     titleLabel: '论文题目',
     groups: THESIS_GROUPS,
@@ -598,3 +598,4 @@ export function instantiateTemplate(templateId: unknown, overrides: TemplateOver
     updatedAt: overrides.updatedAt || null,
   };
 }
+

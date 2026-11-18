@@ -266,7 +266,7 @@ export default {
       args: ['name', 'value'],
       flags: {
         value: { type: 'string', hint: '值的另一种给法（值以 - 开头时用 --value=<值>）' },
-        // 多行值经命令行会被 Windows 启动器 shim 截断成首行且不报错（见 ref 20-secrets），
+        // 多行值经命令行会被 Windows 启动器 shim 截断成首行且不报错（见 A04（密钥）），
         // 文件与 stdin 是可靠通道。取 value 键；没有则取对象里唯一那个键。
         data: { type: 'string', hint: '@文件.json（含 value 键），或 -（从 stdin 读原文）' },
         section: { type: 'string' },
@@ -388,3 +388,4 @@ export default {
     },
   ],
 };
+
