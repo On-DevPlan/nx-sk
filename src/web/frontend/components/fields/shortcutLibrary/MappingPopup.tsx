@@ -50,3 +50,4 @@ export default function MappingPopup({ popup, pos, popupRef, onClose }: Props) {
     document.body,
   );
 }
+

@@ -132,3 +132,4 @@ test('导入失败（孤儿条目）：整体回滚，store.json 一字节不动
   const store = await loadStore();
   assert.equal(store.entries.length, 1);
 });
+

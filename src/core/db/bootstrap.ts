@@ -247,3 +247,4 @@ export function writeFailureLog(err: unknown): string | null {
     return null;
   }
 }
+

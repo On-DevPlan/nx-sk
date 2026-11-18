@@ -20,3 +20,4 @@ export const tagsBehavior: FieldBehavior = {
   sensitive: isSensitiveDef,
   subFields: noSubFields,
 };
+

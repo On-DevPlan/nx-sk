@@ -11,3 +11,4 @@ export function SelectControl({ def, value, onChange }: ControlProps) {
     </select>
   );
 }
+

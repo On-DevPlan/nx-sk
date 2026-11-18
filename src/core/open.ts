@@ -30,3 +30,4 @@ export async function openPath(target: string): Promise<boolean> {
   if (process.platform === 'darwin') return launch('open', [target]);
   return launch('xdg-open', [target]);
 }
+

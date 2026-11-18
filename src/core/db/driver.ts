@@ -309,3 +309,4 @@ export function openRaw(dbPath: string, { readOnly = false, busyTimeoutMs = 5000
     }
   }
 }
+

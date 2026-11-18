@@ -37,3 +37,4 @@ export function findKvSection(store: Pick<Store, 'sections'> | null | undefined,
 export function kvSections(store: Pick<Store, 'sections'> | null | undefined): StoreSection[] {
   return (store?.sections || []).filter((s) => s.kv);
 }
+

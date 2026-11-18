@@ -83,3 +83,4 @@ export function maskValue(text: unknown): string {
   if (s.length <= 10) return '*'.repeat(s.length);
   return `${s.slice(0, 4)}${'*'.repeat(6)}${s.slice(-4)}`;
 }
+

@@ -270,3 +270,4 @@ export function totalsVars(columns: JsonRow[], rows: JsonRow[]): { vars: JsonRow
   vars.n = rows.length;
   return { vars, names: columnNames(columns) };
 }
+

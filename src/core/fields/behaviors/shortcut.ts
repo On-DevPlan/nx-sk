@@ -39,3 +39,4 @@ export const shortcutBehavior: FieldBehavior = {
   sensitive: isSensitiveDef,
   subFields: noSubFields,
 };
+

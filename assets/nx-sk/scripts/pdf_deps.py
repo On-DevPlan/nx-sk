@@ -31,3 +31,4 @@ def require_pymupdf():
         return pymupdf
     except ImportError:
         sys.exit(HINT)
+

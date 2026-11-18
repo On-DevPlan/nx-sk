@@ -289,3 +289,4 @@ export function pruneAllHistory(db: Conn, retention: HistoryRetention = readRete
   const after = Number(db.scalar('SELECT COUNT(*) AS n FROM field_history') ?? 0);
   return Math.max(0, before - after);
 }
+

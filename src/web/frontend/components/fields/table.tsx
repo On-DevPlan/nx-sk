@@ -672,3 +672,4 @@ export function TableControl({ def, value, onChange }: ControlProps) {
     </div>
   );
 }
+

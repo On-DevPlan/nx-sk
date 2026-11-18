@@ -69,3 +69,4 @@ export function summarize(store: Store, s: SectionSummaryInput) {  // 0.42：分
     entries: countEntries(store, s.id),
   };
 }
+

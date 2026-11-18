@@ -108,3 +108,4 @@ export function inferFieldType(raw: unknown): string {
   if (BOOL_TRUE.includes(s) || BOOL_FALSE.includes(s)) return 'bool';
   return 'text';
 }
+

@@ -315,3 +315,4 @@ function ToolPane({ view }: { view: CurrentView }) {
   if (!Component) return null;
   return <Component />;
 }
+

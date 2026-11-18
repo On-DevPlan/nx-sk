@@ -51,3 +51,4 @@ export function resolveActiveView<T extends ViewTab>(
   }
   return list[0] || null;
 }
+

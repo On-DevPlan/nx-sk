@@ -57,3 +57,4 @@ export async function proxyRun(action: Action, ctx: Ctx, port: number): Promise<
   if (!json.ok) throw new AppError(json.code || 'INTERNAL', json.error || '面板执行失败');
   return json.data;
 }
+

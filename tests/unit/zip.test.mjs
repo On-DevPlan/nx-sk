@@ -102,3 +102,4 @@ test('magic 之外的最小长度判定：短 buffer 不会误判为加密包', 
   assert.equal(isEncryptedPackage(Buffer.alloc(4)), false);
   assert.equal(isEncryptedPackage(Buffer.from('PK\x03\x04rest')), false);
 });
+

@@ -70,3 +70,4 @@ export function openPackage(buf: unknown, passphrase: unknown): Buffer {
   }
   return out;
 }
+

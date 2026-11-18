@@ -108,3 +108,4 @@ export function readMigrationSql(file: string): string {
 
 /** 所有直接边按目标版本排序（供 pendingSteps 使用）。 */
 export const MIGRATION_STEPS = [...DIRECT_EDGES].sort((x, y) => x.to - y.to);
+

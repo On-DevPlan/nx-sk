@@ -163,3 +163,4 @@ export function fieldByLabel(section: Pick<StoreSection, 'fields'> | null | unde
   const s = String(label || '').trim();
   return (section?.fields || []).find((x) => x.label === s || x.key === s) || null;
 }
+

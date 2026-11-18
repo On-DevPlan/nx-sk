@@ -17,3 +17,4 @@ export const dateBehavior: FieldBehavior = {
   sensitive: isSensitiveDef,
   subFields: noSubFields,
 };
+

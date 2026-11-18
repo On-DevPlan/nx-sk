@@ -121,3 +121,4 @@ test('两个批量删除的 CLI 都能跑通（含 --dry-run 的试运行输出�
   assert.ok((await loadStore()).entries.some((e) => e.id === li.id), '试运行不能真删');
 });
 
+

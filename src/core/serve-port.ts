@@ -171,3 +171,4 @@ export async function resolvePortConflict(
 export function describeOccupant(occupant: string | null): string {
   return occupant || '未知服务';
 }
+

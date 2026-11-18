@@ -40,3 +40,4 @@ export const FIELD_SEAL: Record<FieldType, SealHook | null> = {
 export function sealOf(type: string): SealHook | null {
   return (FIELD_SEAL as Record<string, SealHook | null>)[type] ?? null;
 }
+

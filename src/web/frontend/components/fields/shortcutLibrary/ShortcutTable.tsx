@@ -1,4 +1,4 @@
-﻿// ShortcutTable.tsx —— 当前选中分组的快捷键表格
+// ShortcutTable.tsx —— 当前选中分组的快捷键表格
 // 与参考实现 shortcut-library/src/pages/ShortcutTable.tsx 的结构、交互、类名保持一致。
 import { useEffect, useMemo, useState } from 'react';
 import type { ShortcutGroup, ShortcutItem, ShortcutStroke } from '../../../../../shared/fields/types.ts';
@@ -264,4 +264,5 @@ export default function ShortcutTable({
     </section>
   );
 }
+
 

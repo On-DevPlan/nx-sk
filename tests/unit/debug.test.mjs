@@ -137,3 +137,4 @@ test('sealDebug：面板整体回传文档形状——模板字段引用丢弃�
   assert.equal(got.values.refs.warnings.length, 1);
   assert.ok(String(got.values.refs.warnings[0]).includes('模板字段是结构引用'));
 });
+

@@ -1,4 +1,4 @@
-﻿// ShortcutLibrary.tsx —— 快捷键详情面板主体
+// ShortcutLibrary.tsx —— 快捷键详情面板主体
 //
 // 结构、类名、交互、动效全部沿用参考实现
 // `ve/packages/react-components/src/shortcut-library`：
@@ -695,4 +695,5 @@ export default function ShortcutLibrary({ groups, onChange }: Props) {
     </div>
   );
 }
+
 

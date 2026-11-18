@@ -502,3 +502,4 @@ test('file cleanup：只删未被引用的附件，被引用的原样留下', as
   assert.ok((await svc.listFiles({})).files.some((f) => f.id === used.id), '反复清理不会伤到被引用的附件');
 });
 
+

@@ -130,3 +130,4 @@ export const MAC_LABEL_OVERRIDES: Record<string, string> = {
   ControlLeft: '⌃', ControlRight: '⌃',
   CapsLock: '⇪', Backspace: '⌫ Delete', Enter: '⏎ Return',
 };
+

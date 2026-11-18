@@ -259,3 +259,4 @@ export function renderSettingSet(d: {
   for (const [k, v] of Object.entries(d.set)) lines.push(`  ${k}: ${JSON.stringify(d.before[k])} -> ${JSON.stringify(v)}`);
   return lines.join('\n');
 }
+

@@ -31,3 +31,4 @@ export function findBindingsByCode(groups: ShortcutGroup[], code: string): Bindi
   }
   return hits;
 }
+

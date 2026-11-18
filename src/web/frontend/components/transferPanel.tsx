@@ -565,3 +565,4 @@ export default function TransferPanel() {
     </div>
   );
 }
+

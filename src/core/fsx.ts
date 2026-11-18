@@ -102,3 +102,4 @@ export async function fileSize(p: string): Promise<number> {
 export async function chmodPrivate(p: string): Promise<void> {
   try { await fsp.chmod(p, 0o600); } catch { /* Windows / 文件系统不支持 */ }
 }
+

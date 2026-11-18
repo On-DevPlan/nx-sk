@@ -44,3 +44,4 @@ test('旧别名仍可解析（#/backup → 设置：备份模块已删，落到�
   assert.equal(normalizeViewId(''), '');
   assert.equal(resolveActiveView('backup', [V('settings')], '').id, 'settings');
 });
+

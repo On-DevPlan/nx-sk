@@ -30,3 +30,4 @@ test('mergeFiles：空入参不制造新数组（避免无意义的重渲染）'
   assert.equal(mergeFiles(prev, null), prev);
   assert.deepEqual(mergeFiles(null, [{ id: 'f_2' }]), [{ id: 'f_2' }]);
 });
+

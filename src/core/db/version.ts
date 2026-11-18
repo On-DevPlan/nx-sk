@@ -70,3 +70,4 @@ export function checkNodeVersion(version = process.versions.node): { ok: boolean
       '原因：存储层使用 Node 内置 SQLite；22.13 起不再需要 --experimental-sqlite 标志。',
   };
 }
+

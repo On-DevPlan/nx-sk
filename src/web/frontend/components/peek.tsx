@@ -455,3 +455,4 @@ function focusRow(menu: HTMLElement | null, row: string, mode?: PeekMode) {
     menu?.querySelector<HTMLElement>(selector)?.focus({ preventScroll: true });
   });
 }
+

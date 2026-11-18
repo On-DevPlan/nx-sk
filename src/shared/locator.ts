@@ -184,3 +184,4 @@ export function locatorAliases(loc: unknown): string[] {
       return [];
   }
 }
+

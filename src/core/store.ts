@@ -222,3 +222,4 @@ export async function pruneHistoryNow(): Promise<number> {
 export async function currentHistoryRetention() {
   return readRetention(ensureDb());
 }
+

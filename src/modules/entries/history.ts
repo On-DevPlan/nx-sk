@@ -192,3 +192,4 @@ export function renderFieldRestore(d: Awaited<ReturnType<typeof restoreFieldVers
   return `已恢复字段「${d.label}」到 v${d.rev}：${fmtValue(d.from)} → ${fmtValue(d.to)}`
     + `（本次恢复也记为新版本 v${d.rev}，可再恢复回来）`;
 }
+

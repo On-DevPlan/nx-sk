@@ -144,3 +144,4 @@ test('CLI 解析层：entry add 的 --data @文件 多键原样通过', () => {
   assert.equal(Object.keys(ctx.data).length, 5);
   assert.equal(ctx.data.name, '甲');
 });
+

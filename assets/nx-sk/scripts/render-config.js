@@ -104,3 +104,4 @@ if (unresolved.length) {
 if (/\.(ya?ml|json|toml|ini|env|conf)$/i.test(outPath)) {
   console.log('提醒：这个文件带真值，确认它不在 git 里（.gitignore / 只提交占位符版本）。');
 }
+

@@ -91,3 +91,4 @@ test('tx 堵死 async 事务体：返回 Promise 立即抛 TypeError，且不留
   assert.equal(db.get("SELECT name FROM sqlite_master WHERE name = 'bad'"), null, '回滚必须带走事务体内的写');
   db.close();
 });
+

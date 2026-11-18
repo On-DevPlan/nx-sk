@@ -96,3 +96,4 @@ function displayWidth(s: unknown): number {
   }
   return w;
 }
+

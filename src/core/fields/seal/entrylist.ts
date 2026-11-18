@@ -39,3 +39,4 @@ export const sealEntryList: SealHook = async ({ def, raw, current }: SealContext
   }
   return out;
 };
+

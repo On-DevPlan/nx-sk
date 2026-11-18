@@ -241,3 +241,4 @@ test('⑥ --set 走 service 与直接写 store 等价（行/值/读回一致）'
   assert.equal(gB.values.a, '2');
   assert.deepEqual(Object.keys(gA.values).sort(), Object.keys(gB.values).sort(), '读回形状一致');
 });
+

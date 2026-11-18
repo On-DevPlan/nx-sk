@@ -60,3 +60,4 @@ export function FieldGroup({ title, fields, draft, onPatch, sectionTitle, entryT
     </>
   );
 }
+

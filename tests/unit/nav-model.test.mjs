@@ -294,3 +294,4 @@ test('分组角标：只看栏目数，条目数变化不影响角标', () => {
   const after = { title: 'g', sections: [{ id: 'a', count: 99 }, { id: 'b', count: 0 }] };
   assert.equal(m.groupSectionCount(before), m.groupSectionCount(after));
 });
+

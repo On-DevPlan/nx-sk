@@ -275,3 +275,4 @@ export function renderResourceResolve(d: ResolveResult) {
   }
   return lines.join('\n');
 }
+

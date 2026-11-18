@@ -54,3 +54,4 @@ export const FIELD_CONTROLS: Record<FieldType, Control> = {
 export function controlOf(type: string): Control {
   return (FIELD_CONTROLS as Record<string, Control>)[type] ?? TextControl;
 }
+

@@ -165,3 +165,4 @@ export function renderSectionChange(d: SectionChangeView) {
   ].filter(Boolean).join('\n');
   return `已更新栏目 ${d.id}：${(d.changed || []).join(', ')}${extra ? `\n${extra}` : ''}`;
 }
+

@@ -286,3 +286,4 @@ export function dumpSection(
     entries: mine.map((e) => serializeEntry(section, e, { mask, decrypt, ownRows: structures?.get(e.id) })),
   };
 }
+

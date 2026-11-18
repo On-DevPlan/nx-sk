@@ -24,3 +24,4 @@ export const mdBehavior: FieldBehavior = {
   sensitive: isSensitiveDef,
   subFields: noSubFields,
 };
+

@@ -54,3 +54,4 @@ export function toErrorShape(err: unknown): { code: string; message: string; det
   const e = err as { message?: string } | null | undefined;
   return { code: CODES.INTERNAL, message: e && e.message ? e.message : String(err) };
 }
+

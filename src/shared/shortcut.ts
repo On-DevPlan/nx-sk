@@ -197,3 +197,4 @@ export function normalizeShortcutGroups(raw: unknown): ShortcutGroup[] {
   });
   return groups;
 }
+

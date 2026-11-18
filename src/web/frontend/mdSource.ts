@@ -39,3 +39,4 @@ export function toggleTaskAtLine(text: unknown, line: number | string): string {
   lines[i] = `${m[1]}${mark}${m[3]}${lines[i].slice(m[0].length)}`;
   return lines.join('\n');
 }
+

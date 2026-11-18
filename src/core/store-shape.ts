@@ -323,3 +323,4 @@ export function normalize(data: unknown): Store {
   }
   return base;
 }
+

@@ -5,3 +5,4 @@ import type { ControlProps } from './types.ts';
 export function TextControl({ value, onChange }: ControlProps) {
   return <input type="text" value={String(value)} onChange={(e) => onChange(e.target.value)} />;
 }
+

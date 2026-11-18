@@ -72,3 +72,4 @@ test('形状完整的临时模块能正常装载', async () => {
     assert.deepEqual(mods.map((m) => m.id), ['alpha', 'beta']);
   });
 });
+

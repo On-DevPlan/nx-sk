@@ -59,3 +59,4 @@ test('同一个对象重复 save 不撞墙（rev 随提交前进）；外部构�
   fresh.settings.defaultSection = 'demo';
   await saveStore(fresh); // 刚读的，正常
 });
+

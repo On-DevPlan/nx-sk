@@ -29,3 +29,4 @@ test('不改原数组', () => {
   reorderAt(list, 0, 3);
   assert.deepEqual(list, ['a', 'b', 'c']);
 });
+

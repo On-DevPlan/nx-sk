@@ -73,3 +73,4 @@ export const sealTable: SealHook = async ({ def, raw, current }: SealContext) =>
   }
   return { ...doc, rows };
 };
+

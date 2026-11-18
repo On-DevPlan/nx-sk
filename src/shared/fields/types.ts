@@ -287,3 +287,4 @@ export interface FieldBehavior {
   /** 清单类字段的列（密文子值的判据）；标量字段返回空数组。 */
   subFields(def: any): SubFieldDef[];
 }
+

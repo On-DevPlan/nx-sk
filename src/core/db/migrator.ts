@@ -142,3 +142,4 @@ export function fileHasContent(path: string): boolean {
     return false;
   }
 }
+

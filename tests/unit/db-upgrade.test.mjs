@@ -106,3 +106,4 @@ test('既有库补导入（崩溃恢复窗口）：导入前同样先留 pre-imp
   assert.equal(probe.prepare("SELECT COUNT(*) c FROM sections WHERE id='imp'").get().c, 0, '快照里还没有 json 数据（是导入前的状态）');
   probe.close();
 });
+

@@ -345,3 +345,4 @@ export function renderContent(d: Awaited<ReturnType<typeof contentInfo>>) {
 export function renderOpen(d: { opened: string; path: string }) {
   return `已用系统默认程序打开：${d.opened}　${d.path}`;
 }
+

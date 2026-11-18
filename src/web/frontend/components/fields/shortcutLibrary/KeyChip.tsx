@@ -1,4 +1,4 @@
-﻿// KeyChip.tsx —— 单个按键芯片（与参考实现 shortcut-library/src/components/KeyChip.tsx 一致）
+// KeyChip.tsx —— 单个按键芯片（与参考实现 shortcut-library/src/components/KeyChip.tsx 一致）
 import type { ShortcutStroke } from '../../../../../shared/fields/types.ts';
 
 interface Props {
@@ -27,4 +27,5 @@ export function ComboDisplay({ combo }: { combo: ShortcutStroke[] }) {
     </span>
   );
 }
+
 

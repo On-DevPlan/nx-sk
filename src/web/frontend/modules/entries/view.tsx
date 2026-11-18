@@ -585,3 +585,4 @@ export default function SectionView({ sectionId: rawId, listHidden = false, side
     </div>
   );
 }
+

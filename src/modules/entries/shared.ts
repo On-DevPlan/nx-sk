@@ -166,3 +166,4 @@ export function defsForEntry(sec: StoreSection, ownRows: EntryFieldView[] | null
   // 只认叶子字段。组标题由 groups 下发，别让它混进「一行字段」的口径里。
   return defs.filter((d) => !isGroupDef(d));
 }
+

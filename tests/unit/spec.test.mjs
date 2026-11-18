@@ -241,3 +241,4 @@ test('已经标了 kv 的栏目再读不会重复迁移', () => {
   assert.equal(s._migration, undefined);
   assert.equal(s.sections[0].kv, true);
 });
+

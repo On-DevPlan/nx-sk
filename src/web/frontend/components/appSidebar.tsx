@@ -585,3 +585,4 @@ function ResultGroup({ title, items, onOpen }: {
     </div>
   );
 }
+
