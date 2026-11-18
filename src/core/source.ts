@@ -1,6 +1,6 @@
 // 原始资料袋（`type: 'source'`）的条目形状与归一规则。
 //
-// 为什么单独一个 core 模块：这份形状同时被 CLI、面板、sk-source skill 三处读写。
+// 为什么单独一个 core 模块：这份形状同时被 CLI、面板、A03（原始资料整理）三处读写。
 // 形状若各写一份，迟早漂成「面板能显示、agent 读不出」——所以口径只此一处。
 //
 // 一条 item 的形状：
@@ -250,3 +250,4 @@ export function sourceItemTimeLabel(item: SourceItem | null | undefined): string
   const p = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
+

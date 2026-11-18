@@ -387,7 +387,7 @@ nx-sk entry table 周报 --field 任务表
 - 求值作用域用 `with` + Proxy 封死：`window` / `document` / `process` / `fetch` 都取不到。
   这不是安全沙箱（公式是数据所有者自己写的），而是**把写错的边界前移**。
 
-形状、列的每个键、公式内建表、错误对照表：`nx-sk skill get nx-sk 15-special-fields`
+形状、列的每个键、公式内建表、错误对照表：`nx-sk skill get nx-sk B02-字段类型与格式`
 （同一篇也讲了 `entrylist` / `md` / `file` / `source` / `secret` 这几种「值不是标量」的字段）。
 
 ### 全局导出 / 导入（多栏目）
@@ -460,66 +460,51 @@ export NX_SK_PASSPHRASE='你的长口令'      # 之后所有密文都用它派�
 
 ## 给 agent 用
 
+**随包只有一个 skill**：`assets/nx-sk/`（A 序列 = 场景 SOP，B 序列 = 格式与字段用法），
+脚本与论文模板也在同一个目录里跟着走。
+
 ```bash
-nx-sk skill list                   # 内置 skill 清单
-nx-sk skill install               # 装到 ~/.claude/skills/nx-sk（三态，不静默覆盖）
+nx-sk skill list                    # 内置 skill 清单（现在只有 nx-sk 一个）
+nx-sk skill install                 # 装到 ~/.claude/skills/nx-sk（三态，不静默覆盖）
 nx-sk skill get nx-sk --json        # {skillName, ref, content, contentBytes, install}
-nx-sk skill get nx-sk 10-sections-entries   # 裸名 → references/10-sections-entries.md
+nx-sk skill get nx-sk A01-填栏目与写条目   # 裸名 → references/A01-….md
 ```
 
-`nx-sk` 的 ref 路由表：
+### A 序列：用户场景 SOP（照着做）
 
-| ref | 何时读 |
+| ref | 场景 |
 | --- | --- |
-| `00-design` | 为什么这么分层、错误码与 `{status}` 的分工 |
-| `10-sections-entries` | 填/改信息的完整命令与 AI 补全流程 |
-| `20-secrets` | 密文机制、密钥来源、排查「解不开」 |
-| `40-files` | 附件库：导入（默认移动）与还原、`file` 字段与条目的链接、附件中心由栏目驱动 |
-| `50-deploy` | 存/取 Dockerfile、compose、k8s 清单 |
-| `60-transfer` | 栏目 ZIP：导出、预览、导入、冲突策略 |
+| `A01-填栏目与写条目` | 记录/更新信息、填求职档案、扩字段；先看台账再写值 |
+| `A02-混乱数据归档` | 一团输入（话/链接/表格/截图清单）→ 先查后建栏目 → 定字段 → 填值 |
+| `A03-原始资料整理与回写` | 原件先入 `source` 袋 → 映射字段 → 标 `mapped` 留痕 → 冲突留旧的 |
+| `A04-密钥与凭据` | KV/密文机制 + 场景凭据归属 + 把真值渲染成 compose/k8s/.env |
+| `A05-附件库` | 简历头像成绩单：导入（默认移动）、挂 `file` 字段、清理与还原 |
+| `A06-部署配置` | 存/取 Dockerfile、compose、k8s 清单：一份配置一个条目 |
+| `A07-PDF转图文SOP` | 手册 PDF → 图文 SOP 栏目（抽取脚本 + 挑图 + 栏目结构） |
+| `A08-毕业论文格式` | 信息工程学院 2022 版格式、模板生成、交稿自检 |
+| `A09-导出与迁移` | 栏目/整库 ZIP 导出导入、三种冲突策略、凭据边界 |
 
-### sk-pdf：PDF → 图文 SOP 栏目
+### B 序列：格式与字段用法（查）
 
-把用户手册、操作指南转成 nx-sk 里的图文 SOP 栏目（抽正文、按版面挑截图、
-上传成附件、在 `md` 字段里 `![]()` 引用），带两个已验证的抽取脚本：
+| ref | 内容 |
+| --- | --- |
+| `B01-概念与放置` | 栏目=结构 / 条目=数据 / 分组=组字段；东西该往哪儿放 |
+| `B02-字段类型与格式` | 全字段值形状、table 公式与统计、entrylist 列、md 图片、file id… |
+| `B03-踩坑合集` | PDF、论文、归档三组真实踩坑 |
+
+### 脚本与模板（都在这一个 skill 里）
 
 ```bash
-nx-sk skill install sk-pdf
-nx-sk skill get sk-pdf             # 全文
-nx-sk skill get sk-pdf 30-pitfalls # 踩过的坑
-
-# 不装也能用（唯一第三方依赖是 PyMuPDF）
-python assets/sk-pdf/scripts/pdf_probe.py   book.pdf      # 先探查：有没有图、是不是扫描件
-python assets/sk-pdf/scripts/pdf_extract.py book.pdf --out /tmp/out
+python assets/nx-sk/scripts/pdf_probe.py   book.pdf       # 先探查：有没有图、是不是扫描件
+python assets/nx-sk/scripts/pdf_extract.py book.pdf --out /tmp/out
+python assets/nx-sk/scripts/make_thesis_template.py \
+  --out assets/nx-sk/templates/毕业论文模板-设计开发类.docx
+node assets/nx-sk/scripts/render-config.js entry.json ./docker-compose.local.yml
 ```
 
-| ref | 何时读 |
-| --- | --- |
-| `10-extract` | 为什么必须按版面坐标排序取图（顺序错 = 图全配错步骤） |
-| `20-sop-schema` | 栏目六段结构（简介/准备材料/入口/手册/常见问题/自检）、账号怎么拆 sensitive 字段 |
-| `30-pitfalls` | 占位符忘换 id、本地路径渲染不出、密码泄漏、md 图片被误判未引用… |
-
-### sk-thesis：毕业论文格式与结构
-
-按信息工程学院 2022 版规范（设计开发类）把格式做成**可查的字段**与**可用的 Word 模板**：
-页面 2.5/2/2.5/2 cm、1.5 倍行距、宋体小四、标题黑体四号/黑体小四/宋体小四、三线表 1.5·1 磅、
-目录域与分节页码（封面与目录不编、标题页起为 1）。
-
-```bash
-nx-sk section add thesis --template thesis   # 新建「毕业论文」栏目（9 组 / 59 字段）
-nx-sk section get thesis                     # 全部硬指标 + 交稿自检清单
-nx-sk skill get sk-thesis 10-format          # 数值速查
-
-# 重新生成模板（本机 managed venv 已装 python-docx）
-~/.workbuddy/binaries/python/envs/default/Scripts/python.exe \
-  assets/sk-thesis/scripts/make_thesis_template.py
-```
-
-| ref | 何时读 |
-| --- | --- |
-| `10-format` | 页边距、字号、标题层级、图表、参考文献、页码的全部数值 |
-| `20-structure` | 章节骨架、每章写什么、开题与论文的格式差异、装订顺序 |
-| `30-pitfalls` | 真实错法：一级标题加粗、图题「图 1」多空格、（1）自动编号带悬挂缩进、批注没删 |
+`A07` 的 ref 里还写着「为什么必须按版面坐标取图」（顺序错 = 图全配错步骤）；
+`A08` 的 ref 里是页边距/字号/标题层级/图表/参考文献的全部数值与章节骨架。
+毕业论文栏目本身用 `nx-sk section add thesis --template thesis` 建，`section get thesis` 查硬指标。
 
 ## 开发
 
@@ -543,10 +528,10 @@ agent 手册** —— 它写在创建本项目的脚手架 skill `server-cli-web
 
 ### 设计取舍与踩坑记录（开发侧）
 
-> 这节原本在随包分发的 `assets/nx-sk/references/00-design.md` 里。
+> 这节原本在随包分发的 `assets/nx-sk/references/B01-概念与放置.md` 里。
 > 那份文档随包发到用户机器，而**代码分层、接口路由、lint 规则用户装了也用不上**——
 > 所以开发侧内容归位到仓库，设计思想（栏目=结构 / 条目=数据 / 动态栏目+动态条目 / 聚合所有信息）
-> 留在 `assets/nx-sk/references/00-design.md`，那里只讲心智模型与用法。
+> 留在 `assets/nx-sk/references/B01-概念与放置.md`，那里只讲心智模型与用法。
 
 **错误契约**（映射只写一处，`src/core/errors.js`）：
 
@@ -588,3 +573,4 @@ LSP 由本地 plugin `ts-lsp@local` 提供：hover / 定义跳转 / 引用查找
 ## License
 
 MIT
+

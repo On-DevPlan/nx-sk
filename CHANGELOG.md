@@ -8,6 +8,21 @@
 
 ### Changed
 
+- **随包 skill 合并成一个（任务 #38）**：原先并列分发的四个用户向 skill（`sk-needdo` /
+  `sk-source` / `sk-pdf` / `sk-thesis`）收进唯一入口 `nx-sk`，`assets/` 下只剩一个可分发目录。
+  组织方式照 nv-kv 的 asset skill：**A 序列 = 用户场景 SOP**（`A01-填栏目与写条目` … `A09-导出与迁移`）、
+  **B 序列 = 格式与字段用法**（`B01-概念与放置` / `B02-字段类型与格式` / `B03-踩坑合集`）。
+  原有 `00-design` / `10-sections-entries` / `15-special-fields` / `20-secrets` + `30-credentials` /
+  `40-files` / `50-deploy` / `60-transfer` 全部按序列改名，密钥与凭据合成一篇（两部分）。
+  **A 引用 B、不复制**：值形状与公式只在 B02 写一份。
+- **脚本与模板跟着 skill 走**：`sk-pdf` 的三个脚本、`sk-thesis` 的模板生成脚本与 `.docx` 模板迁到
+  `assets/nx-sk/scripts/` 与 `assets/nx-sk/templates/`；`pdf_deps.py` 由 `_deps.py` 改名。
+  `skill install` 装一次就拿到「SOP + 脚本 + 模板」，不再需要装四个。
+- **门禁跟着改口径**：一致性测试的路由表对账改为 A/B 双序列（各自序号连续、不重复），
+  冒烟改钉「`skill list` 只有一个 nx-sk + A07/B02 取得到 + 脚本与论文模板在位」；
+  随包手册仍不许出现源码路径与构建工具链。
+- 装过旧 skill 的机器：`nx-sk skill install --force` 重装 `nx-sk` 即可，旧目录
+  （`~/.claude/skills/sk-*`）不会被自动删除，可手动清掉。
 - **原始资料侧栏（任务 #37）**：清单与正文之间加了可拖拽分栏线——拖左右改宽、松手记住宽度
   （`nx-sk-source-list-w`）、双击复原 264；拖动时全局光标变 `col-resize`。清单栏补 `min-width:0`，
   否则长文件名会把自动最小宽顶住，拖线走了栏却不跟着走。

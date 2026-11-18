@@ -3,7 +3,7 @@
 // 为什么不放 runtime/spec.js：那里的 coerce() 是 CLI 与 HTTP **共用**的纯净解码器，
 // 而 HTTP 没有「命令行通道」这回事。CLI 专属的通道问题集中在 CLI 适配层解决。
 //
-// 背景（真实事故，见 ref 20-secrets）：Windows 上值经命令行参数传递时，启动器 shim
+// 背景（真实事故，见 A04（密钥））：Windows 上值经命令行参数传递时，启动器 shim
 // （Volta shim / npm 生成的 .cmd）会把换行当命令分隔符截断、把 < > 当重定向符，
 // 而命令**报成功**——一次性凭据就这么静默丢掉大半。文件与管道是可靠通道。
 //
@@ -50,3 +50,4 @@ function readText(p: string): string {
     throw badInput(`读取文件失败: ${p}（${(e as Error).message}）—— Windows 上请用 C:/Users/... 形式的路径`);
   }
 }
+
