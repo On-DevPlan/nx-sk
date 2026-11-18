@@ -3,7 +3,7 @@ import type { DragEvent as ReactDragEvent } from 'react';
 import { api } from '../../api/client.ts';
 import { fileToDataUrl, refreshAttachments } from '../../api/files.ts';
 import { useStore } from '../../store.tsx';
-import { CliHints, Copyable, Empty, Modal, Tag } from '../../components/ui.tsx';
+import { Copyable, Empty, Modal, Tag } from '../../components/ui.tsx';
 import type { Attachment } from '../../../../shared/model.ts';
 
 /** 反向引用的一条（`describeFile` 的 usedBy）。 */
@@ -369,8 +369,6 @@ export default function FilesView() {
           <button className="btn small ghost" disabled={!data.page.hasMore} onClick={() => setPage((p) => p + 1)}>下一页</button>
         </div>
       ) : null}
-
-      <CliHints module="files" />
 
       {modal ? (
         <Modal title={modal.kind === 'edit' ? '编辑附件' : '从本机路径导入'} onClose={() => setModal(null)}>

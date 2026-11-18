@@ -546,20 +546,6 @@ label.inline { display: inline-flex; align-items: center; gap: 6px; }
   cursor: pointer;
 }
 .detached-chip .chip-restore:hover { text-decoration: underline; }
-/* ── CLI 提示：文案通顺，命令之间用间隔点分开 ── */
-.cli-hint {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 2px;
-  padding: 6px 14px;
-  color: var(--mid);
-  font-size: 11px;
-  border-top: var(--border);
-}
-.cli-hint-label { margin-right: 4px; }
-.cli-hint-sep { color: var(--soft-2); }
-.cli-cmd { color: var(--ink); }
 
 /* ── toast ── */
 .toasts { position: fixed; right: 14px; bottom: 14px; display: flex; flex-direction: column; gap: 6px; z-index: 70; }

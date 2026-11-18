@@ -1,4 +1,4 @@
-import { Component, Fragment, useEffect, useRef } from 'react';
+import { Component, useEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
 import { useStore } from '../store.tsx';
 
@@ -145,28 +145,6 @@ export function DialogHost() {
           </button>
         </div>
       </div>
-    </div>
-  );
-}
-
-/** 「这个页面每个按钮都有同构 CLI 命令」——提示**由数据派生**，不手写（手写必然与实际命令漂移）。 */
-// module 可以是单个 id，也可以是数组——合并页（如「导出与备份」）一个页面承载
-// 多个模块的命令，提示合成一条而不是每半页各来一句。
-export function CliHints({ module }: { module: string | string[] }) {
-  const { boot } = useStore();
-  const mods: string[] = Array.isArray(module) ? module : [module];
-  const cmds = (boot?.commands || []).filter((c) => mods.includes(c.module));
-  if (!cmds.length) return null;
-  return (
-    <div className="cli-hint">
-      <span className="cli-hint-label">这个页面上的每个操作都有一条同构的 CLI 命令：</span>
-      {cmds.map((c, i) => (
-        <Fragment key={c.id}>
-          {i > 0 ? <span className="cli-hint-sep"> · </span> : null}
-          <Copyable className="cli-cmd" text={c.command || ''} title={`点击复制：${c.usage}`}>{c.command}</Copyable>
-        </Fragment>
-      ))}
-      <span className="cli-hint-tail">。加 <code className="cli-cmd">--json</code> 得机器可读输出。</span>
     </div>
   );
 }
