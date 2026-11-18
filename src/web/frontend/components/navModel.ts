@@ -345,3 +345,4 @@ export function validate(cfg: NavConfig, allIds: string[]): NavProblem[] {
   }
   return problems;
 }
+

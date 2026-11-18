@@ -39,3 +39,4 @@ export const sealScalar: SealHook = async ({ def, raw, current }: SealContext) =
   const { key } = await resolveVaultKey();
   return encryptValue(key, text);
 };
+

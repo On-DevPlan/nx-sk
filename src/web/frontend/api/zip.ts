@@ -32,3 +32,4 @@ export function isNeedPassphraseError(err: unknown): boolean {
   const msg = String((err && (err as Error).message) || err || '');
   return /已加密|口令/.test(msg);
 }
+

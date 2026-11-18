@@ -97,3 +97,4 @@ test('B4 entryRefText：原三行 CLI 文案逐字不变 + 末尾补一行 locat
   assert.equal(lines[2], '改: nx-sk entry update --section demo e_1 --set 字段=值');
   assert.equal(lines[3], '定位: nx-sk://entry/e_1');
 });
+

@@ -54,3 +54,4 @@ export function isStoredEmpty(v: unknown): boolean {
 export function isPlainRow(x: unknown): x is Record<string, unknown> {
   return !!x && typeof x === 'object' && !Array.isArray(x);
 }
+

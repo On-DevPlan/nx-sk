@@ -95,3 +95,4 @@ export async function discoverPanelPort(): Promise<number | null> {
   if (await claimPanel(DEFAULT_PORT)) return DEFAULT_PORT;
   return null;
 }
+

@@ -194,3 +194,4 @@ export function imageRefs(text: unknown): Array<{ alt: string; id: string; remot
 export function linkCount(text: unknown): number {
   return tokenizeMd(text).filter((t) => t.type === 'link').length;
 }
+

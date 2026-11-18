@@ -230,3 +230,4 @@ test('store：脏版式在归一化时被夹干净，不会让面板白屏', asy
   assert.deepEqual(out.sections[0].layout.groups.main.layouts, {});
 });
 
+

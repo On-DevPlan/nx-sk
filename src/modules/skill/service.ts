@@ -247,3 +247,4 @@ export function renderSkillList(d: Awaited<ReturnType<typeof listSkills>>) {
   lines.push(`给外部 agent 取上下文: nx-sk skill get ${SKILL_NAME} --json`);
   return lines.join('\n');
 }
+

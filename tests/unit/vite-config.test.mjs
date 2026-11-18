@@ -35,3 +35,4 @@ test('端口只有一个来源：服务端默认端口 == vite 代理目标端�
   assert.equal(viteConfig.server.port, DEV_VITE_PORT);
   assert.equal(viteConfig.server.proxy['/api'].target, `http://127.0.0.1:${DEFAULT_PORT}`);
 });
+

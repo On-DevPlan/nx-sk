@@ -17,3 +17,4 @@ export const numberBehavior: FieldBehavior = {
   sensitive: isSensitiveDef,
   subFields: noSubFields,
 };
+

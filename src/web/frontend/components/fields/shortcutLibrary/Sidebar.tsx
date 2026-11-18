@@ -1,4 +1,4 @@
-﻿// Sidebar.tsx —— 左侧分组列表面板（与参考实现 shortcut-library/src/pages/Sidebar.tsx 一致）
+// Sidebar.tsx —— 左侧分组列表面板（与参考实现 shortcut-library/src/pages/Sidebar.tsx 一致）
 import { useState } from 'react';
 import type { ShortcutGroup } from '../../../../../shared/fields/types.ts';
 
@@ -136,4 +136,5 @@ export default function Sidebar({
     </aside>
   );
 }
+
 

@@ -21,3 +21,4 @@ export const boolBehavior: FieldBehavior = {
   sensitive: isSensitiveDef,
   subFields: noSubFields,
 };
+

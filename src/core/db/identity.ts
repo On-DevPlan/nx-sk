@@ -85,3 +85,4 @@ export function pointerIdentity(kind: AttachmentKind, ref: { sectionId?: string;
   }
   throw new Error(`pointerIdentity 只认内部种类（section/entry/field），收到 ${kind}`);
 }
+

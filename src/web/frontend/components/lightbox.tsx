@@ -110,3 +110,4 @@ export function Lightbox({ item, onClose }: { item?: LightboxItem | null; onClos
     </div>
   );
 }
+

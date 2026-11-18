@@ -87,3 +87,4 @@ test('值没变 → skipped unchanged，不写盘；dry-run 不落盘', async ()
   assert.equal(preview.wouldUpdate.label, '影子名');
   assert.equal((await row(e2.id, 'budget')).label, '预算', 'dry-run 没写');
 });
+

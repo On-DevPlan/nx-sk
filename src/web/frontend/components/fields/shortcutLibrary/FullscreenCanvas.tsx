@@ -1,4 +1,4 @@
-﻿// FullscreenCanvas.tsx —— 全屏快捷键热力键盘（Keyboard Heatmap Canvas）
+// FullscreenCanvas.tsx —— 全屏快捷键热力键盘（Keyboard Heatmap Canvas）
 // 与参考实现 shortcut-library/src/pages/FullscreenCanvas.tsx 的结构、交互、类名一致。
 import {
   useCallback, useEffect, useMemo, useRef, useState,
@@ -269,4 +269,5 @@ export default function FullscreenCanvas({ open, onClose, shortcuts, groupName }
     document.body,
   );
 }
+
 

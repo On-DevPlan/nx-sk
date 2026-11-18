@@ -38,3 +38,4 @@ export const fileBehavior: FieldBehavior = {
   sensitive: isSensitiveDef,
   subFields: noSubFields,
 };
+

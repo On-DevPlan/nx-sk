@@ -10,11 +10,14 @@
 
 - **随包 skill 合并成一个（任务 #38）**：原先并列分发的四个用户向 skill（`sk-needdo` /
   `sk-source` / `sk-pdf` / `sk-thesis`）收进唯一入口 `nx-sk`，`assets/` 下只剩一个可分发目录。
-  组织方式照 nv-kv 的 asset skill：**A 序列 = 用户场景 SOP**（`A01-填栏目与写条目` … `A09-导出与迁移`）、
+  组织方式照 nv-kv 的 asset skill：**A 序列 = 用户场景 SOP**（`A01-填一条信息` … `A09-搬走一个栏目`）、
   **B 序列 = 格式与字段用法**（`B01-概念与放置` / `B02-字段类型与格式` / `B03-踩坑合集`）。
   原有 `00-design` / `10-sections-entries` / `15-special-fields` / `20-secrets` + `30-credentials` /
   `40-files` / `50-deploy` / `60-transfer` 全部按序列改名，密钥与凭据合成一篇（两部分）。
   **A 引用 B、不复制**：值形状与公式只在 B02 写一份。
+- **A 序列统一改成动作句（#39 反馈）**：`A01-填一条信息` / `A02-整理一堆乱资料` / `A03-把原件回写进条目` /
+  `A04-存密钥和凭据` / `A05-收一份附件` / `A06-存一份部署配置` / `A07-把PDF转成图文SOP` /
+  `A08-排一篇论文格式` / `A09-搬走一个栏目`——文件名就是「做这件事」；B 序列仍是名词知识。
 - **脚本与模板跟着 skill 走**：`sk-pdf` 的三个脚本、`sk-thesis` 的模板生成脚本与 `.docx` 模板迁到
   `assets/nx-sk/scripts/` 与 `assets/nx-sk/templates/`；`pdf_deps.py` 由 `_deps.py` 改名。
   `skill install` 装一次就拿到「SOP + 脚本 + 模板」，不再需要装四个。
@@ -1750,3 +1753,6 @@ nx-sk 的定位从来不是「另一个密码管理器」，而是**把凭据变
 - 存储路径支持 `NX_SK_HOME` / `NX_SK_STORE` 覆盖 —— **不是可选项**：没有它测试会写脏真实数据。
 - eslint 的模块互依禁列是**逐模块枚举**的：新增模块必须补一行，漏补是静默的
   （已由 `tests/unit/consistency.test.mjs` 兜住）。
+
+
+

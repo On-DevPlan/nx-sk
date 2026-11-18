@@ -139,3 +139,4 @@ export function renameGroupField(
 export function removeGroupField(fields: readonly FieldDef[], groupKey: string): FieldDef[] {
   return fields.filter((f) => !(isGroupDef(f) && String(f.key) === groupKey));
 }
+

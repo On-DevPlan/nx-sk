@@ -172,3 +172,4 @@ export function relPosix(base: string, target: string): string | null {
 }
 
 export { normalize as normalizePath };
+

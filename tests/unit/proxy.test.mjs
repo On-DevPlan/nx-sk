@@ -176,3 +176,4 @@ test('APP_NAME 认领判据在 bootstrap 里可观测（代理安全的前提）
   // 顶层 close() 会在所有测试跑之前就面板关掉——真实踩过的坑）
   await new Promise((ok) => server2.close(ok));
 });
+

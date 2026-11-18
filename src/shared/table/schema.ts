@@ -462,3 +462,4 @@ export function checkFormulaNames(
   if (r.ok) return null;
   return ['SYNTAX', 'UNKNOWN_NAME', 'UNKNOWN_COL', 'NOT_SCALAR'].includes(r.code) ? r.error : null;
 }
+

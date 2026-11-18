@@ -75,3 +75,4 @@ test('显式 secret 类型：初值落盘即密文（读回原文）', async () 
   const masked = await entries.getEntry('af1', { section: 'demo', mask: true });
   assert.notEqual(masked.values.afToken, 'abc123', '--mask 下不是明文');
 });
+

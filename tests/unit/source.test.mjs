@@ -241,3 +241,4 @@ test('sourceImageIds：收正文内嵌的附件图（去重、跳过外链），
   assert.deepEqual(sourceImageIds(items), ['f_one'], '外链与 file item 都不算正文内嵌引用');
 });
 
+

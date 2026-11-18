@@ -98,3 +98,4 @@ export const entrylistBehavior: FieldBehavior = {
   sensitive: isSensitiveDef,
   subFields: (def) => def?.fields || [],
 };
+

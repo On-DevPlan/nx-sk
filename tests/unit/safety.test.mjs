@@ -63,3 +63,4 @@ test('仓库里没有 store.json / nxsk.db —— 真实数据在 ~/nx-sk/，在
   const found = (await gitLines(['ls-files'])).filter((f) => /(^|\/)(store\.json|nxsk\.db)$/.test(f));
   assert.deepEqual(found, [], `仓库里出现了本机数据文件，数据应在 ~/nx-sk/: ${found.join(', ')}`);
 });
+

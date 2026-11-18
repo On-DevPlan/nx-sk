@@ -14,3 +14,4 @@ export const textareaBehavior: FieldBehavior = {
   sensitive: isSensitiveDef,
   subFields: noSubFields,
 };
+

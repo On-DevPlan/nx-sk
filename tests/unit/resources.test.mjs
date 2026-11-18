@@ -153,3 +153,4 @@ test('CLI 渲染不炸且带 locator', async () => {
   const r = await res.resolveLocator('nx-sk://section/ressec');
   assert.ok(res.renderResourceResolve(r).includes('资源栏目'));
 });
+

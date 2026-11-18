@@ -393,8 +393,8 @@ function isCipher(v) { return !!v && typeof v === 'object' && typeof v.ct === 's
 step('导入后 secret 落盘仍是密文（已用本机 vaultKey 重新加密）',
   !!entryB && isCipher(entryB));
 
-const skillGet = await cliJson(['skill', 'get', 'nx-sk', 'A01-填栏目与写条目', '--dry-run']);
-step('skill get --json 是四元', skillGet.skillName === 'nx-sk' && skillGet.ref === 'references/A01-填栏目与写条目.md'
+const skillGet = await cliJson(['skill', 'get', 'nx-sk', 'A01-填一条信息', '--dry-run']);
+step('skill get --json 是四元', skillGet.skillName === 'nx-sk' && skillGet.ref === 'references/A01-填一条信息.md'
   && skillGet.contentBytes > 1000 && typeof skillGet.install.status === 'string');
 
 const skillHuman = await cli(['skill', 'get', 'nx-sk', '--dry-run']);
@@ -410,8 +410,8 @@ const skillList = await cliJson(['skill', 'list']);
 step('assets 下只有一个可分发的 skill', skillList.skills.length === 1 && skillList.skills[0].name === 'nx-sk',
   `skills: ${skillList.skills.map((s) => s.name).join(', ')}`);
 
-const pdfGet = await cliJson(['skill', 'get', 'nx-sk', 'A07-PDF转图文SOP', '--dry-run']);
-step('A 序列可单独取（PDF SOP）', pdfGet.skillName === 'nx-sk' && pdfGet.ref === 'references/A07-PDF转图文SOP.md'
+const pdfGet = await cliJson(['skill', 'get', 'nx-sk', 'A07-把PDF转成图文SOP', '--dry-run']);
+step('A 序列可单独取（PDF SOP）', pdfGet.skillName === 'nx-sk' && pdfGet.ref === 'references/A07-把PDF转成图文SOP.md'
   && pdfGet.contentBytes > 1000);
 
 const { existsSync } = await import('node:fs');
@@ -615,4 +615,5 @@ const titles = finalList.entries.map((e) => e.title).sort();
 step('CLI 与 HTTP 写进的是同一份数据', finalList.count === 2 && titles.join('|') === 'HTTP造的数据|本机面板造的', titles.join(' / '));
 
 process.stdout.write(`\n冒烟通过：${passed} 项断言，全部在临时目录 ${home} 内完成\n`);
+
 

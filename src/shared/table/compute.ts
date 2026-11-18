@@ -151,3 +151,4 @@ export function computeTable(def: JsonRow | null | undefined, value: unknown): C
     declaredTotals: spec.totals,
   };
 }
+

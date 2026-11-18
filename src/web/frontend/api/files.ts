@@ -56,3 +56,4 @@ export function fileToDataUrl(file: Blob): Promise<string> {
     reader.readAsDataURL(file);
   });
 }
+

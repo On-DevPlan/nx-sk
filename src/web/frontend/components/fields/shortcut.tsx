@@ -119,3 +119,4 @@ export function ShortcutControl({ def, value, onChange, ctx }: ControlProps) {
     </div>
   );
 }
+

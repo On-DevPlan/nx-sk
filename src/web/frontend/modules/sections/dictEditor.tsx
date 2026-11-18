@@ -722,3 +722,4 @@ function ColumnRow({ col, table, onChange, onRemove }: {
     </div>
   );
 }
+

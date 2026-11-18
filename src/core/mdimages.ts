@@ -74,3 +74,4 @@ export function rewriteMdImages(
     return rec.path ? `[图片: ${label}] ${rec.path}` : `[图片: ${label}] ${rec.name}`;
   });
 }
+

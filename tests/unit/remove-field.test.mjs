@@ -162,3 +162,4 @@ test('台账（entry fields）不含已脱离的扩展出身键；list 序列化
   const item = list.entries.find((x) => x.id === e1.id);
   assert.ok(Array.isArray(item.detachedFields), 'list 出口同样带 detachedFields（恒输出）');
 });
+

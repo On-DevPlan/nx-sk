@@ -35,3 +35,4 @@ export const groupBehavior: FieldBehavior = {
   sensitive: () => false,
   subFields: noSubFields,
 };
+

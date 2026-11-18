@@ -16,3 +16,4 @@ process.on('warning', (w) => {
   const message = (w && w.message) || String(w);
   console.error(`${name}: ${message}`);
 });
+

@@ -33,3 +33,4 @@ export {
 } from './table/schema.ts';
 export { computeTable } from './table/compute.ts';
 export { formatNumber, formatCellValue, renderTableText } from './table/text.ts';
+

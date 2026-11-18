@@ -32,3 +32,4 @@ export function loadNumber(key: string, fallback: number, min: number, max: numb
 export function newId(prefix: string): string {
   return `${prefix}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 }
+

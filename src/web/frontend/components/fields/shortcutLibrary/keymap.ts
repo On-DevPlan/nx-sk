@@ -33,3 +33,4 @@ export function labelFor(code: string, fallbackKey: string): string {
 export function isModifier(code: string): boolean {
   return MODIFIER_CODES.has(code);
 }
+

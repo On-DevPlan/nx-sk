@@ -330,7 +330,7 @@ test('assets/<skill>/ 里的每条命令都真实存在（单向断言：防 age
     const spans = codeSpans(src);
     for (const m of spans.matchAll(/nx-sk\s+([a-z][a-z0-9-]*)(?:\s+([a-z][a-z0-9-]*))?/g)) {
       // 命令必须出现在行首或表格单元/行内代码的开头；
-      // 否则 "nx-sk skill get nx-sk references/A04-密钥与凭据.md" 里的第二个 nx-sk 会被当成命令
+      // 否则 "nx-sk skill get nx-sk references/A04-存密钥和凭据.md" 里的第二个 nx-sk 会被当成命令
       let k = m.index - 1;
       while (k >= 0 && spans[k] === ' ') k--;
       const prev = k < 0 ? '\n' : spans[k];
@@ -354,7 +354,7 @@ test('SKILL.md 的 ref 路由表 ↔ references/ 目录双向对账', async () =
   // 不看「文档提到的 ref 文件是否存在」。agent 会照着 SKILL.md 去取，然后拿到 NOT_FOUND。
   const skillDir = join(ROOT, 'assets', 'nx-sk');
   const skillMd = await readFile(join(skillDir, 'SKILL.md'), 'utf8');
-  // 合并后的 ref 名是「<序列><两位序号>-<中文动作>」：A01-填栏目与写条目 / B02-字段类型与格式。
+  // 合并后的 ref 名是「<序列><两位序号>-<中文动作>」：A01-填一条信息 / B02-字段类型与格式。
   const named = [...skillMd.matchAll(/`([AB]\d\d-[\w\u4e00-\u9fff]+)`/g)].map((m) => m[1]);
   assert.ok(named.length >= 4, `SKILL.md 的 ref 路由表只解析出 ${named.length} 条，断言可能失效`);
 
@@ -590,4 +590,5 @@ test('视图写请求的 body 键必须声明过（applySpec 会静默丢掉未�
   assert.ok(checked >= 8, `扫到的 body 键太少（${checked}），断言可能失效`);
   assert.deepEqual(problems, [], `视图发了未声明的 body 键（会被 applySpec 静默丢掉）:\n${problems.join('\n')}`);
 });
+
 

@@ -9,3 +9,4 @@ export function BoolControl({ value, onChange }: ControlProps) {
     </label>
   );
 }
+

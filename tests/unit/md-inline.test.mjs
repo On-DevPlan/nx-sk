@@ -155,3 +155,4 @@ test('image token 必须同时带 id 与 src（渲染层按 id 查表）', () =>
   assert.equal(remote.id, 'https://cdn.example.com/a.png');
   assert.equal(remote.remote, true);
 });
+

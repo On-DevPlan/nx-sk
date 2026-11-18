@@ -224,3 +224,4 @@ test('normalizeSection 收口自愈：老形状（groups + field.group）读一�
   // 自带的「原始资料」袋也一并补齐
   assert.ok(sec.fields.some((f) => f.type === 'source' && f.key === 'source'));
 });
+

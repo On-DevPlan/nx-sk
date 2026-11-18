@@ -16,3 +16,4 @@ export const secretBehavior: FieldBehavior = {
   sensitive: isSensitiveDef,
   subFields: noSubFields,
 };
+

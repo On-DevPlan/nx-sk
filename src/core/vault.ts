@@ -147,3 +147,4 @@ export async function sensitiveViewer(
   const { key } = await resolveVaultKey();
   return (blob: unknown) => decryptValue(key, blob);
 }
+

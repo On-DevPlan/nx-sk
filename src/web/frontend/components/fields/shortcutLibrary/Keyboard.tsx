@@ -1,4 +1,4 @@
-﻿// Keyboard.tsx —— ANSI 104 键 1:1 物理键盘预览
+// Keyboard.tsx —— ANSI 104 键 1:1 物理键盘预览
 // 与参考实现 shortcut-library/src/pages/Keyboard.tsx 的结构、类名、交互一致。
 import { type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import {
@@ -117,4 +117,5 @@ export default function Keyboard({
     </div>
   );
 }
+
 

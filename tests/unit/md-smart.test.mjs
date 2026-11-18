@@ -84,3 +84,4 @@ test('smartStats：代码里的地址不计入', () => {
   assert.deepEqual(smartStats('没有地址'), { copy: 0, url: 0 });
   assert.deepEqual(smartStats(null), { copy: 0, url: 0 });
 });
+

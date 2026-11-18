@@ -97,3 +97,4 @@ npx eslint . && npx vite build && node --test && node tests/smoke.mjs
 - **巡检类定时任务必须只读，禁止写仓库**：2026-11-09 一个定时巡检会话越权直接改工作树（批量改名、注入 `@ts-nocheck`、跑 build），与人工批次的改动互相覆盖。定时任务只允许读与汇报；需要改代码时只能出建议或走独立分支。
 - **带 `@ts-nocheck` 的文件不进类型检查，会让 typecheck 假绿**：同一事故中 20 个文件首行被批量注入 `// @ts-nocheck`，`tsc -b` 直接显示通过。批量改名/迁移后必须 `grep -r "@ts-nocheck" src bin tests` 复核（应为 0），并用 `git status --porcelain` 与文件 mtime 快照确认没有非自身写入。
 
+

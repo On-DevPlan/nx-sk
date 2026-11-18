@@ -321,3 +321,4 @@ function renameLayoutPanels(layout: unknown, from: string, to: string): unknown 
   for (const [k, v] of Object.entries(l.groups)) groups[k === from ? to : k] = v;
   return { ...l, panels, groups };
 }
+

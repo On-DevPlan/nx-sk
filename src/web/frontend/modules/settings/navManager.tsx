@@ -237,3 +237,4 @@ function SectionRow({ section, sid, dragging, mark, actions, onDragStart, onDrag
     </div>
   );
 }
+

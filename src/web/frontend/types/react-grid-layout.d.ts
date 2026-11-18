@@ -37,3 +37,4 @@ export declare function useContainerWidth(): {
   containerRef: RefObject<HTMLDivElement>;
   mounted: boolean;
 };
+

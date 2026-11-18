@@ -422,3 +422,4 @@ export function renderEntryChange(d: EntryChangeView) {
   const extra = d.newFields?.length ? `\n新增字段: ${d.newFields.join(', ')}` : '';
   return `已更新条目 ${d.title}（${d.id}）· 改动 ${(d.changed || []).join(', ')} · 完整度 ${c.filled}/${c.total} = ${c.ratio}%${extra}`;
 }
+

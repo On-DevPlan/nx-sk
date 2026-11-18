@@ -161,3 +161,4 @@ export const tableBehavior: FieldBehavior = {
   sensitive: isSensitiveDef,
   subFields: (def) => def?.columns || [],
 };
+

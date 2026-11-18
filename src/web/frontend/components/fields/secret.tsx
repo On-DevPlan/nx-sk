@@ -11,3 +11,4 @@ export function SecretControl({ value, onChange, disabled }: ControlProps) {
     />
   );
 }
+

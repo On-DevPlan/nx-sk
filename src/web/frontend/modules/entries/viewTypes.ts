@@ -94,3 +94,4 @@ export function syncEntryHash(sectionId: string, entryId: string): void {
   const next = `${base}?entry=${encodeURIComponent(entryId)}`;
   if (hash !== next) window.history.replaceState(null, '', next);
 }
+

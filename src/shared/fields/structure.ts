@@ -197,3 +197,4 @@ export function boardGroupsOf<T extends { key: string; type?: string; keys?: unk
     return { id, title: String(byKey.get(id)?.label ?? id), fields: members };
   });
 }
+

@@ -230,3 +230,4 @@ test('store 不存在：首次读取即落盘，重复读取 id 稳定（否则�
   assert.equal(third.entries[0].id, first.entries[0].id, '落盘后再读仍是同一套 id');
 });
 
+

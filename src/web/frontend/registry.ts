@@ -41,3 +41,4 @@ export const VIEWS: ViewDef[] = [
 ];
 
 export const SECTION_VIEW = VIEWS.find((v) => v.id === 'entries')!.component;
+

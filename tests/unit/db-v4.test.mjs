@@ -145,3 +145,4 @@ test('④ 坏脚本回滚：apply 中途失败整步撤销，库停在 v3 可用
   assert.ok(db.get("SELECT 1 AS x FROM field_data WHERE value LIKE '%aes-256-gcm%'"), '密文值行还在');
   db.close();
 });
+

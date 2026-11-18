@@ -112,3 +112,4 @@ export function importOrSeed(conn: Conn, jsonPath: string | null): ImportOutcome
     migration: oldVersion < STORE_VERSION ? { from: oldVersion, to: STORE_VERSION } : null,
   };
 }
+
