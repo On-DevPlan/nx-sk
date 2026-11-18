@@ -18,7 +18,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { DragEvent as ReactDragEvent, HTMLAttributes } from 'react';
 import { createPortal } from 'react-dom';
-import { Responsive, useContainerWidth } from 'react-grid-layout';
+import { Responsive } from 'react-grid-layout';
 import 'react-grid-layout/css/styles.css';
 import {
   BP_COLS, BREAKPOINTS, MARGIN, ROW_HEIGHT,
@@ -223,13 +223,52 @@ interface PanelProps {
 }
 
 /**
- * 一块面板（= 一个分组）。网格宽度由 useContainerWidth 实测（引擎要按像素算位置）；
- * 父容器变宽（拉左栏、窗口缩放）时它自己会重算。
+ * 面板正文的实测宽度。
+ *
+ * 不用 react-grid-layout 的 `useContainerWidth`：它用普通 ref + 一次性 effect 观察
+ * 挂载当时那个节点，节点被卸载重挂（折叠再展开）或容器晚一步才拿到真实宽度时，
+ * 都不会重新量 —— 网格就按旧宽度排版，块被压成窄条、看上去内容消失了（#40）。
+ * 这里用 callback ref：节点一被挂上来就量一次并观察它，卸载时断开。
  */
-function Panel({ group, layoutGroup, index, drag, draft, onPatch, ctx, onLayouts, onCollapse, onReset, fieldActions }: PanelProps) {
-  const { width, containerRef, mounted } = useContainerWidth();
+function useBodyWidth() {
+  const [width, setWidth] = useState(0);
+  const roRef = useRef<ResizeObserver | null>(null);
+
+  const containerRef = useCallback((node: HTMLDivElement | null) => {
+    roRef.current?.disconnect();
+    roRef.current = null;
+    if (!node) return;
+    const measure = () => {
+      const cs = getComputedStyle(node);
+      const pad = (Number.parseFloat(cs.paddingLeft) || 0) + (Number.parseFloat(cs.paddingRight) || 0);
+      const next = Math.round(Math.max(0, node.clientWidth - pad));
+      setWidth((prev) => (prev === next ? prev : next));
+    };
+    measure();
+    roRef.current = new ResizeObserver(measure);
+    roRef.current.observe(node);
+  }, []);
+
+  useEffect(() => () => roRef.current?.disconnect(), []);
+
+  return { width, containerRef, mounted: width > 0 };
+}
+
+/**
+ * 一块面板（= 一个分组）的正文：测量 + 网格 + 块。
+ * 只在这一组展开时挂载，所以每次展开都会重新量一次宽度。
+ */
+function PanelGrid({ group, layoutGroup, draft, onPatch, ctx, onLayouts, fieldActions }: {
+  group: BoardGroup;
+  layoutGroup?: GroupLayout;
+  draft: Record<string, unknown>;
+  onPatch: (key: string, value: any) => void;
+  ctx: BoardContext;
+  onLayouts: (gid: string, layouts: Record<string, GridItem[]>) => void;
+  fieldActions?: FieldActions;
+}) {
+  const { width, containerRef, mounted } = useBodyWidth();
   const layouts = useMemo<Record<string, GridItem[]>>(() => layoutGroup?.layouts || {}, [layoutGroup]);
-  const collapsed = layoutGroup?.collapsed === true;
   const [bp, setBp] = useState('lg');
   const [measured, setMeasured] = useState<Record<string, number>>({}); // 字段 key → 内容需要的像素高
 
@@ -286,6 +325,57 @@ function Panel({ group, layoutGroup, index, drag, draft, onPatch, ctx, onLayouts
     .filter((f): f is FieldDef => Boolean(f));
 
   return (
+    <div className="panel-body" ref={containerRef}>
+      {mounted ? (
+        <Responsive
+          width={width}
+          className="blk-grid"
+          layouts={effective}
+          breakpoints={BREAKPOINTS}
+          cols={BP_COLS}
+          rowHeight={ROW_HEIGHT}
+          margin={MARGIN}
+          containerPadding={[0, 0]}
+          // 位置由上面的「插入式排序」决定，不让引擎自己搬块；只留左右改宽
+          dragConfig={{ enabled: false }}
+          resizeConfig={{ enabled: true, handles: ['e', 'w'] }}
+          onResizeStop={commit}
+          onBreakpointChange={(next) => setBp(next)}
+        >
+          {fieldsInOrder.map((def, i) => (
+            // 注意：直接子元素必须是**原生 div**——网格引擎靠 cloneElement + ref 给子元素
+            // 注入定位与尺寸，函数组件接不住 ref（会抛 DraggableCore not mounted）。
+            // 块本身放在这层里面；这块 div 同时是「插入式拖拽」的落点判定区。
+            <div key={def.key} className={`blk-cell${fieldDrag.draggingIndex === i ? ' dragging' : ''}${fieldDrag.dropClass(i)}`} {...fieldDrag.itemProps(i)}>
+              <Block
+                def={def}
+                value={draft[def.key]}
+                onPatch={onPatch}
+                ctx={ctx}
+                onMeasure={onMeasure}
+                dragProps={fieldDrag.dragStartProps(i)}
+                fieldActions={fieldActions}
+              />
+            </div>
+          ))}
+        </Responsive>
+      ) : <div className="hint pad">正在量宽度…</div>}
+    </div>
+  );
+}
+
+/**
+ * 一块面板（= 一个分组）：标题行常驻，正文交给 PanelGrid。
+ *
+ * **为什么正文要单独一个组件**：折叠会卸载 `.panel-body`，而 `useContainerWidth`
+ * 的 ResizeObserver 只在组件挂载时观察当时的那个节点。展开后 DOM 是新节点，
+ * 却没有任何东西重新观察它 —— 网格一直用折叠前的宽度排版，块被压成窄条，
+ * 看起来就是「收起再展开，字段内容不见了」（#40）。
+ * 把测量与网格一起放在「只在展开时挂载」的 PanelGrid 里，每次展开都会重新量宽。
+ */
+function Panel({ group, layoutGroup, index, drag, draft, onPatch, ctx, onLayouts, onCollapse, onReset, fieldActions }: PanelProps) {
+  const collapsed = layoutGroup?.collapsed === true;
+  return (
     <section
       className={`panel${collapsed ? ' collapsed' : ''}${drag.draggingIndex === index ? ' dragging' : ''}${drag.dropClass(index)}`}
       {...drag.itemProps(index)}
@@ -312,42 +402,15 @@ function Panel({ group, layoutGroup, index, drag, draft, onPatch, ctx, onLayouts
         </span>
       </header>
       {collapsed ? null : (
-        <div className="panel-body" ref={containerRef}>
-          {mounted ? (
-            <Responsive
-              width={width}
-              className="blk-grid"
-              layouts={effective}
-              breakpoints={BREAKPOINTS}
-              cols={BP_COLS}
-              rowHeight={ROW_HEIGHT}
-              margin={MARGIN}
-              containerPadding={[0, 0]}
-              // 位置由上面的「插入式排序」决定，不让引擎自己搬块；只留左右改宽
-              dragConfig={{ enabled: false }}
-              resizeConfig={{ enabled: true, handles: ['e', 'w'] }}
-              onResizeStop={commit}
-              onBreakpointChange={(next) => setBp(next)}
-            >
-              {fieldsInOrder.map((def, i) => (
-                // 注意：直接子元素必须是**原生 div**——网格引擎靠 cloneElement + ref 给子元素
-                // 注入定位与尺寸，函数组件接不住 ref（会抛 DraggableCore not mounted）。
-                // 块本身放在这层里面；这块 div 同时是「插入式拖拽」的落点判定区。
-                <div key={def.key} className={`blk-cell${fieldDrag.draggingIndex === i ? ' dragging' : ''}${fieldDrag.dropClass(i)}`} {...fieldDrag.itemProps(i)}>
-                  <Block
-                    def={def}
-                    value={draft[def.key]}
-                    onPatch={onPatch}
-                    ctx={ctx}
-                    onMeasure={onMeasure}
-                    dragProps={fieldDrag.dragStartProps(i)}
-                    fieldActions={fieldActions}
-                  />
-                </div>
-              ))}
-            </Responsive>
-          ) : <div className="hint pad">正在量宽度…</div>}
-        </div>
+        <PanelGrid
+          group={group}
+          layoutGroup={layoutGroup}
+          draft={draft}
+          onPatch={onPatch}
+          ctx={ctx}
+          onLayouts={onLayouts}
+          fieldActions={fieldActions}
+        />
       )}
     </section>
   );
