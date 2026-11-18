@@ -54,6 +54,25 @@ function titleOf(item: any) {
   return '一段文字';
 }
 
+// —— 清单 / 预览之间的拖拽线 ——
+// 与侧栏、条目列表同一种手感：拖动只改本地 state（不落盘），松手写 localStorage，
+// 双击回默认；拖的过程中给 body 挂 col-resizing 让光标全局变成左右箭头。
+const SRC_W_KEY = 'nx-sk-source-list-w';
+const SRC_W_DEFAULT = 264;
+const SRC_W_MIN = 160;
+const SRC_W_MAX = 560;
+// 预览区至少留这么宽：清单再想宽也不能把正文挤没。
+// 抽屉本身很窄（side 模式）时，保证清单不越界优先——按「容器宽 - 这条线」算上限。
+const SRC_VIEW_MIN = 140;
+
+function loadSrcW(): number {
+  try {
+    const n = Math.round(Number(localStorage.getItem(SRC_W_KEY)));
+    if (Number.isFinite(n) && n >= SRC_W_MIN && n <= SRC_W_MAX) return n;
+  } catch { /* 隐私模式 */ }
+  return SRC_W_DEFAULT;
+}
+
 interface SourceDrawerProps {
   items: any[];
   onChange: (value: any) => void;
@@ -68,8 +87,7 @@ interface SourceDrawerProps {
  * 抽屉本体。单独一个组件：它有自己的焦点生命周期（打开聚焦、关闭归还），
  * 混在字段控件里会让两件事互相干扰。
  */
-function SourceDrawer({ items, onChange, onClose, title, sectionTitle, sectionId, entryId }: SourceDrawerProps) {
-  const { toast, guard } = useStore() as any;
+function SourceDrawer({ items, onChange, onClose, title, sectionTitle, sectionId, entryId }: SourceDrawerProps) {  const { toast, guard } = useStore() as any;
   const [selId, setSelId] = useState(items[0]?.id || null);
   const [dragOver, setDragOver] = useState(false);
   const [editorOver, setEditorOver] = useState(false);
@@ -86,6 +104,34 @@ function SourceDrawer({ items, onChange, onClose, title, sectionTitle, sectionId
   const taRef = useRef<any>(null);
   const dragDepth = useRef(0);
   const editorDepth = useRef(0);
+  // 分栏宽度：打开时读上次的值；拖宽 → 松手落 localStorage；双击回默认。
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const [listW, setListW] = useState(loadSrcW);
+  const listWRef = useRef(listW);
+  const [dragSplit, setDragSplit] = useState(false);
+  useEffect(() => {
+    if (!dragSplit) return undefined;
+    const move = (ev: MouseEvent) => {
+      const box = bodyRef.current?.getBoundingClientRect();
+      if (!box) return;
+      const max = Math.max(SRC_W_MIN, Math.min(SRC_W_MAX, Math.round(box.width - SRC_VIEW_MIN)));
+      const w = Math.round(Math.max(SRC_W_MIN, Math.min(max, ev.clientX - box.left)));
+      listWRef.current = w;
+      setListW(w);
+    };
+    const up = () => {
+      setDragSplit(false);
+      try { localStorage.setItem(SRC_W_KEY, String(listWRef.current)); } catch { /* 隐私模式 */ }
+    };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+    document.body.classList.add('col-resizing');
+    return () => {
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', up);
+      document.body.classList.remove('col-resizing');
+    };
+  }, [dragSplit]);
   // 三态外壳：默认 side = 迁移前的右侧栏；center/fullpage 由 Peek 负责遮罩与焦点陷阱。
   // 默认形态可被「编辑默认视图」改写（localStorage，键按面板类型隔离）。
   const [mode, setMode] = useState<PeekMode>(() => peekDefault('source', 'side'));
@@ -306,10 +352,11 @@ function SourceDrawer({ items, onChange, onClose, title, sectionTitle, sectionId
         persistKey="source"
         defaultMode="side"
       >
-        <div className="source-drawer-body">
+        <div className="source-drawer-body" ref={bodyRef}>
           {/* 左：清单 + 入口 */}
           <div
             className={`source-list-pane${dragOver ? ' drag' : ''}`}
+            style={{ flex: `0 0 ${listW}px` }}
             onDragEnter={(e) => { e.preventDefault(); dragDepth.current += 1; setDragOver(true); }}
             onDragOver={(e) => e.preventDefault()}
             onDragLeave={() => { dragDepth.current -= 1; if (dragDepth.current <= 0) { dragDepth.current = 0; setDragOver(false); } }}
@@ -435,6 +482,20 @@ function SourceDrawer({ items, onChange, onClose, title, sectionTitle, sectionId
               ) : null}
             </div>
           </div>
+
+          {/* 分栏线：左右都能拖（清单宽度记忆在 localStorage，双击回默认） */}
+          <div
+            className={`source-splitter${dragSplit ? ' active' : ''}`}
+            role="separator"
+            aria-orientation="vertical"
+            title="拖动调整清单 / 预览宽度（双击恢复默认）"
+            onMouseDown={() => setDragSplit(true)}
+            onDoubleClick={() => {
+              listWRef.current = SRC_W_DEFAULT;
+              setListW(SRC_W_DEFAULT);
+              try { localStorage.setItem(SRC_W_KEY, String(SRC_W_DEFAULT)); } catch { /* 隐私模式 */ }
+            }}
+          />
 
           {/* 中：选中那条的正文（text 按 markdown 渲染，图片从附件库解析 / 外链直连） */}
           <div className="source-view-pane">
