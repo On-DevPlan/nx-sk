@@ -328,13 +328,15 @@ export default function SectionView({ sectionId: rawId, listHidden = false, side
 
   const addEntry = guard(async () => {
     const label = data?.section.titleLabel || '名称';
-    const answer = await dialog({ message: `新建「${data?.section.title}」条目，${label}是？`, input: { placeholder: `例如 ${data?.section.titleField || '名称'}` } });
+    const answer = await dialog({ message: `新建「${data?.section.title}」条目，${label}是？`, input: { placeholder: '给这条起个名字' } });
     if (!answer) return;
     const name = String(answer);
     const body: { section: string; title: string; set?: Record<string, string> } = { section: sectionId, title: name };
     if (data?.section.titleField) body.set = { [data.section.titleField]: name };
     const created = await api<{ id: string; title: string }>('/api/entries', { method: 'POST', body });
     toast(`已新建：${created.title}`);
+    patchUi({ entry: created.id });
+    syncEntryHash(sectionId, created.id);
     await load(created.id);
     await reload();
   });
@@ -349,6 +351,8 @@ export default function SectionView({ sectionId: rawId, listHidden = false, side
     if (!ok) return;
     await api(`/api/entries/${encodeURIComponent(current.id)}`, { method: 'DELETE' });
     toast('已删除');
+    patchUi({ entry: '' });
+    syncEntryHash(sectionId, '');
     await load('');
     await reload();
   });
@@ -490,7 +494,6 @@ export default function SectionView({ sectionId: rawId, listHidden = false, side
         {listHidden ? null : (
           <EntryListColumn
             listW={listW}
-            sectionId={data.section.id}
             entries={data.entries}
             count={data.count}
             shortcutDefs={shortcutDefs}
@@ -504,6 +507,7 @@ export default function SectionView({ sectionId: rawId, listHidden = false, side
             onCopyRef={copyEntryRef}
             onStartDrag={startColDrag}
             onResetDrag={resetColDrag}
+            onAdd={addEntry}
           />
         )}
 
