@@ -11,7 +11,6 @@ import type { SerializedEntry } from '../../../../shared/model.ts';
  */
 export default function EntryListColumn({
   listW,
-  sectionId,
   entries,
   count,
   shortcutDefs,
@@ -21,9 +20,9 @@ export default function EntryListColumn({
   onCopyRef,
   onStartDrag,
   onResetDrag,
+  onAdd,
 }: {
   listW: number;
-  sectionId: string;
   entries: SerializedEntry[];
   count: number;
   shortcutDefs: FieldDef[];
@@ -33,6 +32,8 @@ export default function EntryListColumn({
   onCopyRef: (entry: { id: string; title: string }) => void;
   onStartDrag: (e: ReactMouseEvent) => void;
   onResetDrag: () => void;
+  /** 空列表时也要有个显眼的「新建条目」入口（#43）。 */
+  onAdd: () => void;
 }) {
   return (
     <>
@@ -40,7 +41,9 @@ export default function EntryListColumn({
         <div className="card">
           <div className="colhead">
             <span className="pickall">条目列表</span>
+            <span className="grow" />
             <span className="right muted">{count}</span>
+            <button type="button" className="btn small ghost" onClick={onAdd} title="新建条目">＋ 新建</button>
           </div>
           <div className="colbody">
             {entries.length ? entries.map((e) => (
@@ -68,7 +71,7 @@ export default function EntryListColumn({
                   >⧉</button>
                 </span>
               </div>
-            )) : <Empty>还没有条目。点侧栏栏目名右侧的「＋」新建（侧栏收起时用右上角「新建条目」），或用 CLI：nx-sk entry add --section {sectionId} --set ...</Empty>}
+            )) : <Empty>还没有条目。点上方「＋ 新建」创建第一条。</Empty>}
           </div>
         </div>
       </div>

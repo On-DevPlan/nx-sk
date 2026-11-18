@@ -91,7 +91,8 @@ export function syncEntryHash(sectionId: string, entryId: string): void {
   const base = `#/${encodeURIComponent(sectionId)}`;
   const hash = window.location.hash || '';
   if (hash !== base && !hash.startsWith(`${base}?`)) return;
-  const next = `${base}?entry=${encodeURIComponent(entryId)}`;
+  // entryId 为空 = 回到栏目本身（删掉当前条目后地址栏不该还挂着它）。
+  const next = entryId ? `${base}?entry=${encodeURIComponent(entryId)}` : base;
   if (hash !== next) window.history.replaceState(null, '', next);
 }
 

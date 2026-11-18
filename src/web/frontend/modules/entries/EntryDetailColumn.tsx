@@ -71,13 +71,15 @@ export default function EntryDetailColumn({
               onClick={() => onCopyRef(current || draft)}
             >⧉</button>
             <span className="grow" />
-            {current ? <Tag kind={current.missing.length ? '' : 'strong'}>完整度 {current.completeness.ratio}%</Tag> : null}
             {dirtyCount ? (
               <>
                 <span className="hint nowrap">{dirtyCount} 处改动未保存</span>
                 <button type="button" className="btn small" onClick={onSave} title="保存当前条目的改动">保存</button>
+                <button type="button" className="btn small ghost" onClick={onDiscard} title="丢弃未保存的改动">放弃改动</button>
               </>
             ) : null}
+            <button type="button" className="btn small ghost" onClick={onOpenHistory} title="查看这条条目的字段变化时间线">变化历史</button>
+            <button type="button" className="btn small ghost" onClick={onRemoveEntry} title="删除这条条目（不可恢复）">删除条目</button>
           </div>
 
           {/* 条目名是「这一页的标题」，不是第一个字段：给它一点标题的语气，
@@ -90,6 +92,7 @@ export default function EntryDetailColumn({
               onChange={(e) => onDraftTitle(e.target.value)}
               aria-label={data.section.titleLabel || '名称'}
             />
+            {current ? <Tag kind={current.missing.length ? '' : 'strong'}>完整度 {current.completeness.ratio}%</Tag> : null}
           </div>
 
           {/* 条目内字段扩展正门（类型/分组可选）。#19：「字段=值 快填」旁路按验收反馈撤除 */}
@@ -127,11 +130,7 @@ export default function EntryDetailColumn({
             fieldActions={fieldActions}
           />
 
-          <div className="rowgap pad">
-            <button className="btn" onClick={onSave} disabled={!dirtyCount}>保存{dirtyCount ? `（${dirtyCount} 处改动）` : ''}</button>
-            <button className="btn ghost" onClick={onDiscard} disabled={!dirtyCount}>放弃改动</button>
-            <button className="btn ghost" onClick={onOpenHistory}>变化历史</button>
-            <button className="btn ghost" onClick={onRemoveEntry}>删除条目</button>
+          <div className="rowgap pad entry-hints">
             {current?.missing.length ? (
               <span className="hint">模板建议里还有 {current.missing.length} 项没填（不影响使用）：{current.missing.slice(0, 5).map((m) => m.label).join('、')}{current.missing.length > 5 ? '…' : ''}</span>
             ) : null}
