@@ -8,6 +8,9 @@
 
 ### Changed
 
+- **原始资料侧栏（任务 #37）**：清单与正文之间加了可拖拽分栏线——拖左右改宽、松手记住宽度
+  （`nx-sk-source-list-w`）、双击复原 264；拖动时全局光标变 `col-resize`。清单栏补 `min-width:0`，
+  否则长文件名会把自动最小宽顶住，拖线走了栏却不跟着走。
 - **模型**：`section.groups[]` 与 `field.group` 一起退役。组是 `type: 'group'` 的字段，
   用 `keys` 引用同栏目其他字段（组成员还能是另一个组字段 → 支持嵌套）。
   面板/CLI 的「分组」措辞与操作名（`add-group` / `rename-group` / `move-group` /
