@@ -15,6 +15,10 @@
 // 本文件是**纯函数**（不 import node、不 import react）：CLI / 服务端 / 浏览器
 // 三方共用同一套「默认怎么摆」「字段增删后怎么自愈」的规则——这类规则一旦有
 // 两份实现，必然漂移成「面板上好好的，CLI 读出另一套」。
+//
+// 0.42：分组不再是栏目上的数组，而是字段字典里 type='group' 的字段；
+// 本文件只从 fields 推导（boardGroupsOf），不认第二种结构。
+import { boardGroupsOf } from './fields/structure.ts';
 
 /** 版式 JSON 的版本。结构变了才加，读的时候按版本兜底。 */
 export const LAYOUT_VERSION = 1;
@@ -262,14 +266,18 @@ export function repackBlocks(items: Array<Partial<GridItem> & { i: string }> | n
   return out;
 }
 
-/** 栏目 = 分组 + 字段字典 → 版式只关心「哪些分组、每组有哪些字段」。 */
+/**
+ * 字段字典 → 版式只关心「哪些分组、每组有哪些字段」。
+ *
+ * 0.42：分组由字段字典推导（组是 type='group' 的字段，见 shared/fields/structure.ts），
+ * 不再读 `section.groups`——版式与结构之间只剩这一条依赖。
+ */
 export function groupsForLayout(
-  section: { groups?: unknown; fields?: unknown } | null | undefined,
+  section: { fields?: unknown } | null | undefined,
 ): Array<{ id: string; title: unknown; fields: unknown[] }> {
-  const groups = Array.isArray(section?.groups) ? section.groups : [];
   const fields = Array.isArray(section?.fields) ? section.fields : [];
-  return groups
-    .map((g) => ({ id: String(g.id), title: g.title || String(g.id), fields: fields.filter((f) => f.group === g.id) }))
+  return boardGroupsOf(fields as Array<{ key: string; type?: string; keys?: unknown; label?: string }>)
+    .map((g) => ({ id: g.id, title: g.title, fields: g.fields as unknown[] }))
     // 空分组在面板上不出现（没有块可摆），版式里也不该占位
     .filter((g) => g.fields.length);
 }

@@ -99,19 +99,9 @@ export function importOrSeed(conn: Conn, jsonPath: string | null): ImportOutcome
     );
   }
 
-  // declared 判据来自**原始 JSON** 的 groups 数组（syncSectionGroups 自愈出来的
-  // 分组不在里面 → declared=0）。
-  const declaredHint: Record<string, Set<string>> = {};
-  const rawSections = Array.isArray((parsed as { sections?: unknown[] } | null)?.sections)
-    ? ((parsed as { sections: Array<Record<string, unknown>> }).sections)
-    : [];
-  for (const s of rawSections) {
-    if (!s || typeof s !== 'object' || !s.id) continue;
-    const gs = Array.isArray(s.groups) ? s.groups : [];
-    declaredHint[String(s.id)] = new Set(gs.map((g) => String((g as { id?: unknown })?.id ?? '')));
-  }
-
-  writeStore(conn, store, { declaredHint });
+  // 0.42：分组已经是字段（normalize 会把旧 JSON 的 groups[] 折成 group 字段），
+  // 「声明过 vs 自愈出来」这个区分随旧结构一起退役——没有 declaredHint 了。
+  writeStore(conn, store, {});
   setMeta(conn, 'imported_from_json_at', nowIso());
 
   return {

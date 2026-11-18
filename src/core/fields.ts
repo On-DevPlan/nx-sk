@@ -34,6 +34,7 @@ export {
 } from './fields/templates.ts';
 
 export {
+  SOURCE_GROUP_KEY,
   SOURCE_FIELD,
   SOURCE_GROUP,
   ensureSourceBuiltin,
@@ -43,12 +44,14 @@ export {
 
 export {
   groupFields,
-  syncSectionGroups,
   fieldDrift,
   mergeTemplate,
   fieldByKey,
   fieldByLabel,
 } from './fields/diff.ts';
+
+// 层级（组 = 字段）的唯一实现：后端与面板共用同一份（面板从 shared 直接 import）。
+export { normalizeStructure, structureOf, boardGroupsOf, isGroupDef, groupKeysOf } from '../shared/fields/structure.ts';
 
 export {
   findSection,

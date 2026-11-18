@@ -7,7 +7,8 @@
 // 「运行时不做旧结构兼容」的落点就在这里：normalize 里的 v1→v2、v2→v3 迁移
 // **只在首启导入旧 store.json 时生效**（输入 version < STORE_VERSION）；
 // 从 DB 读出来的形状 version 恒为 STORE_VERSION，那些迁移函数一条都不会跑。
-import { ensureSourceBuiltin, instantiateTemplate, seedEntries, seedSections, syncSectionGroups } from './fields.ts';
+import { ensureSourceBuiltin, instantiateTemplate, seedEntries, seedSections } from './fields.ts';
+import { normalizeStructure } from '../shared/fields/structure.ts';
 import { normalizeFileRecord, type FileRecord } from './attachments.ts';
 import { sanitizeLayout } from '../shared/blockLayout.ts';
 import { nowIso } from './ids.ts';
@@ -23,8 +24,11 @@ export type { StoreEntry, StoreSection, StoreSettings, SectionGroup };
 
 /** v2：密钥栏目从 8 字段模板改成单字段 KV（名称 → 值）。
  *  v3：栏目有了 `kv` 标记——KV 栏目是一张表（面板渲染成表格，key 命令默认作用在它上面），
- *      并去掉 `settings.kvSection` 这个冗余概念。 */
-export const STORE_VERSION = 3;
+ *      并去掉 `settings.kvSection` 这个冗余概念。
+ *  v4（0.42）：栏目不再有 `groups[]`、字段不再有 `group`——「组」变成 type='group' 的
+ *      一条字段（keys 引用同栏目其他字段）。旧 store.json 在首启导入时折成新形状，
+ *      DB 侧由 schema v6 迁移一次；运行时不认旧形状。 */
+export const STORE_VERSION = 4;
 
 /** store 的完整形状（P4 起作为后端共享类型；DB facade 进出都过它）。 */
 export interface Store {
@@ -137,7 +141,6 @@ function normalizeSection(raw: RawSection | null | undefined): StoreSection | nu
     kv: raw.kv === true,
     titleField: raw.titleField ? String(raw.titleField) : null,
     titleLabel: String(raw.titleLabel || '名称'),
-    groups: Array.isArray(raw.groups) ? raw.groups.map((g) => ({ id: String(g.id), title: String(g.title || g.id) })) : [],
     fields: Array.isArray(raw.fields) ? raw.fields.map((x) => ({ ...x, key: String(x.key), label: String(x.label || x.key) })) : [],
     // 版式（块布局）是**显示关系**，与字段字典分开存：结构归栏目，版式归这一份 JSON。
     // 读的时候一律过 sanitizeLayout——手搓的脏 JSON 不许进 store，也不许让面板白屏。
@@ -145,16 +148,51 @@ function normalizeSection(raw: RawSection | null | undefined): StoreSection | nu
     createdAt: (raw.createdAt as string | null) || null,
     updatedAt: (raw.updatedAt as string | null) || null,
   };
-  // 「分组声明 ⊇ 字段引用」是栏目不变量：字段引用了没声明的分组，面板的分组表单
-  // 会整组消失（真实事故：servers 栏目 groups 为空，Web 端白屏而 CLI 正常）。
-  // 放在 normalize 收口——每条读写路径都会过这里，存量数据读一次就自愈。
-  out.groups = syncSectionGroups(out.groups, out.fields);
-  // 「原始资料」袋是每个非 KV 栏目自带的结构（不是可选字段）：存量栏目缺了
-  // 读一次就补上，与上面的分组自愈同一条收口路径。规则只此一份，见 ensureSourceBuiltin。
-  const ensured = ensureSourceBuiltin(out.groups, out.fields, { kv: out.kv });
-  out.groups = ensured.groups;
-  out.fields = ensured.fields;
+  // 0.42：栏目不变量只剩三条，全部收在字段字典上（唯一结构 = fields）：
+  //   ① 每个普通字段恰好归属一个组（孤儿入根组）② 组声明的成员必须存在、不成环
+  //   ③ 每个非 KV 栏目自带「原始资料」袋（source 字段 + 包住它的组字段）
+  // 前两条由 normalizeStructure 统一修（面板/后端共用同一份实现），第三条见 ensureSourceBuiltin。
+  out.fields = normalizeStructure(out.fields as any, { ensureRoot: !out.kv }) as typeof out.fields;
+  out.fields = ensureSourceBuiltin(out.fields as any, { kv: out.kv }) as typeof out.fields;
+  // 袋补完再修一次：source 字段的归属由 ensureSourceBuiltin 决定
+  out.fields = normalizeStructure(out.fields as any, { ensureRoot: !out.kv }) as typeof out.fields;
   return out;
+}
+
+/**
+ * 旧 store.json（v3 及以前）→ 新形状的一次性折算：`section.groups[]` + `field.group`
+ * 折成 type='group' 的字段。**只在首启导入旧 JSON 时跑**（normalize 的 oldVersion < 4 分支），
+ * DB 读出来的形状不会走这里——DB 侧的同一件事是 migrations/v6-apply.ts。
+ */
+function foldLegacyGroups(raw: Record<string, unknown>): void {
+  const groups = Array.isArray(raw.groups) ? (raw.groups as Array<Record<string, unknown>>) : [];
+  const fields = Array.isArray(raw.fields) ? (raw.fields as Array<Record<string, unknown>>) : [];
+  if (!groups.length && !fields.some((f) => f && typeof f.group === 'string')) return;
+  // 组 id 一次声明可能缺失（历史自愈行）→ 用字段引用补出来，标题就用 id。
+  const declared = new Map<string, string>();
+  for (const g of groups) {
+    if (!g || g.id == null) continue;
+    declared.set(String(g.id), String(g.title || g.id));
+  }
+  const memberOf = new Map<string, string[]>();
+  const plain: Array<Record<string, unknown>> = [];
+  for (const f of fields) {
+    if (!f || f.key == null) continue;
+    const { group, ...rest } = f;
+    const gid = group == null ? '' : String(group);
+    if (gid) {
+      if (!declared.has(gid)) declared.set(gid, gid);
+      const list = memberOf.get(gid) || [];
+      list.push(String(f.key));
+      memberOf.set(gid, list);
+    }
+    plain.push(rest);
+  }
+  const groupFields = [...declared.keys()].map((gid) => ({
+    key: gid, label: declared.get(gid) || gid, type: 'group', keys: memberOf.get(gid) || [],
+  }));
+  raw.fields = [...groupFields, ...plain];
+  delete raw.groups;
 }
 
 function normalizeEntry(raw: RawEntry | null | undefined): StoreEntry | null {
@@ -197,7 +235,6 @@ function migrateSecretToKv(store: Store) {
       moved.push(e.id);
     }
   }
-  sec.groups = tpl.groups;
   sec.fields = tpl.fields;
   sec.titleField = tpl.titleField;
   sec.titleLabel = tpl.titleLabel;
@@ -248,7 +285,6 @@ function migrateKvToTable(store: Store, oldSettings: { kvSection?: unknown } | n
 
   target.kv = true;
   target.fields = tpl.fields;
-  target.groups = tpl.groups;
   target.titleField = tpl.titleField;
   target.titleLabel = tpl.titleLabel;
   target.template = 'secret';
@@ -274,7 +310,10 @@ export function normalize(data: unknown): Store {
   base.settings = { ...base.settings, ...rawSettings };
   // v3 起 kvSection 没了：哪个栏目是 KV，由栏目自己的 kv 标记说了算
   delete base.settings.kvSection;
-  base.sections = (Array.isArray(d.sections) ? d.sections : []).map(normalizeSection).filter((x): x is StoreSection => x !== null);
+  const rawSections = Array.isArray(d.sections) ? d.sections : [];
+  // v4（0.42）：旧 JSON 的分组结构一次性折成 group 字段（DB 读路径 version 恒为 4，不会进这里）
+  if (oldVersion < 4) for (const s of rawSections) if (s && typeof s === 'object') foldLegacyGroups(s as unknown as Record<string, unknown>);
+  base.sections = rawSections.map(normalizeSection).filter((x): x is StoreSection => x !== null);
   base.entries = (Array.isArray(d.entries) ? d.entries : []).map(normalizeEntry).filter((x): x is StoreEntry => x !== null);
   base.files = (Array.isArray(d.files) ? d.files : []).map(normalizeFileRecord).filter((x): x is FileRecord => x !== null);
   if (oldVersion < 2) base._migration = migrateSecretToKv(base);

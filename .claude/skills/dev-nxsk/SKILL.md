@@ -11,7 +11,8 @@ description: nx-sk 的开发知识库（仓库 D:/a_js/js_proj/nx-sk）。讲清
 
 ## 这个项目一句话
 
-**本机个人资源管理器**：`store.json` 里按「栏目 → 分组 → 字段 → 条目」存个人信息与凭据；
+**本机个人资源管理器**：按「栏目 → 分组 → 字段 → 条目」存个人信息与凭据，其中
+**分组本身就是一种字段**（`type: 'group'`，`keys` 引用成员，schema v6 起 `groups` 表已删）；
 **CLI 与 Web 面板是同一套业务**（同一份 action 声明同时编译出命令行与 HTTP 路由），
 敏感字段密文落盘（AES-256-GCM），正文用块面板（一个分组 = 一块面板、一个字段 = 一个块）。
 
@@ -34,7 +35,7 @@ description: nx-sk 的开发知识库（仓库 D:/a_js/js_proj/nx-sk）。讲清
 
 | 你要做的事 / 看到的信号 | 读 |
 | --- | --- |
-| 「栏目 / 分组 / 字段 / 条目 / values 是什么关系」「store.json 长什么样」「改了字段为什么不生效」 | [[A01-概念与数据模型]] |
+| 「栏目 / 分组 / 字段 / 条目 / values 是什么关系」「存储长什么样（分组就是字段）」「改了字段为什么不生效」 | [[A01-概念与数据模型]] |
 | 「action 怎么声明」「为什么加了模块启动就崩」「面板 tab 从哪来」「一致性测试红了」 | [[A02-模块与工程契约]] |
 | 「加一条 CLI 命令」「加一个面板页」「加一次 store 版本迁移」 | [[A03-扩展方式]] |
 | 「块怎么排的」「高度为什么跟内容」「版式存在哪」「拖拽为什么这样设计 / 卡手」 | [[B01-拖拽与版式实现]] |
@@ -63,8 +64,8 @@ npx eslint . && npx vite build && node --test && node tests/smoke.mjs
    `tests/unit/consistency.test.mjs` 会核对视图里出现的 `/api` 字面量都能反查到 action。
 2. **结构是数据**：分组、字段字典、版式都是 store 里的数据，改它们一律走 `section update` 那批 action；
    前端不许硬编码「某个栏目有某个字段」。
-3. **归一化收口在 `src/core/store.js`**：任何新字段/新结构都要在这里被读时修正（老数据必须能读），
-   而不是让各页面各自兜底。
+3. **归一化收口在 `src/core/store-shape.ts`**：任何新字段/新结构都要在这里被读时修正（老数据必须能读），
+   而不是让各页面各自兜底。组的层级规则只有一份实现：`src/shared/fields/structure.ts`。
 4. **测试门禁**：`consistency.test.mjs` 钉死「模块目录 ↔ 后端注册表 ↔ 前端 VIEWS ↔ 视图里的 /api」四张表，
    并禁止面板源码里出现 emoji（注释里也不行）。
 5. **单文件行数预算**：`eslint-rules/line-budget.js` 按三档卡（600 提醒 / 800 要审批 / 1000 硬上限），
@@ -77,7 +78,7 @@ npx eslint . && npx vite build && node --test && node tests/smoke.mjs
 ## 检查清单（收尾自查）
 
 - [ ] 改动落在 action 层，CLI 能做的面板也能做（反之亦然）
-- [ ] 数据形状变了 → `src/core/store.js` 的 `normalize*` 已兼容老数据
+- [ ] 数据形状变了 → `src/core/store-shape.ts` 的 `normalizeSection` 已收口（v6 起分组也是字段）
 - [ ] 新模块/新视图已在 `src/runtime/registry.js` 与 `src/web/frontend/registry.js` 两处登记
 - [ ] `npx eslint . && npx vite build && node --test && node tests/smoke.mjs` 全绿
 - [ ] 用户可见行为变了 → 同步 `CHANGELOG.md` 与 `assets/nx-sk/references/*.md`（后者是用户向文档）
@@ -86,6 +87,13 @@ npx eslint . && npx vite build && node --test && node tests/smoke.mjs
 
 ## pitfalls（真实踩过的坑）
 
+- **「组」不是第二份结构（0.42 之后）**：`section.groups[]` 与 `field.group` 都已退役——组是
+  `type:'group'` 的字段，归属只住在它的 `keys` 里。看到任何代码还在写 `groups` 数组或给字段挂
+  `group` 键，那都是漏改（读出口的派生 `group` 除外，它不落盘）。
+  组 key 与字段 key 共用命名空间，撞名会让成员字段被去重丢掉——模板/迁移用 `freeGroupKey()` 改名。
+- **`validateFieldDef` 是白名单，早 `return` 等于关掉所有类型校验**：重构时把 `return` 插到前半段，
+  `table` / `entrylist` 的列校验整段失效，表现是「非法定义静默存进库」。改它之后必须跑
+  `node --test tests/unit/table.test.mjs`（有一批「Missing expected exception」专门抓这个）。
 - **巡检类定时任务必须只读，禁止写仓库**：2026-11-09 一个定时巡检会话越权直接改工作树（批量改名、注入 `@ts-nocheck`、跑 build），与人工批次的改动互相覆盖。定时任务只允许读与汇报；需要改代码时只能出建议或走独立分支。
 - **带 `@ts-nocheck` 的文件不进类型检查，会让 typecheck 假绿**：同一事故中 20 个文件首行被批量注入 `// @ts-nocheck`，`tsc -b` 直接显示通过。批量改名/迁移后必须 `grep -r "@ts-nocheck" src bin tests` 复核（应为 0），并用 `git status --porcelain` 与文件 mtime 快照确认没有非自身写入。
 

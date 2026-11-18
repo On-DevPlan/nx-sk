@@ -47,9 +47,12 @@ export async function previewImport(ref: unknown, buffer: Buffer | ZipFile[], { 
   const { byTitle, byId } = entryTitleIndex(targetEntries);
 
   const targetFieldKeys = new Set((target?.fields || []).map((f) => f.key));
-  const targetGroupIds = new Set((target?.groups || []).map((g) => g.id));
+  // 0.42：分组也是字段，所以「目标已有哪些组」= 已有 group 字段的 key；
+  // 导入包里也按字段读（老包里的 groups 数组由 normalizeSection 折过）。
+  const targetGroupIds = new Set((target?.fields || []).filter((f) => (f as { type?: string }).type === 'group').map((f) => f.key));
   const fieldsToAdd = (manifest.section.fields || []).filter((f: any) => !targetFieldKeys.has(f.key));
-  const groupsToAdd = (manifest.section.groups || []).filter((g: any) => !targetGroupIds.has(g.id));
+  const groupsToAdd = (manifest.section.fields || [])
+    .filter((f: any) => f && f.type === 'group' && !targetGroupIds.has(f.key));
 
   const conflicts: Array<{ id: string; title: string; reason: string; existingId: string; existingTitle: string; copyTitle?: string }> = [];
   for (const e of manifest.entries) {

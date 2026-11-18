@@ -88,7 +88,13 @@ test('导入防丢：栏目/分组/字段/条目/版式/设置逐项在库里一
   for (const s of json.sections) assert.ok(one('SELECT 1 FROM sections WHERE id=?', s.id), `栏目 ${s.id} 丢失`);
   for (const e of json.entries) assert.ok(one('SELECT 1 FROM entries WHERE id=?', e.id), `条目 ${e.id} 丢失`);
   for (const s of json.sections) {
-    for (const g of s.groups) assert.ok(one('SELECT 1 FROM groups WHERE section_id=? AND id=?', s.id, g.id), `分组 ${s.id}/${g.id} 丢失`);
+    // 0.42：分组落成 type='group' 的字段行（名字可能因 key 撞车而加后缀，所以按「有同名组」判）
+    for (const g of s.groups) {
+      assert.ok(
+        one("SELECT 1 FROM fields WHERE section_id=? AND type='group' AND (key=? OR key LIKE ?)", s.id, g.id, `${g.id}%`),
+        `分组 ${s.id}/${g.id} 丢失`,
+      );
+    }
     for (const f of s.fields) assert.ok(one('SELECT 1 FROM fields WHERE section_id=? AND key=?', s.id, f.key), `字段 ${s.id}/${f.key} 丢失`);
   }
 

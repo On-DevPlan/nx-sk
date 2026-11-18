@@ -9,6 +9,7 @@ import { serializeEntry } from '../../core/render.ts';
 import { sensitiveViewer } from '../../core/vault.ts';
 import { computeTable, renderTableText } from '../../shared/table.ts';
 import { FIELD_TYPES, type FieldDef } from '../../shared/fields/types.ts';
+import { boardGroupsOf, structureOf } from '../../shared/fields/structure.ts';
 import { getEntry, renderEntryGet, updateEntry } from './crud.ts';
 import { defsForEntry, mustFindSection, resolveEntry } from './shared.ts';
 
@@ -17,7 +18,9 @@ interface FieldDictEntry {
   key: string;
   label: string;
   type: string;
-  group: string;
+  /** 推导出来的归属（组字段的 keys 决定）；组字段自己也有 keys。 */
+  group?: string;
+  keys?: string[];
   kind?: string;
   fields?: unknown[] | null;
   columns?: Array<{ label: string; type: string; formula?: string }> | null;
@@ -35,6 +38,7 @@ export async function fieldDictionary({ section }: { section?: string } = {}) {
   const shape = (sec: StoreSection) => {
     // 台账 = 栏目字典 + 各条目的**扩展行**（v3：quickAdd 不进字典，但台账要看得见）。
     // 按 key 去重（字典优先），形状从各自的 spec 出。
+    const parentOf = structureOf(sec.fields as any).parentOf;
     const byKey = new Map<string, Record<string, unknown>>();
     for (const x of sec.fields as unknown as FieldDictEntry[]) byKey.set(x.key, x as unknown as Record<string, unknown>);
     for (const e of store.entries) {
@@ -51,9 +55,13 @@ export async function fieldDictionary({ section }: { section?: string } = {}) {
       title: sec.title,
       titleField: sec.titleField,
       titleLabel: sec.titleLabel,
-      groups: sec.groups,
+      // 0.42：分组由字段推导（组=字段）；台账仍按 {id,title} 下发，agent 的读法不变。
+      groups: boardGroupsOf(sec.fields as any).map((g) => ({ id: g.id, title: String(g.title) })),
       fields: [...byKey.values()].map((x) => ({
-        key: String(x.key), label: String(x.label ?? x.key), type: String(x.type || 'text'), group: x.group ? String(x.group) : undefined,
+        key: String(x.key), label: String(x.label ?? x.key), type: String(x.type || 'text'),
+        // 归属是推导的（组字段的 keys 说了算）；组字段本身也把它自己的 keys 带出去
+        group: parentOf.get(String(x.key)) || undefined,
+        keys: Array.isArray(x.keys) ? (x.keys as string[]) : undefined,
         kind: String(x.kind || ''),
         // 结构清单的列跟着字典出去：agent 写行之前得知道行里允许哪些键
         fields: (x.fields as unknown[] | null) || null,
@@ -95,29 +103,31 @@ export async function addEntryField(ref: unknown, ctx: {
   const rows = entryStructures(store).get(target.id) || [];
   const hit = rows.find((r) => r.key === key);
   if (hit) throw conflict(`条目已有字段「${key}」（行 ${hit.id}）——直接写值即可：nx-sk entry update ${target.id} --set ${key}=值`);
-  const groupIds = (sec.groups || []).map((g) => g.id);
-  const group = String(ctx.group ?? '').trim() || groupIds[0] || 'other';
-  if (!groupIds.includes(group) && group !== 'other') {
+  const groupIds = (sec.fields as Array<{ key: string; type?: string }>).filter((f) => f.type === 'group').map((f) => f.key);
+  const group = String(ctx.group ?? '').trim() || groupIds[0] || 'root';
+  if (!groupIds.includes(group) && group !== 'root') {
     throw badInput(`栏目「${sec.title}」没有分组 "${group}"（可用: ${groupIds.join(', ') || '无'}）`);
   }
-  const def = { key, label: String(ctx.label ?? '').trim() || key, type, group } as unknown as FieldDef;
+  // 归属走组字段的 keys（字段定义里不再有 group 键）
+  const def = { key, label: String(ctx.label ?? '').trim() || key, type } as unknown as FieldDef;
   if (ctx['dry-run']) {
-    return { status: 'skipped', dryRun: true, entry: target.id, wouldAddField: def, wouldSetValue: ctx.value !== undefined && ctx.value !== '' };
+    return { status: 'skipped', dryRun: true, entry: target.id, wouldAddField: { ...def, group }, group, wouldSetValue: ctx.value !== undefined && ctx.value !== '' };
   }
   await upsertEntryFields(target.id, [def]);
   const hasInitial = ctx.value !== undefined && ctx.value !== '';
   if (hasInitial) await updateEntry(target.id, { section: sec.id, set: { [key]: ctx.value } });
   const got = await getEntry(target.id, { section: sec.id });
-  return { ...got, addedField: def, valueSet: hasInitial };
+  // group 只是**读侧**的归属信息（存储里由组字段的 keys 表达），一起带出去方便调用方回显。
+  return { ...got, addedField: { ...def, group }, group, valueSet: hasInitial };
 }
 
 export function renderEntryAddField(d: Awaited<ReturnType<typeof addEntryField>>) {
   if ((d as { status?: string }).status === 'skipped') {
     const w = (d as unknown as { wouldAddField: FieldDef }).wouldAddField;
-    return `试运行（未落盘）：将给条目 ${String((d as unknown as { entry: string }).entry)} 添加扩展字段「${w.label}」(${w.key}) · 类型 ${w.type} · 分组 ${String(w.group)}${(d as unknown as { wouldSetValue: boolean }).wouldSetValue ? ' · 带初值' : ''}`;
+    return `试运行（未落盘）：将给条目 ${String((d as unknown as { entry: string }).entry)} 添加扩展字段「${w.label}」(${w.key}) · 类型 ${w.type} · 分组 ${String((d as { group?: string }).group ?? '')}${(d as unknown as { wouldSetValue: boolean }).wouldSetValue ? ' · 带初值' : ''}`;
   }
-  const got = d as Awaited<ReturnType<typeof getEntry>> & { addedField: FieldDef; valueSet: boolean };
-  return `已添加扩展字段「${got.addedField.label}」(${got.addedField.key}) · 类型 ${got.addedField.type} · 分组 ${String(got.addedField.group)}${got.valueSet ? ' · 已写入初值' : ''}\n${renderEntryGet(got)}`;
+  const got = d as Awaited<ReturnType<typeof getEntry>> & { addedField: FieldDef; valueSet: boolean; group?: string };
+  return `已添加扩展字段「${got.addedField.label}」(${got.addedField.key}) · 类型 ${got.addedField.type} · 分组 ${String(got.group ?? '')}${got.valueSet ? ' · 已写入初值' : ''}\n${renderEntryGet(got)}`;
 }
 
 /**

@@ -77,7 +77,6 @@ function fillMirror(def: Record<string, unknown> | Row): string | null {
  */
 export function readStore(db: Conn): LoadedRaw {
   const sectionRows = db.all('SELECT * FROM sections ORDER BY rowid');
-  const groupRows = db.all('SELECT * FROM groups ORDER BY section_id, sort, rowid');
   const fieldRows = db.all('SELECT * FROM fields ORDER BY section_id, sort, rowid');
   const entryRows = db.all('SELECT * FROM entries ORDER BY rowid');
   const fileRows = db.all("SELECT * FROM attachments WHERE kind = 'file' AND deleted_at IS NULL ORDER BY rowid");
@@ -88,17 +87,12 @@ export function readStore(db: Conn): LoadedRaw {
      ORDER BY ef.entry_id, ef.position, ef.key`,
   );
 
-  const groupsBySection = new Map<string, Array<{ id: string; title: string }>>();
-  for (const g of groupRows) {
-    const list = groupsBySection.get(String(g.section_id)) || [];
-    list.push({ id: String(g.id), title: String(g.title) });
-    groupsBySection.set(String(g.section_id), list);
-  }
   const fieldsBySection = new Map<string, Array<Record<string, unknown>>>();
   for (const f of fieldRows) {
     const list = fieldsBySection.get(String(f.section_id)) || [];
     // spec 是保真源：整条 FieldDef 原样回来（列只是镜像，不参与重建）。
-    list.push(parseJson(f.spec, { key: f.key, label: f.label, type: f.type, group: f.group_id || '' }) as unknown as Record<string, unknown>);
+    // 0.42 起分组也是字段（type='group'，spec 带 keys），所以这里不再有 group_id 镜像。
+    list.push(parseJson(f.spec, { key: f.key, label: f.label, type: f.type }) as unknown as Record<string, unknown>);
     fieldsBySection.set(String(f.section_id), list);
   }
 
@@ -111,7 +105,6 @@ export function readStore(db: Conn): LoadedRaw {
     kv: Number(s.kv) === 1,
     titleField: s.title_field == null ? null : String(s.title_field),
     titleLabel: String(s.title_label ?? '名称'),
-    groups: groupsBySection.get(String(s.id)) || [],
     fields: (fieldsBySection.get(String(s.id)) || []) as unknown as StoreSection['fields'],
     layout: parseJson(s.layout, {}),
     createdAt: s.created_at == null ? null : String(s.created_at),
@@ -169,12 +162,10 @@ export function readStore(db: Conn): LoadedRaw {
   };
 }
 
-/** writeStore 的可选输入（导入器用来把「原始 JSON 里声明过的分组」带进 declared 列）。 */
+/** writeStore 的可选输入（导入器/播种只需要声明「要不要校验 rev」）。 */
 export interface WriteStoreOptions {
   /** 期望的 rev（乐观并发）；null/undefined = 不校验（首启导入、播种）。 */
   expectedRev?: number | null;
-  /** 分组 declared 判据覆盖：sectionId → 声明过的 group id 集合（导入路径专用）。 */
-  declaredHint?: Record<string, Set<string>> | null;
 }
 
 /**
@@ -182,7 +173,7 @@ export interface WriteStoreOptions {
  *
  * @returns 新的 rev
  */
-export function writeStore(db: Conn, store: Store, { expectedRev = null, declaredHint = null }: WriteStoreOptions = {}): number {
+export function writeStore(db: Conn, store: Store, { expectedRev = null }: WriteStoreOptions = {}): number {
   const at = nowIso();
   return tx((conn) => {
     const curRev = getRev(conn);
@@ -219,11 +210,6 @@ export function writeStore(db: Conn, store: Store, { expectedRev = null, declare
     for (const r of capturedRows) {
       if (r.data_value != null) oldValues.set(String(r.id), String(r.data_value));
     }
-    // 分组 declared：原地保留（新出现的分组才算「声明」；自愈行由导入 hint 或读路径决定）。
-    const declaredBefore = new Map<string, number>();
-    for (const g of conn.all('SELECT section_id, id, declared FROM groups')) {
-      declaredBefore.set(`${String(g.section_id)}\u0000${String(g.id)}`, Number(g.declared));
-    }
     // 内部指针（section/entry/field）：attachments 里**不被全量重写删除**的行，
     // 删除钩子只软删（见第 6 步）。
     const livePointers = conn.all(
@@ -239,9 +225,8 @@ export function writeStore(db: Conn, store: Store, { expectedRev = null, declare
     // ── 3. 行插入（数组顺序 = rowid 顺序 = 读回顺序；sort 列显式化字段/分组顺序）──
     const insSection = `INSERT INTO sections (id, title, description, "order", template, kv, title_field, title_label, layout, created_at, updated_at)
       VALUES (:id, :title, :description, :order, :template, :kv, :titleField, :titleLabel, :layout, :createdAt, :updatedAt)`;
-    const insGroup = 'INSERT INTO groups (section_id, id, title, sort, declared) VALUES (:sectionId, :id, :title, :sort, :declared)';
-    const insField = `INSERT INTO fields (section_id, key, label, type, group_id, fill, hint, sensitive, sort, spec, default_value)
-      VALUES (:sectionId, :key, :label, :type, :groupId, :fill, :hint, :sensitive, :sort, :spec, :defaultValue)`;
+    const insField = `INSERT INTO fields (section_id, key, label, type, fill, hint, sensitive, sort, spec, default_value)
+      VALUES (:sectionId, :key, :label, :type, :fill, :hint, :sensitive, :sort, :spec, :defaultValue)`;
     const insEntry = `INSERT INTO entries (id, section_id, title, tags, created_at, updated_at)
       VALUES (:id, :sectionId, :title, :tags, :createdAt, :updatedAt)`;
     const insSetting = 'INSERT INTO settings (key, value, updated_at) VALUES (:key, :value, :at)';
@@ -256,17 +241,11 @@ export function writeStore(db: Conn, store: Store, { expectedRev = null, declare
         layout: s.layout === undefined || s.layout === null ? 'null' : JSON.stringify(s.layout),
         createdAt: s.createdAt ?? null, updatedAt: s.updatedAt ?? null,
       });
-      (s.groups || []).forEach((g, i) => {
-        const hint = declaredHint?.[s.id];
-        const declared = hint ? (hint.has(g.id) ? 1 : 0) : (declaredBefore.get(`${s.id}\u0000${g.id}`) ?? 1);
-        conn.run(insGroup, { sectionId: s.id, id: g.id, title: g.title, sort: i, declared });
-      });
       (s.fields || []).forEach((f, i) => {
         const def = f as unknown as Record<string, unknown>;
         conn.run(insField, {
           sectionId: s.id, key: String(def.key), label: String(def.label ?? def.key ?? ''),
           type: String(def.type || 'text'),
-          groupId: def.group ? String(def.group) : null,
           fill: ['normal', 'optional', 'avoid'].includes(String(def.fill)) ? String(def.fill) : 'normal',
           hint: String(def.hint ?? ''), sensitive: def.sensitive === true,
           sort: i,

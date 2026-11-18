@@ -223,3 +223,23 @@ cd D:/a_js/js_proj/nx-sk
 pnpm typecheck && node --test tests/unit/fields.test.ts && node tests/smoke.mjs
 pnpm test
 ```
+
+## 12. 特例：`group`（结构型字段，0.42）
+
+`group` 是**唯一一种「没有值」的字段类型**，它不走上面那套标量钩子，加它/改它时按这四条核对：
+
+| 环节 | 必须成立 | 在哪 |
+| --- | --- | --- |
+| 结构 | 组字段是容器：`keys` 是成员清单，成员可以是字段也可以是另一个组 | `src/shared/fields/structure.ts`（`isGroupDef` / `groupKeysOf` / `structureOf` / `normalizeStructure`） |
+| 行为 | `cell:false`、`coerce→null`、`reveal` 原样、`refs→[]`、`sensitive:false`、`noSubFields` | `src/core/fields/behaviors/group.ts`（已在 `FIELD_BEHAVIOR` / `FIELD_SEAL` 注册） |
+| 完整度 | **不计数**（容器没有可填的值） | `src/core/render.ts` 的 `completeness()` 先滤掉组字段 |
+| 面板 | 渲染成一行小标题（`GroupControl`），不是输入框；`FIELD_CONTROLS` 里必须有 `group` 键 | `src/web/frontend/components/fields/group.tsx` + `fields/index.ts` |
+
+**改组的正确姿势**：不要给字段加 `group` 键，也不要另写一份 groups 数组。所有结构变更走
+`src/modules/sections/structure.ts` 的算子（`moveMemberTo` / `moveWithinGroup` / `addGroupField` /
+`renameGroupField` / `removeGroupField`），它们只改组字段的 `keys`，字段本身不动。
+
+**读侧**：`fieldListOf()`（`src/modules/sections/common.ts`）与 `dumpSection` 会在字段上补
+**派生的** `group`（归属）并展开成「组 → 成员」的显示顺序。面板依赖这个派生键，
+但它**不落盘**——别在写入路径里把它当存储字段。
+

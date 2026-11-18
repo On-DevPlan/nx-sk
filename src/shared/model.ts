@@ -7,7 +7,11 @@
 // 否则面板会被拖进 fs / crypto。
 import type { FieldDef, FieldType } from './fields/types.ts';
 
-/** 栏目分组声明（头部导航的一个分组）。 */
+/**
+ * 模板里的「组声明」**只存在于代码常量**（field template 的作者态）：
+ * 模板是新建栏目的说明书，落进 store 时已经被 instantiateTemplate 折成
+ * type='group' 的字段（见 core/fields/templates.ts）。存储里没有这个形状。
+ */
 export interface SectionGroup {
   id: string;
   title: string;
@@ -23,7 +27,8 @@ export interface Section {
   kv: boolean;
   titleField: string | null;
   titleLabel: string;
-  groups: SectionGroup[];
+  // 0.42：栏目不再有 `groups[]`——「组」是 fields 里 type='group' 的一条字段，
+  // 用 `keys` 引用同栏目其他字段。层级只有这一份结构，见 shared/fields/structure.ts。
   fields: FieldDef[];
   // 播种/新建的草稿在 normalize 之前可能没有 layout；读路径一律过 sanitizeLayout
   layout?: unknown;

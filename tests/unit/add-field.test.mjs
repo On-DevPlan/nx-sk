@@ -11,10 +11,10 @@ const entries = await import('../../src/modules/entries/service.ts');
 
 const created = await entries.addEntry({ section: 'demo', title: 'af1' });
 
-test('add-field 只落条目行：扩展行 template_field_id=NULL，type/group 进 spec，字典不被污染', async () => {
+test('add-field 只落条目行：扩展行 template_field_id=NULL，type 进 spec，归属由组字段 keys 表达', async () => {
   const got = await entries.addEntryField('af1', { section: 'demo', key: 'budget', label: '预算', type: 'number', group: 'basic' });
   assert.equal(got.addedField.type, 'number');
-  assert.equal(got.addedField.group, 'basic');
+  assert.equal(got.group, 'basic', '读侧回显归属');
   assert.equal(got.valueSet, false, '没给初值');
 
   const s = await store.loadStore();
@@ -23,7 +23,8 @@ test('add-field 只落条目行：扩展行 template_field_id=NULL，type/group 
   assert.ok(row, '条目行建出来了');
   assert.equal(row.templateFieldId, null, '扩展字段没有模板出身');
   assert.equal(row.spec.type, 'number');
-  assert.equal(row.spec.group, 'basic');
+  // 0.42：字段定义里不再有 group——归属只住在栏目组字段的 keys 里
+  assert.equal(row.spec.group, undefined, '行 spec 不带 group');
   assert.equal(row.position, rows.length - 1, '追加在页面尾部');
 
   const demo = s.sections.find((x) => x.id === 'demo');

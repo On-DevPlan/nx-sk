@@ -1,6 +1,7 @@
 // 字段模板数据：`section add --template` 与面板「新建栏目」共用同一份字段/分组声明。
 
 import type { FieldDef, FieldType } from '../../shared/fields/types.ts';
+import { freeGroupKey } from '../../shared/fields/structure.ts';
 import type { SectionGroup } from '../store.ts';
 import { ensureSourceBuiltin } from './source-bag.ts';
 
@@ -388,7 +389,11 @@ const DEMO_GROUPS = [
   { id: 'rich', title: '富内容' },
 ];
 
-/** 字段模板（数据）：`section add --template` 与面板「新建栏目」共用同一份声明。 */
+/** 字段模板（数据）：`section add --template` 与面板「新建栏目」共用同一份声明。
+ *
+ * `groups` 是**模板的作者态**（写模板时按「小标题」成段列字段最省事），
+ * 落进 store 之前由 `templateFieldDefs()` 折成 type='group' 的字段——
+ * 存储里只有 field，没有第二份分组结构。 */
 export interface FieldTemplateDef {
   id: string;
   label: string;
@@ -398,6 +403,35 @@ export interface FieldTemplateDef {
   fields: FieldDef[];
   titleField: string | null;
   kv?: boolean;
+}
+
+/**
+ * 模板 → 字段字典（唯一的折算点）：把作者态的 groups + 字段里的 group 引用
+ * 折成「组字段（type='group'，keys=成员）+ 普通字段（没有 group 键）」。
+ *
+ * 顺序刻意保持「组在前、字段按原序」：组的顺序就是面板顺序，
+ * 成员在组内按模板里的书写顺序排。
+ */
+export function templateFieldDefs(t: FieldTemplateDef): FieldDef[] {
+  const memberOf = (gid: string) => t.fields
+    .filter((f) => String((f as unknown as { group?: string }).group ?? '') === gid)
+    .map((f) => String(f.key));
+  const plain: FieldDef[] = t.fields.map((f) => {
+    const { group: _drop, ...rest } = f as unknown as Record<string, unknown> & { group?: string };
+    return rest as unknown as FieldDef;
+  });
+  // KV 栏目就是一张表（一行一个键值对），**不该有分组**：作者态里的 groups
+  // 只是模板书写时的组织方式，落到存储时丢掉，免得 KV 表里多出一条无意义的组字段。
+  if (t.kv) return plain;
+  // 组 key 与成员字段共用 key 空间：撞名（如 `education` 组 + `education` 字段）就改名，
+  // 否则归一化会按 key 去重把成员字段丢掉。规则与迁移共用一份（freeGroupKey）。
+  const taken = new Set(plain.map((f) => String(f.key)));
+  const groupFields: FieldDef[] = t.groups.map((g) => {
+    const key = freeGroupKey(String(g.id), taken);
+    taken.add(key);
+    return { key, label: String(g.title || g.id), type: 'group', keys: memberOf(String(g.id)) } as unknown as FieldDef;
+  });
+  return [...groupFields, ...plain];
 }
 
 export const DEMO_TPL: FieldTemplateDef = {
@@ -547,10 +581,9 @@ interface TemplateOverrides {
 export function instantiateTemplate(templateId: unknown, overrides: TemplateOverrides = {}) {
   const t = getTemplate(templateId);
   if (!t) return null;
-  const baseGroups = t.groups.map((g) => ({ ...g }));
-  const baseFields = t.fields.map((x) => ({ ...x }));
-  // 每个非 KV 栏目都自带「原始资料」袋（规则只此一份，见 ensureSourceBuiltin）
-  const { groups, fields } = ensureSourceBuiltin(baseGroups, baseFields, { kv: t.kv });
+  // 模板作者态 → 字段字典（组字段 + 普通字段），再补「原始资料」袋。
+  const baseFields = templateFieldDefs(t);
+  const fields = ensureSourceBuiltin(baseFields, { kv: t.kv });
   return {
     id: overrides.id,
     title: overrides.title || t.label,
@@ -560,7 +593,6 @@ export function instantiateTemplate(templateId: unknown, overrides: TemplateOver
     kv: t.kv === true,
     titleField: overrides.titleField || t.titleField,
     titleLabel: overrides.titleLabel || t.titleLabel,
-    groups,
     fields,
     createdAt: overrides.createdAt || null,
     updatedAt: overrides.updatedAt || null,

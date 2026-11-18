@@ -89,7 +89,8 @@ export async function buildSectionZip(ref: unknown, { entryIds, passphrase, incl
       id: section.id, title: section.title, description: section.description || '',
       titleLabel: section.titleLabel || '名称', titleField: section.titleField || null,
       order: section.order, kv: section.kv === true,
-      groups: section.groups || [], fields: section.fields || [],
+      // 0.42：分组即字段（type='group' 的那几条），导出只带 fields，不再有 groups 键。
+      fields: section.fields || [],
     },
     counts: { entries: entries.length, available: all.length, files: fileRecords.length },
     selection: { partial: rows.length !== all.length, requested: picked },

@@ -126,6 +126,10 @@ body {
 .dict-head { display: flex; align-items: center; gap: 8px; padding: 10px 0; }
 .dict-card { border: var(--border); border-radius: 6px; background: var(--paper); margin-bottom: 12px; }
 .dict-card-title { padding: 10px 12px 2px; font-weight: 600; }
+/* 组字段（type='group'）的只读小标题：它是容器，不是可填的行 */
+.fld-group-title { display: flex; align-items: baseline; gap: 8px; padding: 6px 2px; border-bottom: var(--border); }
+.fld-group-title-text { font-weight: 600; }
+.fld-group-title-count { color: var(--mid); font-size: 11px; }
 .dbar { display: flex; gap: 8px; align-items: center; padding: 4px 2px 8px; color: var(--mid); font-size: 11px; }
 /* 一块面板 = 一个分组 */
 .dgrp { border: var(--border); border-radius: 6px; background: var(--paper); margin-bottom: 8px; }

@@ -4,15 +4,17 @@
 import { loadStore, mutateStore, entryStructures, syncEntryStructures, isDetachedField, type StoreSection } from '../../core/store.ts';
 import { assertSafeId } from '../../core/paths.ts';
 import { badInput, blocked, conflict, notFound } from '../../core/errors.ts';
-import { ensureSourceBuiltin, findSection, getTemplate, groupFields, instantiateTemplate, mergeTemplate, sectionNames, syncSectionGroups, templateSummaries } from '../../core/fields.ts';
+import { ensureSourceBuiltin, findSection, getTemplate, instantiateTemplate, mergeTemplate, normalizeStructure, sectionNames, templateSummaries } from '../../core/fields.ts';
+import { boardGroupsOf } from '../../shared/fields/structure.ts';
+import { fieldsFromInput } from './structure.ts';
 import { computeTable } from '../../shared/table.ts';
 import { groupsForLayout, reconcileLayout } from '../../shared/blockLayout.ts';
 import { completeness, dumpSection } from '../../core/render.ts';
 import { sensitiveViewer } from '../../core/vault.ts';
 import { nowIso } from '../../core/ids.ts';
 import type { FieldDef } from '../../shared/fields/types.ts';
-import { mustFind, summarize } from './common.ts';
-import { validateFieldDef, validateGroupDef } from './validate.ts';
+import { fieldListOf, mustFind, summarize } from './common.ts';
+import { validateFieldDef } from './validate.ts';
 
 // 定位方式放宽：内部 id 与用户手上的标题都接受（实现在 core/fields.js，避免模块互依）。
 export { findSection };
@@ -38,8 +40,9 @@ export async function getSection(ref: unknown) {
     titleField: s.titleField,
     createdAt: s.createdAt,
     updatedAt: s.updatedAt,
-    groupList: s.groups,
-    fieldList: s.fields,
+    // 分组清单是**推导**出来的（组=字段），对外仍按 {id,title} 给，CLI/面板的措辞不变
+    groupList: boardGroupsOf(s.fields as any).map((g) => ({ id: g.id, title: g.title })),
+    fieldList: fieldListOf(s.fields as any),
     // 版式（块布局）：agent 要照着改/复制版式时读这个字段，形状见 shared/blockLayout.js
     layout: reconcileLayout(s.layout, groupsForLayout(s)),
   };
@@ -68,23 +71,19 @@ export async function addSection({ id, title, template, description, order, fiel
     }
     draft = { ...t, id: sid };
   } else {
-    // 自定义栏目。groups/fields 先空着——用户的 --fields/--groups 应用完，
-    // 再由 ensureSourceBuiltin 统一补上自带的「原始资料」袋（见下方）。
-    draft = { id: sid, title: title || sid, description: description || '', order: Number.isFinite(order) ? (order as number) : 50, template: null, kv: false, titleField: null, titleLabel: '名称', groups: [], fields: [], createdAt: null, updatedAt: null };
+    // 自定义栏目。字段字典先空着——用户的 --fields/--groups 应用完，
+    // 再由 normalizeStructure + ensureSourceBuiltin 统一收口（结构不变量只此一处）。
+    draft = { id: sid, title: title || sid, description: description || '', order: Number.isFinite(order) ? (order as number) : 50, template: null, kv: false, titleField: null, titleLabel: '名称', fields: [], createdAt: null, updatedAt: null };
   }
-  if (Array.isArray(groups)) draft.groups = groups.map(validateGroupDef);
-  if (Array.isArray(fields)) {
-    const defaultGroup = draft.groups[0]?.id || 'other';
-    draft.fields = fields.map((x) => validateFieldDef(x, { allowGroup: defaultGroup }));
+  // --groups / --fields 是**输入层**的历史写法，落成字典时折成组字段（fieldsFromInput 唯一折算点）。
+  if (Array.isArray(groups) || Array.isArray(fields)) {
+    draft.fields = fieldsFromInput(Array.isArray(fields) ? fields : draft.fields, Array.isArray(groups) ? groups : null);
   }
-  // 与 normalize 同一条规则：--fields 引用了 --groups 没声明的分组时自动补上，
-  // 否则面板按声明数组渲染会整组消失（CLI 从字段推导所以看不出来）。
-  draft.groups = syncSectionGroups(draft.groups, draft.fields);
-  // 「每个结构自带」：无论模板实例还是自定义栏目（也无论是否传了 --fields/--groups），
-  // 非 KV 栏目都自带「原始资料」袋——杂乱资料先原样入袋，再按字段字典整理。
-  const ensured = ensureSourceBuiltin(draft.groups, draft.fields, { kv: draft.kv });
-  draft.groups = ensured.groups;
-  draft.fields = ensured.fields;
+  // 结构不变量（每个普通字段恰好归属一组；组声明只留存在的成员）+ 「每个结构自带」的
+  // 「原始资料」袋（非 KV 栏目都自带：杂乱资料先原样入袋，再按字段字典整理）。
+  draft.fields = normalizeStructure(draft.fields as any, { ensureRoot: draft.kv !== true }) as typeof draft.fields;
+  draft.fields = ensureSourceBuiltin(draft.fields as any, { kv: draft.kv }) as typeof draft.fields;
+  draft.fields = normalizeStructure(draft.fields as any, { ensureRoot: draft.kv !== true }) as typeof draft.fields;
   draft.createdAt = nowIso();
   draft.updatedAt = draft.createdAt;
 
@@ -110,7 +109,6 @@ export async function syncSection(ref: unknown, { 'dry-run': dryRun }: { 'dry-ru
   const target = mustFind(store, ref);
 
   // ── 阶段 1：代码模板 → 栏目字典 ──
-  let groups = target.groups;
   let fields = target.fields;
   let addedGroups: string[] = [];
   let addedFields: string[] = [];
@@ -118,7 +116,9 @@ export async function syncSection(ref: unknown, { 'dry-run': dryRun }: { 'dry-ru
   if (target.template) {
     const tpl = getTemplate(target.template);
     if (!tpl) throw badInput(`栏目记录了模板 ${target.template}，但该模板已不存在（可能被重命名或移除）。`);
-    ({ groups, fields, addedGroups, addedFields, changedFields } = mergeTemplate(target, tpl));
+    ({ fields, addedGroups, addedFields, changedFields } = mergeTemplate(target, tpl));
+    // 合并完再收口一次：模板新加的字段要落进合适的组（组是字段，归一化会补 keys）
+    fields = normalizeStructure(fields as any, { ensureRoot: target.kv !== true }) as typeof fields;
   }
 
   // ── 阶段 2：栏目字典 → 存量条目结构行 ──
@@ -155,7 +155,6 @@ export async function syncSection(ref: unknown, { 'dry-run': dryRun }: { 'dry-ru
   if (addedGroups.length || addedFields.length) {
     await mutateStore((s) => {
       const t = mustFind(s, ref);
-      t.groups = groups;
       t.fields = fields;
       t.updatedAt = nowIso();
     });
@@ -219,10 +218,10 @@ export async function dump(ref: unknown, { mask }: { mask?: boolean } = {}) {
     ...data,
     generatedAt: nowIso(),
     mask: !!mask,
-    groupIndex: groupFields(s.fields).map((g) => ({
+    groupIndex: boardGroupsOf(s.fields as any).map((g) => ({
       id: g.id,
-      title: s.groups.find((x) => x.id === g.id)?.title || g.id,
-      fields: ((g.fields || []) as Array<{ key: string }>).map((x) => x.key),
+      title: String(g.title),
+      fields: (g.fields as Array<{ key: string }>).map((x) => x.key),
     })),
   };
 }

@@ -24,6 +24,7 @@ import { ShortcutControl } from './shortcut.tsx';
 import { SecretControl } from './secret.tsx';
 import { FileControl } from './file.tsx';
 import { MdControl } from './md.tsx';
+import { GroupControl } from './group.tsx';
 import { DebugControl } from './debug.tsx';
 
 export const FIELD_CONTROLS: Record<FieldType, Control> = {
@@ -42,6 +43,7 @@ export const FIELD_CONTROLS: Record<FieldType, Control> = {
   secret: SecretControl,
   file: FileControl,
   md: MdControl,
+  group: GroupControl,
   debug: DebugControl,
 };
 

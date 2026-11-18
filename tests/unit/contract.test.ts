@@ -63,7 +63,11 @@ test('section dump：字段字典 + 条目 + 完整度', async () => {
   const types = new Set(d.fields.map((f: any) => f.type));
   for (const t of FIELD_TYPES) assert.ok(types.has(t), `demo 栏目缺类型 ${t}`);
 
-  const fieldKeys = d.fields.map((f: any) => f.key).sort();
+  // 组字段（type='group'）是容器：它在字典里有一行，但没有值——`values` 只承载叶子字段。
+  for (const f of d.fields.filter((x: any) => x.type === 'group')) {
+    assert.ok(Array.isArray(f.keys), `组字段必须带成员清单 keys: ${f.key}`);
+  }
+  const fieldKeys = d.fields.filter((f: any) => f.type !== 'group').map((f: any) => f.key).sort();
   for (const e of d.entries) {
     // 条目上除下列键外只允许 `tables`（表格现值，按需附带）
     // #20：`detachedFields`（已脱离模板字段清单）随 serializeEntry 恒输出

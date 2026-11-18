@@ -26,6 +26,7 @@ import { secretBehavior } from './behaviors/secret.ts';
 import { fileBehavior } from './behaviors/file.ts';
 import { mdBehavior } from './behaviors/md.ts';
 import { debugBehavior } from './behaviors/debug.ts';
+import { groupBehavior } from './behaviors/group.ts';
 
 export const FIELD_BEHAVIOR: Record<FieldType, FieldBehavior> = {
   text: textBehavior,
@@ -44,6 +45,7 @@ export const FIELD_BEHAVIOR: Record<FieldType, FieldBehavior> = {
   file: fileBehavior,
   md: mdBehavior,
   debug: debugBehavior,
+  group: groupBehavior,
 };
 
 /** 八个钩子 + `cell` —— 断言用的权威清单。 */
