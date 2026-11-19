@@ -159,8 +159,12 @@ function Block({ def, value, onPatch, ctx, onMeasure, dragProps, fieldActions, .
       const head = body.parentElement?.querySelector('.blk-head');
       // 量的是**内容自身**的自然高度：块体的高度被网格锁着，scrollHeight 在
       // `overflow: visible` 下等于可视高度（量了也白量），只有里面那个控件会按内容长。
+      // 两处取大：控件的盒子可能比它实际占的地方小（标签换行、内嵌多行 chips 都会
+      // 顶出来），只量 firstElementChild 会把这块量矮 —— 差的那几像素就是被裁掉的一行
+      // （#44：同组里几个块挤在一起、tags 被浮层压住半行）。
       const inner = body.firstElementChild;
-      const contentH = inner ? inner.getBoundingClientRect().height : body.scrollHeight;
+      const innerH = inner ? inner.getBoundingClientRect().height : 0;
+      const contentH = Math.max(innerH, body.scrollHeight);
       const need = Math.ceil(((head as HTMLElement | null)?.offsetHeight || 0) + contentH + 8);
       if (Math.abs(need - last) < 2) return; // 抖 1px 不必重排
       last = need;

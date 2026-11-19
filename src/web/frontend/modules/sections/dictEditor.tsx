@@ -111,11 +111,14 @@ export default function DictEditor({ sectionId, initial, types, labels, builtin,
   const [busy, setBusy] = useState(false);
   const [form, setForm] = useState<EditFormData>(() => formOf(initial));
   // 稳定引用：doDrop 的 useCallback 依赖它们，每次渲染新建数组会让回调形同虚设
-  const groups = useMemo(() => full.groupList || [], [full]);
   const fields = useMemo(() => full.fieldList || [], [full]);
-  // 引用了未声明分组的字段：存量数据 / 手改 store 才可能出现。给它们单独一块，
-  // 让人一眼看见并拖回某个分组，而不是混在分组里「看起来正常」。
-  const orphans = fields.filter((f) => !groups.some((g) => g.id === (f.group || 'other')));
+  // 分组面板 = 字典里的一条组字段 + 紧跟它的成员（fieldList 已按 keys 顺序排好）。
+  // 面板顺序就是顶层组字段在字典里的顺序——**没有第二份分组清单**，所以「拖分组」
+  // 走的是和「拖字段」同一条写路径（PATCH fields），不再有 `PATCH groups` 那条旧路。
+  const panels = useMemo(() => groupPanelsOf(fields), [fields]);
+  // 没有任何组接管的字段（KV 栏目 / 手改 store 的脏数据）：单独一区，拖进分组即可。
+  // 组字段自己**不算**孤儿——它就是分组本身，旧算法把它判成孤儿才多出一个假面板。
+  const loose = useMemo(() => fields.filter((f) => f.type !== 'group' && !f.group), [fields]);
 
   // 服务端回读后（改名成功 / 被拒绝）以服务端为准，本地草稿不留在旧值上
   useEffect(() => { setForm(formOf(full)); }, [full]);
@@ -171,11 +174,14 @@ export default function DictEditor({ sectionId, initial, types, labels, builtin,
     onChanged();
   });
 
-  // —— 分组顺序：整行是把手，落定一次 PATCH 整份 groups ——
+  // —— 分组顺序：整行是把手；落定一次 PATCH 整份 fields（组字段在字典里的位置就是面板顺序）——
   const groupDrag = useListDrag((from, insertAt) => {
-    const next = reorderAt(groups, from, insertAt);
-    if (!next || next === groups) return;
-    void patch({ groups: next });
+    const next = reorderAt(panels, from, insertAt);
+    if (!next || next === panels) return;
+    const flat = [...next.flatMap((p) => [p.def, ...p.rows]), ...loose];
+    // 只比较 key 签名：原地放回不写库
+    if (flat.every((r, i) => r.key === fields[i]?.key)) return;
+    void patch({ fields: flat });
   });
 
   // —— 字段拖拽：跨面板的落点自己记（useListDrag 是单列表的，这里要「拖进别的组」）——
@@ -321,7 +327,7 @@ export default function DictEditor({ sectionId, initial, types, labels, builtin,
         <button type="button" className="btn small ghost" onClick={onClose}>← 返回栏目</button>
         <strong>栏目属性</strong>
         <Tag>{sectionId}</Tag>
-        <span className="muted">{groups.length} 分组 · {fields.length} 字段</span>
+        <span className="muted">{panels.length} 分组 · {fields.filter((f) => f.type !== 'group').length} 字段</span>
         <span className="grow" />
         {busy ? <span className="muted">保存中…</span> : null}
       </div>
@@ -373,13 +379,13 @@ export default function DictEditor({ sectionId, initial, types, labels, builtin,
         拖分组标题行调整分组顺序 · 拖字段 ⠿ 把手换序，拖进别的分组就是挪过去 · 每次改动即时保存
       </div>
 
-      {/* 分组面板：一块 = 一个分组；块里的行 = 字段 */}
-      {groups.map((g, gi) => {
-        const list = fields.filter((f) => (f.group || 'other') === g.id);
-        const isBuiltin = !!builtin.group && g.id === builtin.group;
+      {/* 分组面板：一块 = 一个分组；块里的行 = 字段（组字段后面紧跟它的成员） */}
+      {panels.map((p, gi) => {
+        const isBuiltin = !!builtin.group && p.id === builtin.group;
+        const list = p.rows;
         return (
           <section
-            key={g.id}
+            key={p.id}
             className={`dgrp${groupDrag.draggingIndex === gi ? ' dragging' : ''}${groupDrag.dropClass(gi)}`}
             {...groupDrag.itemProps(gi)}
           >
@@ -394,7 +400,7 @@ export default function DictEditor({ sectionId, initial, types, labels, builtin,
               onDragEnd={groupDrag.dragStartProps(gi).onDragEnd}
             >
               <span className="panel-grip" aria-hidden>⠿</span>
-              <GroupHeadInputs g={g} builtin={isBuiltin} onRename={renameGroup} />
+              <GroupHeadInputs g={p} builtin={isBuiltin} onRename={renameGroup} />
               <span className="panel-count">{list.length} 字段</span>
               {isBuiltin ? <span className="hint">内置分组：每个栏目自带，删了下回读又会补回来</span> : null}
               <span className="right dgrp-acts">
@@ -402,14 +408,14 @@ export default function DictEditor({ sectionId, initial, types, labels, builtin,
                   type="button"
                   className="btn small ghost danger-ghost"
                   disabled={isBuiltin || list.length > 0}
-                  onClick={() => removeGroup(g.id)}
+                  onClick={() => removeGroup(p.id)}
                   title={list.length ? `这组里还有 ${list.length} 个字段：先把它们拖到别的分组或删掉` : '删除这个分组（必须是空的）'}
                 >
                   删除分组
                 </button>
               </span>
             </header>
-            <div className={bodyCls(g.id)} onDragOver={(e) => bodyOver(e, g.id)} onDrop={(e) => { e.preventDefault(); doDrop(); }}>
+            <div className={bodyCls(p.id)} onDragOver={(e) => bodyOver(e, p.id)} onDrop={(e) => { e.preventDefault(); doDrop(); }}>
               {list.length ? list.map((f) => (
                 <FieldBlock
                   key={f.key}
@@ -422,8 +428,8 @@ export default function DictEditor({ sectionId, initial, types, labels, builtin,
                   onDropRow={doDrop}
                   onStart={(e) => startField(e, f.key)}
                   onEnd={endField}
-                  onSet={(p) => setField(f.key, p)}
-                  onFill={(p) => setFill(f.key, p)}
+                  onSet={(pat) => setField(f.key, pat)}
+                  onFill={(pol) => setFill(f.key, pol)}
                   onRemove={() => removeField(f.key)}
                 />
               )) : <div className="dgrp-empty hint">这组还没有字段：把字段拖进来，或在下方「新增字段」里选它。</div>}
@@ -431,17 +437,17 @@ export default function DictEditor({ sectionId, initial, types, labels, builtin,
           </section>
         );
       })}
-      {!groups.length ? <div className="hint pad">还没有分组：字段会全部堆在内置「原始资料」袋里。先建一个。</div> : null}
+      {!panels.length ? <div className="hint pad">还没有分组：字段会全部堆在内置「原始资料」袋里。先建一个。</div> : null}
 
-      {/* 未声明分组（存量数据兜底）：只出不进——拖回上面的正经分组即可 */}
-      {orphans.length ? (
+      {/* 未归组（KV 栏目 / 脏数据兜底）：只出不进——拖回上面的分组即可 */}
+      {loose.length ? (
         <section className="dgrp orphans">
           <header className="dgrp-head">
-            <span className="panel-title nowrap">未声明分组</span>
-            <span className="panel-count">{orphans.length}</span>
+            <span className="panel-title nowrap">未归组</span>
+            <span className="panel-count">{loose.length}</span>
           </header>
           <div className="dgrp-body">
-            {orphans.map((f) => (
+            {loose.map((f) => (
               <FieldBlock
                 key={f.key}
                 f={f}
@@ -453,12 +459,12 @@ export default function DictEditor({ sectionId, initial, types, labels, builtin,
                 onDropRow={doDrop}
                 onStart={(e) => startField(e, f.key)}
                 onEnd={endField}
-                onSet={(p) => setField(f.key, p)}
-                onFill={(p) => setFill(f.key, p)}
+                onSet={(pat) => setField(f.key, pat)}
+                onFill={(pol) => setFill(f.key, pol)}
                 onRemove={() => removeField(f.key)}
               />
             ))}
-            <div className="dgrp-empty hint">这些字段的分组没有在「分组」里声明，拖到某个分组里即可（分组声明 ⊇ 字段引用）。</div>
+            <div className="dgrp-empty hint">这些字段不属于任何分组（KV 栏目本来就不分组）。拖进某个分组即可。</div>
           </div>
         </section>
       ) : null}
@@ -504,7 +510,7 @@ export default function DictEditor({ sectionId, initial, types, labels, builtin,
           </select>
           <select style={{ width: 150 }} value={nf.group} onChange={(e) => setNf({ ...nf, group: e.target.value })}>
             <option value="">（首个分组）</option>
-            {groups.map((g) => <option key={g.id} value={g.id}>{g.title}</option>)}
+            {panels.map((g) => <option key={g.id} value={g.id}>{g.title}</option>)}
           </select>
           {nf.type === 'entrylist' || nf.type === 'table' ? (
             <div className="stack" style={{ gap: 4, width: '100%' }}>
@@ -527,6 +533,31 @@ export default function DictEditor({ sectionId, initial, types, labels, builtin,
       </div>
     </div>
   );
+}
+
+/** 一个分组面板：组字段本身 + 紧跟它的成员（含嵌套组与普通字段，顺序即 keys 顺序）。 */
+interface GroupPanel { id: string; title: string; def: FieldRow; rows: FieldRow[] }
+
+/**
+ * 字段字典 → 分组面板清单。
+ *
+ * `fieldList` 的读出口（modules/sections/common.ts 的 fieldListOf）已经把「组字段 +
+ * 按 keys 顺序的成员」摊平成一条线，所以这里只需按**顶层组字段**切段：
+ * 每一段 = 一个面板；段外的普通字段 = 「未归组」（KV 栏目本来就不分组）。
+ * 组字段自己绝不能被当成孤儿——它就是分组本身（旧算法在这一步多造出一个假面板）。
+ */
+function groupPanelsOf(fields: FieldRow[]): GroupPanel[] {
+  const out: GroupPanel[] = [];
+  let cur: GroupPanel | null = null;
+  for (const f of fields) {
+    if (f.type === 'group' && !f.group) {
+      cur = { id: f.key, title: f.label || f.key, def: f, rows: [] };
+      out.push(cur);
+      continue;
+    }
+    if (cur) cur.rows.push(f);
+  }
+  return out;
 }
 
 /** 分组头的两个输入（id / 名字）：本地草稿、失焦才提交——与旧 GroupRow 一致。 */
