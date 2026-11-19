@@ -564,7 +564,10 @@ label.inline { display: inline-flex; align-items: center; gap: 6px; }
 .detached-chip .chip-restore:hover { text-decoration: underline; }
 
 /* ── toast ── */
-.toasts { position: fixed; right: 14px; bottom: 14px; display: flex; flex-direction: column; gap: 6px; z-index: 70; }
+/* toast 只是通报，不该挡住正文：右下角那块区域经常压着最后几个块（#44 附图里
+   「黑色药丸盖住 tags」就是这个形态）。pointer-events:none 让它只看不拦，
+   要点也点不到它下面被盖住的输入/标签的点击、选区都不会丢。 */
+.toasts { position: fixed; right: 14px; bottom: 14px; display: flex; flex-direction: column; gap: 6px; z-index: 70; pointer-events: none; }
 .toast {
   background: var(--ink);
   color: var(--paper);
