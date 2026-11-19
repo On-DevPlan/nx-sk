@@ -339,8 +339,10 @@
 
 **已知既有缺陷（未修，保持 1:1）**
 
-- `modules/sections/view.tsx` 的 `GroupRow.onMove` 实际只以 `'up'` 调用（`moveGroup` 的 `dir` 为可选）。
-  重构前就是这个写法，P6 只补类型、不修行为，待单独裁决。
+- ~~`modules/sections/view.tsx` 的 `GroupRow.onMove` 实际只以 `'up'` 调用~~ —— **已过期（#44）**：
+  分组改为「字段字典里 `type='group'` 的字段」之后，`GroupRow` / `onMove` / `moveGroup` 均已不存在，
+  组内顺序改由 `dictEditor.tsx` 的 `groupPanelsOf()` 按 `fieldList` 切段、拖拽时回写 `patch({ fields: flat })`。
+  回归由 `tests/web-sop.mjs` 的「栏目属性编辑器里组内字段换序」一步守住。
 
 ---
 

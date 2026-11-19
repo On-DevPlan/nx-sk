@@ -494,9 +494,11 @@ label.inline { display: inline-flex; align-items: center; gap: 6px; }
   transition: opacity .12s;
 }
 .blk-head:hover .blk-grip { opacity: 1; }
-/* 高度跟着内容长：块体不滚动、不裁字，块体高度就是内容的自然高度 */
-/* 块里的字比工具条大一号：正文是拿来读的，12px 只够「看参数」 */
-.blk-body { flex: 1; min-height: 0; font-size: 13px; }
+/* 高度跟着内容长：块体高度就是内容的自然高度。但网格行只能按 8px 取整，
+   量出来的「需要多少」偶尔仍差几像素（字体、图标基线都会抖），
+   而 `.blk` 根节点是 overflow:hidden —— 差一点就是**整行字被裁掉**（#44 附图）。
+   所以块体给一个滚动兜底：正常情况永远滚不到，真溢出时是「能滚」而不是「看不见」。 */
+.blk-body { flex: 1; min-height: 0; font-size: 13px; overflow: hidden auto; }
 .blk-body input, .blk-body select, .blk-body textarea { width: 100%; font-size: 13px; }
 /* 拖动 / 改宽时这一块确实「浮」起来了——全站唯一允许投影的时刻 */
 .react-grid-item.react-draggable-dragging .blk,
