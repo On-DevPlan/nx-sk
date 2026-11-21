@@ -259,11 +259,10 @@ export default function GrillPanel({
           ) : null}
 
           <label className="grill-free">
-            <span className="grill-label">还有没问到的？<em>会原样回给 agent</em></span>
+            <span className="grill-label">补充</span>
             <textarea
               rows={4}
               value={doc.freeform}
-              placeholder="还有什么要补充的…"
               onChange={(e) => onDoc(pending({ ...doc, freeform: e.target.value }))}
             />
           </label>
