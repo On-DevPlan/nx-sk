@@ -10,7 +10,7 @@ await useTempHome('nx-sk-proxy-');
 
 const panel = await import('../../src/core/panel-port.ts');
 const store = await import('../../src/core/store.ts');
-const sections = await import('../../src/modules/sections/service.ts');
+const templates = await import('../../src/modules/templates/service.ts');
 const entries = await import('../../src/modules/entries/service.ts');
 const { startServer } = await import('../../src/runtime/server.ts');
 const { ACTIONS } = await import('../../src/runtime/registry.ts');
@@ -19,12 +19,12 @@ const { proxyRun } = await import('../../src/runtime/cli-proxy.ts');
 const { APP_NAME } = await import('../../src/core/paths.ts');
 
 await store.saveStore(await store.loadStore());
-await sections.addSection({
-  id: 'px', title: '代理栏目',
+await templates.addTemplate({
+  id: 'px', title: '代理条目模板',
   fields: [{ key: 'name', label: '名称', type: 'text', group: 'g' }],
   groups: [{ id: 'g', title: 'G' }],
 });
-await entries.addEntry({ section: 'px', title: '甲', set: { name: '甲' } });
+await entries.addEntry({ template: 'px', title: '甲', set: { name: '甲' } });
 
 // —— 1. portfile：写读删与 pid 语义 ——
 
@@ -118,29 +118,29 @@ test('dispatch：未知 action 404；raw 下载口拒绝代理', async () => {
 });
 
 test('proxyRun：与直跑等价（读命令 deepEqual；写命令 tags/array 与 kv flag 读回一致）', async () => {
-  const list = ACTIONS.find((a) => a.id === 'section.list');
+  const list = ACTIONS.find((a) => a.id === 'template.list');
   const ctxList = applySpec(list, {});
   assert.deepEqual(await proxyRun(list, ctxList, port2), await list.run(ctxList, { transport: 'cli' }));
 
   const add = ACTIONS.find((a) => a.id === 'entry.add');
-  await proxyRun(add, applySpec(add, { section: 'px', title: '乙', tags: ['t1', 't2'] }), port2);
-  await add.run(applySpec(add, { section: 'px', title: '丙', tags: ['t1', 't2'] }), { transport: 'cli' });
-  const gotY = await entries.getEntry('乙', { section: 'px' });
-  const gotB = await entries.getEntry('丙', { section: 'px' });
+  await proxyRun(add, applySpec(add, { template: 'px', title: '乙', tags: ['t1', 't2'] }), port2);
+  await add.run(applySpec(add, { template: 'px', title: '丙', tags: ['t1', 't2'] }), { transport: 'cli' });
+  const gotY = await entries.getEntry('乙', { template: 'px' });
+  const gotB = await entries.getEntry('丙', { template: 'px' });
   assert.deepEqual(gotY.tags, gotB.tags, 'array flag 经代理二次 coerce 不变形');
-  assert.deepEqual(gotY.tags, ['t1', 't2']);
+  assert.deepEqual(gotY.tags, ['px', '代理条目模板', 't1', 't2'], '模板默认 tag 与显式 --tags 取并集，经代理不变形');
 
   const upd = ACTIONS.find((a) => a.id === 'entry.update');
-  const r = await proxyRun(upd, applySpec(upd, { ref: '乙', section: 'px', set: { name: '改名' } }), port2);
+  const r = await proxyRun(upd, applySpec(upd, { ref: '乙', template: 'px', set: { name: '改名' } }), port2);
   assert.equal(r.status, 'ok', 'kv flag 经代理（对象原样）照常工作');
-  assert.equal((await entries.getEntry('乙', { section: 'px' })).values.name, '改名');
+  assert.equal((await entries.getEntry('乙', { template: 'px' })).values.name, '改名');
 });
 
 test('proxyRun：错误形状等价——INVALID_INPUT 带用法串、code 一致', async () => {
   const get = ACTIONS.find((a) => a.id === 'entry.get');
   let directErr = null; let proxyErr = null;
-  try { await get.run(applySpec(get, { section: 'px' }), { transport: 'cli' }); } catch (e) { directErr = e; }
-  try { await proxyRun(get, applySpec(get, { section: 'px' }), port2); } catch (e) { proxyErr = e; }
+  try { await get.run(applySpec(get, { template: 'px' }), { transport: 'cli' }); } catch (e) { directErr = e; }
+  try { await proxyRun(get, applySpec(get, { template: 'px' }), port2); } catch (e) { proxyErr = e; }
   assert.ok(directErr && proxyErr, '两边都必须报错（缺 <ref>）');
   assert.equal(proxyErr.code, directErr.code);
   assert.ok(proxyErr.message.includes('用法:'), '代理错误必须带用法串（agent 的锚点）');

@@ -1,4 +1,4 @@
-import { entryStructures, loadStore, mutateStore, upsertEntryFields, type StoreEntry, type StoreSection } from '../../core/store.ts';
+import { entryStructures, loadStore, mutateStore, upsertEntryFields, type StoreEntry, type StoreTemplate } from '../../core/store.ts';
 import { badInput, conflict, notFound } from '../../core/errors.ts';
 import { isSensitiveField } from '../../core/fields.ts';
 import { behaviorOf } from '../../core/fields/registry.ts';
@@ -8,34 +8,46 @@ import { sensitiveViewer } from '../../core/vault.ts';
 import * as att from '../../core/attachments.ts';
 import { displayPath } from '../../core/paths.ts';
 import { computeTable } from '../../shared/table.ts';
+import { BLANK_TEMPLATE_ID } from '../../shared/tree.ts';
+import { nextSort, subtreeOf } from '../../core/tree.ts';
+import { boardGroupsOf, structureOf } from '../../shared/fields/structure.ts';
+import type { FieldDef } from '../../shared/fields/types.ts';
 import {
-  autoTitle, defsForEntry, isPlainRow, mergeInputs, mustFindSection,
+  autoTitle, defsForEntry, isPlainRow, mergeInputs, mustFindTemplate,
   prepareValue, prepareWrite, resolveEntry, resolveFieldDef, resolveOwnRow,
 } from './shared.ts';
+import { entryMatchesTags } from './search.ts';
 
-// 条目（entry）：栏目下的一条记录。
+// 条目（entry）：条目模板下的一条记录。
 // 写敏感字段时加密、读时**默认原文**（只有显式 --mask 才打码）——
 // 这条边界只在这里实现一次，两端共用。
 //
-// 写入分两趟：趟 A（异步，在草稿 section 上跑）解析字段、加密敏感值；
+// 写入分两趟：趟 A（异步，在草稿 template 上跑）解析字段、加密敏感值；
 // 趟 B（同步，在 mutateStore 事务里）只做赋值。这样加密只发生在事务外，
 // 事务里没有 await，也就没有「改了一半又抛错」的中间态。
 //
-// schema v3（写时复制）：字段解析顺序 = 条目自身结构行 → 栏目字典 → quickAdd 推断。
+// schema v3（写时复制）：字段解析顺序 = 条目自身结构行 → 条目模板字典 → quickAdd 推断。
 // quickAdd **不再登记进字典**——推断出的 def 只用于封装本次值，
 // 写后由 upsertEntryFields 把条目自身的占位行归正（type/label/spec）。
 
-export async function listEntries({ section, q }: { section?: string; q?: unknown } = {}) {
+export async function listEntries({ template, q, parent, tag, 'tag-mode': tagMode }: { template?: string; q?: unknown; parent?: string; tag?: unknown; 'tag-mode'?: string } = {}) {
   const store = await loadStore();
   const structures = entryStructures(store);
   let list = store.entries;
-  if (section) list = list.filter((e) => e.section === mustFindSection(store, section).id);
+  if (template) list = list.filter((e) => e.template === mustFindTemplate(store, template).id);
+  if (tag !== undefined) list = list.filter((e) => entryMatchesTags(e, tag, tagMode === 'all' ? 'all' : 'any'));
+  if (parent !== undefined) {
+    const pid = parent === '' || parent === 'root' ? null : resolveEntry(store, parent).id;
+    list = list.filter((e) => (e.parent ?? null) === pid);
+  }
   const viewers = new Map<string, Awaited<ReturnType<typeof sensitiveViewer>>>();
-  const out: Array<ReturnType<typeof serializeEntry> & { sectionTitle: string }> = [];
+  const out: Array<ReturnType<typeof serializeEntry> & { templateTitle: string }> = [];
   for (const e of list) {
-    const sec = store.sections.find((s) => s.id === e.section);
+    // 模板只记录出身：模板被删了，条目照样要读得出来（按 blank 模板 + 自身结构行）。
+    const sec = store.templates.find((s) => s.id === e.template)
+      || store.templates.find((s) => s.blank || s.id === BLANK_TEMPLATE_ID);
     if (!sec) continue;
-    if (!viewers.has(sec.id)) viewers.set(sec.id, await sensitiveViewer(sec, list.filter((x) => x.section === sec.id), structures));
+    if (!viewers.has(sec.id)) viewers.set(sec.id, await sensitiveViewer(sec, list.filter((x) => x.template === sec.id), structures));
     const ownRows = structures.get(e.id) || null;
     const item = serializeEntry(sec, e, { decrypt: viewers.get(sec.id), ownRows });
     if (q) {
@@ -50,7 +62,7 @@ export async function listEntries({ section, q }: { section?: string; q?: unknow
         .join('\n').toLowerCase();
       if (!hay.includes(String(q).toLowerCase())) continue;
     }
-    out.push({ ...item, sectionTitle: sec.title });
+    out.push({ ...item, templateTitle: sec.title });
   }
   return { count: out.length, total: store.entries.length, entries: out };
 }
@@ -63,11 +75,13 @@ function hayText(v: unknown): string {
   return String(v);
 }
 
-export async function getEntry(ref: unknown, { mask, section }: { mask?: boolean; section?: string } = {}) {
+export async function getEntry(ref: unknown, { mask, template }: { mask?: boolean; template?: string } = {}) {
   const store = await loadStore();
-  const entry = resolveEntry(store, ref, section);
-  const sec = store.sections.find((s) => s.id === entry.section);
-  if (!sec) throw notFound(`条目 ${entry.id} 指向的栏目已不存在: ${entry.section}`);
+  const entry = resolveEntry(store, ref, template);
+  // 模板只记录出身（0.43）：模板删掉/改 id 之后，条目仍按空白模板 + 自身结构行读。
+  const sec = store.templates.find((s) => s.id === entry.template)
+    || store.templates.find((s) => s.blank || s.id === BLANK_TEMPLATE_ID);
+  if (!sec) throw notFound(`条目 ${entry.id} 指向的条目模板已不存在，而且库里没有空白模板: ${entry.template}`);
   const structures = entryStructures(store);
   const ownRows = structures.get(entry.id) || null;
   const decrypt = await sensitiveViewer(sec, [entry], structures);
@@ -96,11 +110,11 @@ export async function getEntry(ref: unknown, { mask, section }: { mask?: boolean
   // 字段类型随读出来：CLI 渲染要知道哪个值是「图文」，才能把 f_xxx 换成文件名/路径；
   // 结构清单还要带**列定义**（entryFields），渲染行时才知道每个键的人读标签
   const fieldTypes: Record<string, string> = {};
-  const entryFields: Record<string, Array<{ key: string; label: string; sensitive: boolean }>> = {};
+  const entrylistFields: Record<string, Array<{ key: string; label: string; sensitive: boolean }>> = {};
   for (const f of defs) {
     fieldTypes[f.key] = f.type;
     if (f.type === 'entrylist') {
-      entryFields[f.key] = ((f as unknown as { fields?: Array<{ key: string; label: string; sensitive?: boolean }> }).fields || [])
+      entrylistFields[f.key] = ((f as unknown as { fields?: Array<{ key: string; label: string; sensitive?: boolean }> }).fields || [])
         .map((s) => ({ key: s.key, label: s.label, sensitive: s.sensitive === true }));
     }
   }
@@ -111,11 +125,32 @@ export async function getEntry(ref: unknown, { mask, section }: { mask?: boolean
     if (f.type !== 'table') continue;
     tables[f.key] = computeTable(f, serialized.values[f.key]);
   }
-  return { ...serialized, sectionTitle: sec.title, mask: !!mask, files, fieldTypes, entryFields, tables };
+  // 0.43：模板只是初始化蓝图；读一条条目时，字段结构以**条目自身行**为准。
+  // 把 defs + groups 一并下发，面板/CLI 不再依赖「模板 dump 里刚好有这条」。
+  const allDefs = ownRows
+    ? ownRows.map((r) => r.spec as unknown as FieldDef)
+    : sec.fields;
+  const groups = boardGroupsOf((allDefs.length ? allDefs : sec.fields) as any).map((g) => ({ id: g.id, title: String(g.title) }));
+  const parentOf = structureOf((allDefs.length ? allDefs : sec.fields) as unknown as FieldDef[]).parentOf;
+  // 无模板条目没有组字段：给一个「内容」根组，否则面板会把所有字段都过滤掉。
+  const groupsView = groups.length || !defsForEntry(sec, ownRows).length ? groups : [{ id: 'root', title: '内容' }];
+  const entryDefs = defsForEntry(sec, ownRows).map((f) => ({ ...f, group: parentOf.get(f.key) || groupsView[0]?.id }));
+  return {
+    ...serialized,
+    templateTitle: sec.title,
+    parent: entry.parent ?? null,
+    sort: entry.sort ?? 0,
+    fields: entryDefs,
+    // 面板按 entryFields 渲染块（含扩展字段）；模板被删/无模板时它就是自身的全部结构。
+    entryFields: entryDefs,
+    groups: groupsView,
+    mask: !!mask, files, fieldTypes, entrylistFields, tables,
+  };
 }
 
-export async function addEntry({ section, title, set, data, tags, 'dry-run': dryRun }: {
-  section?: string;
+export async function addEntry({ template, parent, title, set, data, tags, 'dry-run': dryRun }: {
+  template?: string;
+  parent?: string;
   title?: unknown;
   set?: unknown;
   data?: unknown;
@@ -123,13 +158,18 @@ export async function addEntry({ section, title, set, data, tags, 'dry-run': dry
   'dry-run'?: boolean;
 } = {}) {
   const store = await loadStore();
-  const sec = mustFindSection(store, section);
+  // 0.43：条目模板只是创建时的初始化蓝图；不给模板就按空白模板建——条目是唯一内容节点。
+  const sec = template
+    ? mustFindTemplate(store, template)
+    : store.templates.find((s) => s.blank || s.id === BLANK_TEMPLATE_ID)
+      || mustFindTemplate(store, BLANK_TEMPLATE_ID);
   const incoming = mergeInputs(set, data);
+  const parentId = parent ? resolveEntry(store, parent).id : null;
   if (!Object.keys(incoming).length && !title) {
     throw badInput(`至少要给一个字段：--set ${sec.fields[0]?.label || '字段'}=值（可重复），或 --data @file.json`);
   }
 
-  const { values, newFields } = await prepareWrite({ section: sec, incoming });
+  const { values, newFields } = await prepareWrite({ template: sec, incoming });
   // 模板默认值（v3）：字典里 defaultValue 非空、本次没给的键，落默认值。
   // 敏感字段走同一个封装入口（落盘即密文），与显式写入零差别。
   for (const def of sec.fields) {
@@ -142,11 +182,16 @@ export async function addEntry({ section, title, set, data, tags, 'dry-run': dry
   if (!finalTitle) {
     throw badInput(`无法确定条目名：加 --title <名>，或先填上「${sec.titleField || '首个字段'}」字段`);
   }
-  const dup = store.entries.find((e) => e.section === sec.id && e.title === finalTitle);
-  if (dup) throw conflict(`栏目「${sec.title}」下已有叫「${finalTitle}」的条目（${dup.id}）。要改它就用 entry update，别再加一条。`);
+  // 同一模板内重名会让「按标题定位」二义；跨模板可以同名（定位时用 --template 限定）。
+  const dup = store.entries.find((e) => e.template === sec.id && e.title === finalTitle);
+  if (dup) throw conflict(`条目模板「${sec.title}」里已有叫「${finalTitle}」的条目（${dup.id}）。要改它就用 entry update，别再加一条。`);
 
+  const givenTags = Array.isArray(tags) ? tags.map(String).map((x) => x.trim()).filter(Boolean) : [];
+  // 模板默认 tag 跟着条目走；条目自己的 --tags 是追加，不覆盖模板语义。
+  const finalTags = [...new Set([...(sec.tags || []), ...givenTags])];
   const entry = {
-    id: newId('e'), section: sec.id, title: finalTitle, tags: Array.isArray(tags) ? tags.map(String) : [],
+    id: newId('e'), template: sec.id, title: finalTitle, tags: finalTags,
+    parent: parentId, sort: nextSort(store, parentId),
     values, createdAt: nowIso(), updatedAt: nowIso(),
   };
   if (dryRun) {
@@ -160,7 +205,8 @@ export async function addEntry({ section, title, set, data, tags, 'dry-run': dry
   });
   if (newFields.length) await upsertEntryFields(entry.id, newFields);
   return {
-    status: 'ok', created: true, id: entry.id, title: entry.title, section: sec.id,
+    status: 'ok', created: true, id: entry.id, title: entry.title, template: sec.id,
+    parent: parentId,
     completeness: completeness(sec, entry), createdFields: newFields.map((f) => f.key),
   };
 }
@@ -169,8 +215,10 @@ export async function updateEntry(ref: unknown, patch: Record<string, any> = {})
   // TODO(P4): patch 是 CLI/HTTP 原样传入的键值集合（set/unset/title/tags/...），逐键校验在下方 errors 里
   const dryRun = patch['dry-run'];
   const store = await loadStore();
-  const target = resolveEntry(store, ref, patch.section);
-  const sec = mustFindSection(store, target.section);
+  const target = resolveEntry(store, ref, patch.template);
+  const sec = store.templates.find((s) => s.id === target.template)
+    || store.templates.find((s) => s.blank || s.id === BLANK_TEMPLATE_ID)
+    || mustFindTemplate(store, BLANK_TEMPLATE_ID);
   const incoming = mergeInputs(patch.set, patch.data);
   const unset: string[] = patch.unset || [];
 
@@ -183,12 +231,12 @@ export async function updateEntry(ref: unknown, patch: Record<string, any> = {})
   const unsetKeys: string[] = [];
   for (const k of unset) {
     const def = resolveOwnRow(ownRows, k) || resolveFieldDef(sec, k);
-    if (!def) throw notFound(`栏目「${sec.title}」没有字段: ${k}`);
+    if (!def) throw notFound(`条目模板「${sec.title}」没有字段: ${k}`);
     unsetKeys.push(def.key);
   }
 
   const { values, newFields } = await prepareWrite({
-    section: sec, ownRows, currentValues: target.values, incoming,
+    template: sec, ownRows, currentValues: target.values, incoming,
   });
 
   if (dryRun) {
@@ -201,11 +249,10 @@ export async function updateEntry(ref: unknown, patch: Record<string, any> = {})
     };
   }
 
-  // 重名会让 `entry get <名字>` / `key get <名字>` 变成二义（只能靠 id 定位），
-  // 所以改名时挡一下：KV 表格改键名、agent 改条目标题都走这里。
+  // 同一模板内重名会让「按标题定位」二义；跨模板可同名。
   if (patch.title !== undefined && String(patch.title) !== target.title) {
-    const dup = store.entries.find((e) => e.id !== target.id && e.section === target.section && e.title === String(patch.title));
-    if (dup) throw conflict(`同栏目下已有叫「${patch.title}」的了（${dup.id}）；先合并或删掉那一条。`);
+    const dup = store.entries.find((e) => e.id !== target.id && e.template === target.template && e.title === String(patch.title));
+    if (dup) throw conflict(`条目模板「${sec.title}」里已有叫「${patch.title}」的了（${dup.id}）；先合并或删掉那一条。`);
   }
 
   await mutateStore((s) => {
@@ -215,16 +262,18 @@ export async function updateEntry(ref: unknown, patch: Record<string, any> = {})
     for (const [k, v] of Object.entries(values)) e.values[k] = v;
     for (const k of unsetKeys) e.values[k] = null;
     if (patch.title !== undefined) e.title = String(patch.title);
-    if (Array.isArray(patch.tags)) e.tags = patch.tags.map(String);
+    if (Array.isArray(patch.tags)) {
+      e.tags = [...new Set(patch.tags.map(String).map((x) => x.trim()).filter(Boolean))];
+    }
     e.updatedAt = nowIso();
   });
   if (newFields.length) await upsertEntryFields(target.id, newFields);
 
   const after = await loadStore();
   const finalEntry = after.entries.find((x) => x.id === target.id)!;
-  const finalSec = after.sections.find((x) => x.id === finalEntry.section)!;
+  const finalSec = after.templates.find((x) => x.id === finalEntry.template)!;
   return {
-    status: 'ok', id: finalEntry.id, title: finalEntry.title, section: finalEntry.section,
+    status: 'ok', id: finalEntry.id, title: finalEntry.title, template: finalEntry.template,
     // 报**解析后**的字段 key，而不是用户敲的中文标签——调用方/agent 拿它去对比字典
     changed: [...Object.keys(values), ...unsetKeys.map((k) => `-${k}`)],
     newFields: newFields.map((f) => f.key),
@@ -232,20 +281,28 @@ export async function updateEntry(ref: unknown, patch: Record<string, any> = {})
   };
 }
 
-export async function removeEntry(ref: unknown, { section, 'dry-run': dryRun }: { section?: string; 'dry-run'?: boolean } = {}) {
+export async function removeEntry(ref: unknown, { template, 'dry-run': dryRun }: { template?: string; 'dry-run'?: boolean } = {}) {
   const store = await loadStore();
-  const target = resolveEntry(store, ref, section);
+  const target = resolveEntry(store, ref, template);
+  // 文件夹语义：删一个有子条目的条目，等于删整棵子树（子条目没有别的父级可挂）。
+  const doomed = subtreeOf(store, target.id).map((e) => e.id);
   if (dryRun) {
-    return { status: 'skipped', dryRun: true, wouldRemove: { id: target.id, title: target.title, section: target.section } };
+    return {
+      status: 'skipped', dryRun: true,
+      wouldRemove: { id: target.id, title: target.title, template: target.template, entries: doomed.length, ids: doomed },
+    };
   }
-  await mutateStore((s) => { s.entries = s.entries.filter((e) => e.id !== target.id); });
-  return { status: 'ok', removed: { id: target.id, title: target.title, section: target.section } };
+  await mutateStore((s) => { s.entries = s.entries.filter((e) => !doomed.includes(e.id)); });
+  return {
+    status: 'ok',
+    removed: { id: target.id, title: target.title, template: target.template, entries: doomed.length },
+  };
 }
 
-function maskAll(section: StoreSection, entry: StoreEntry, decrypt?: ((blob: unknown) => string) | undefined, mask = false) {
+function maskAll(template: StoreTemplate, entry: StoreEntry, decrypt?: ((blob: unknown) => string) | undefined, mask = false) {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(entry.values)) {
-    out[k] = isSensitiveField(section, k) ? displaySensitive(v, { mask, decrypt }) : v;
+    out[k] = isSensitiveField(template, k) ? displaySensitive(v, { mask, decrypt }) : v;
   }
   return out;
 }
@@ -254,7 +311,7 @@ function maskAll(section: StoreSection, entry: StoreEntry, decrypt?: ((blob: unk
 export function renderEntryList(d: Awaited<ReturnType<typeof listEntries>>) {
   const lines = [`${d.count} 条 / 共 ${d.total} 条`];
   for (const e of d.entries) {
-    lines.push(`  ${e.id}  ${(e.title || '（无名）').padEnd(16)} ${String(e.completeness.ratio).padStart(3)}% 完整度　[${e.section}]`);
+    lines.push(`  ${e.id}  ${(e.title || '（无名）').padEnd(16)} ${String(e.completeness.ratio).padStart(3)}% 完整度　[${e.template}]`);
     const missing = e.missing.slice(0, 6).map((m) => m.label).join('、');
     if (missing) lines.push(`      未填: ${missing}${e.missing.length > 6 ? ` 等 ${e.missing.length} 项` : ''}`);
     // 「不填」只报**真的空着**的可选字段。可选字段填了值还列出来，会让人以为
@@ -264,7 +321,7 @@ export function renderEntryList(d: Awaited<ReturnType<typeof listEntries>>) {
       lines.push(`      不填: ${skipped.map((m) => m.label).join('、')}（主动跳过，不计入完整度）`);
     }
   }
-  lines.push('', '看全部字段: nx-sk entry get <id> --json　或　nx-sk entry fields --section <id>');
+  lines.push('', '看全部字段: nx-sk entry get <id> --json　或　nx-sk entry fields --template <id>');
   return lines.join('\n');
 }
 
@@ -286,10 +343,10 @@ function valueLines(d: Awaited<ReturnType<typeof getEntry>>, v: unknown, key: st
   if (one) return [one];
   // 类型专属的多行格式查行为体的 `format`：表格整张印出来（表头 + 数据 + 统计行 + 公式报错）、
   // 资料袋逐条、清单逐行、图文把 `![说明](f_x)` 换成文件名/路径；返回 null 的走通用分支。
-  const formatted = behaviorOf(type).format({ key, type }, v, { files: d.files, entryFields: d.entryFields, tables: d.tables });
+  const formatted = behaviorOf(type).format({ key, type }, v, { files: d.files, entryFields: d.entrylistFields, tables: d.tables });
   if (formatted) return formatted;
   if (Array.isArray(v) && v.length && v.every(isPlainRow)) {
-    const subs = d.entryFields?.[key] || [];
+    const subs = d.entrylistFields?.[key] || [];
     const labelOf = (k: string) => subs.find((s) => s.key === k)?.label || k;
     return v.map((row, i) => Object.entries(row)
       .filter(([, x]) => !isBlank(x))
@@ -311,7 +368,8 @@ export function renderEntryGet(d: Awaited<ReturnType<typeof getEntry>>) {
   // 否则一份填满的资料会被报成「另有 7 项已标不填」，自相矛盾。
   const skipped = (d.excluded || []).filter((m) => isBlank(d.values?.[m.key]));
   const lines = [
-    `${d.title || d.id}（${d.id}）· 栏目 ${d.section} · 完整度 ${c.filled}/${c.total} = ${c.ratio}%`
+    `${d.title || d.id}（${d.id}）· 条目模板 ${d.template} · 完整度 ${c.filled}/${c.total} = ${c.ratio}%`
+    + (d.parent ? ` · 父级 ${d.parent}` : ' · 根')
     + (skipped.length ? ` · 另有 ${skipped.length} 项已标不填` : '')
     + `${d.mask ? ' · 已打码' : ''}`,
   ];
@@ -342,19 +400,19 @@ export function renderEntryGet(d: Awaited<ReturnType<typeof getEntry>>) {
  *   - 一个都找不到才算错（NOT_FOUND）——那时确实是 id 给错了。
  *   - 只认 NOT_FOUND / CONFLICT 两种业务错，别的（比如解密失败）照常抛，不吞。
  */
-export async function removeMany(refs: unknown, { section, 'dry-run': dryRun }: { section?: string; 'dry-run'?: boolean } = {}) {
+export async function removeMany(refs: unknown, { template, 'dry-run': dryRun }: { template?: string; 'dry-run'?: boolean } = {}) {
   const list = (Array.isArray(refs) ? refs : String(refs ?? '').split(','))
     .map((x) => String(x ?? '').trim()).filter(Boolean);
   if (!list.length) throw badInput('没有要删的条目（把 id 用逗号分隔，或重复传参）');
 
   const store = await loadStore();
   const ids = new Set<string>();
-  const removed: Array<{ id: string; title: string; section: string }> = [];
+  const removed: Array<{ id: string; title: string; template: string }> = [];
   const missing: string[] = [];
   for (const ref of list) {
     let e: StoreEntry | null = null;
     try {
-      e = resolveEntry(store, ref, section);
+      e = resolveEntry(store, ref, template);
     } catch (err) {
       const code = (err as { code?: string })?.code;
       if (code !== 'NOT_FOUND' && code !== 'CONFLICT') throw err;
@@ -363,14 +421,18 @@ export async function removeMany(refs: unknown, { section, 'dry-run': dryRun }: 
     if (!e) { missing.push(ref); continue; }
     if (ids.has(e.id)) continue;
     ids.add(e.id);
-    removed.push({ id: e.id, title: e.title, section: e.section });
+    removed.push({ id: e.id, title: e.title, template: e.template });
   }
   if (!ids.size) throw notFound(`这些条目都不存在: ${list.join(', ')}`);
 
   if (dryRun) {
     return { status: 'skipped', dryRun: true, wouldRemove: removed, count: removed.length, missing };
   }
-  await mutateStore((s) => { s.entries = s.entries.filter((e) => !ids.has(e.id)); });
+  await mutateStore((s) => {
+    const doomed = new Set<string>(ids);
+    for (const id of ids) for (const x of subtreeOf(s, id)) doomed.add(x.id);
+    s.entries = s.entries.filter((e) => !doomed.has(e.id));
+  });
   return { status: missing.length ? 'partial' : 'ok', removed, count: removed.length, missing };
 }
 
@@ -378,8 +440,8 @@ export async function removeMany(refs: unknown, { section, 'dry-run': dryRun }: 
 interface EntryRemoveManyView {
   status?: string;
   count?: number;
-  removed?: Array<{ id: string; title: string; section: string }>;
-  wouldRemove?: Array<{ id: string; title: string; section: string }>;
+  removed?: Array<{ id: string; title: string; template: string }>;
+  wouldRemove?: Array<{ id: string; title: string; template: string }>;
   missing?: string[];
 }
 
@@ -388,7 +450,7 @@ export function renderEntryRemoveMany(d: EntryRemoveManyView) {
   const lines = [d.status === 'skipped'
     ? `试运行（未落盘）：将删除 ${d.count} 条条目`
     : `已删除 ${d.count} 条条目`];
-  for (const e of list.slice(0, 20)) lines.push(`  ${e.title || '（无名）'}（${e.id}）· ${e.section}`);
+  for (const e of list.slice(0, 20)) lines.push(`  ${e.title || '（无名）'}（${e.id}）· ${e.template}`);
   if (list.length > 20) lines.push(`  …另有 ${list.length - 20} 条`);
   if (d.missing?.length) lines.push(`未找到（已跳过）: ${d.missing.join('、')}`);
   return lines.join('\n');
@@ -403,7 +465,7 @@ interface EntryChangeView {
   created?: boolean;
   title?: string;
   id?: string;
-  section?: string;
+  template?: string;
   completeness?: { filled: number; total: number; ratio: number };
   createdFields?: string[];
   newFields?: string[];
@@ -416,7 +478,7 @@ export function renderEntryChange(d: EntryChangeView) {
   if (d.removed) return `已删除条目 ${d.removed.id}（${d.removed.title}）`;
   const c = d.completeness!;
   if (d.created) {
-    return `已创建条目 ${d.title}（${d.id}）· 栏目 ${d.section} · 完整度 ${c.filled}/${c.total} = ${c.ratio}%`
+    return `已创建条目 ${d.title}（${d.id}）· 条目模板 ${d.template} · 完整度 ${c.filled}/${c.total} = ${c.ratio}%`
       + (d.createdFields?.length ? `\n新增字段: ${d.createdFields.join(', ')}` : '');
   }
   const extra = d.newFields?.length ? `\n新增字段: ${d.newFields.join(', ')}` : '';

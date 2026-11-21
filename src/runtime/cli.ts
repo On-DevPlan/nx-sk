@@ -24,7 +24,7 @@ async function cmdServe(ctx: Ctx) {
   const { appHome, displayPath } = await import('../core/paths.ts');
   const { autoOpenEnabled, resolvePortConflict, describeOccupant } = await import('../core/serve-port.ts');
 
-  await loadStore(); // 触发首次播种：面板一打开就该有「求职」栏目
+  await loadStore(); // 触发首次播种：面板一打开就该有「求职」条目模板
   const host = '127.0.0.1';
   // --port 0 = 让 OS 挑一个空闲端口（测试用），所以这里不能用 DEFAULT_PORT 兜底
   const desiredPort = ctx.port;
@@ -146,7 +146,7 @@ export function helpEntries(topic?: unknown): CommandEntry[] {
   if (byRoot.length) return byRoot;
   const byId = all.filter((e) => e.id === t);
   if (byId.length) return byId;
-  throw badInput(`未知帮助主题: ${t}（可用模块: ${MODULES.map((m) => m.id).join(' / ')}；或命令组如 section / entry）`);
+  throw badInput(`未知帮助主题: ${t}（可用模块: ${MODULES.map((m) => m.id).join(' / ')}；或命令组如 template / entry）`);
 }
 
 export function renderHelp(entries: CommandEntry[], topic?: unknown): string {
@@ -170,8 +170,8 @@ export function renderHelp(entries: CommandEntry[], topic?: unknown): string {
   }
   lines.push('常用姿势：');
   lines.push('  nx-sk bootstrap --json                          一次拿齐上下文（agent 首选入口）');
-  lines.push('  nx-sk section dump job --json                   一个栏目的全部信息（字段 + 全部条目 + 未填清单）');
-  lines.push('  nx-sk entry fields --section job                字段字典：填之前先看，别猜字段名');
+  lines.push('  nx-sk template dump job --json                   一个条目模板的全部信息（字段 + 全部条目 + 未填清单）');
+  lines.push('  nx-sk entry fields --template job                字段字典：填之前先看，别猜字段名');
   lines.push('  nx-sk entry update 张三 --set 微信=zhangsan 改一个字段（PATCH 语义）');
   lines.push('  nx-sk export run --format both                  整体导出到 ~/nx-sk/export');
   lines.push('  nx-sk serve                                     打开 Web 面板');
@@ -275,7 +275,7 @@ function expandSafeArgs(raw: Record<string, unknown>, { hasValueArg = false }: {
   // 时就被判定成「value 也是 stdin」，把两次消费搅在一起（真实踩到的顺序 bug）。
   if (typeof out.data === 'string') out.data = parseDataArg(out.data, takeStdin);
 
-  // `--data` 是位置参数 value 的替代给法（KV 表格只有一个值字段，语义确定），
+  // `--data` 是位置参数 value 的替代给法（旧单值密钥模板只有一个值字段，语义确定），
   // 所以给了 data 就不该再因为缺 value 而报用法错。
   // 取 value 键；没有 value 键时取对象里唯一那个键。
   //

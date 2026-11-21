@@ -49,12 +49,6 @@ function stateOf(db: Conn): { depth: number } {
   return st;
 }
 
-/** 当前连接的事务深度（0 = 不在事务里）。测试用来断言「事务真的关掉了」。 */
-export function txDepth(db: Conn | null = defaultDb): number {
-  if (!db) return 0;
-  return stateOf(db).depth;
-}
-
 function isThenable(v: unknown): v is Promise<unknown> {
   return !!v && (typeof v === 'object' || typeof v === 'function') && typeof (v as { then?: unknown }).then === 'function';
 }

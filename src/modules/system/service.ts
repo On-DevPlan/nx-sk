@@ -7,6 +7,8 @@ import { vaultStatus } from '../../core/vault.ts';
 import { FIELD_TYPES, FIELD_TYPE_LABELS, SOURCE_FIELD, SOURCE_GROUP, templateSummaries } from '../../core/fields.ts';
 import { blocked } from '../../core/errors.ts';
 import { compileRoute, usageOf } from '../../runtime/spec.ts';
+import { buildTree } from '../../core/tree.ts';
+import { BLANK_TEMPLATE_ID } from '../../shared/tree.ts';
 
 /**
  * 命令表在 runtime/registry.js，而分层规则说模块不能向上依赖 runtime。
@@ -22,8 +24,8 @@ export async function bootstrapInfo() {
   const store = await loadStore();
   const p = storePathInUse();
   const commands = await commandTable();
-  const bySection: Record<string, number> = {};
-  for (const e of store.entries) bySection[e.section] = (bySection[e.section] || 0) + 1;
+  const byTemplate: Record<string, number> = {};
+  for (const e of store.entries) byTemplate[e.template] = (byTemplate[e.template] || 0) + 1;
   return {
     app: { name: APP_NAME, label: APP_LABEL, version: VERSION, node: process.version, platform: process.platform },
     home: displayPath(appHome()),
@@ -36,22 +38,28 @@ export async function bootstrapInfo() {
       [ENV_PASSPHRASE]: process.env[ENV_PASSPHRASE] ? '已设置（口令模式）' : null,
     },
     settings: store.settings,
-    // kv 必须带上：bootstrap 是 agent 的首选入口，它得能一眼看出「哪个栏目是 KV 表」
-    // （缺这字段时 agent 只能猜 `/api/sections` 再去查，等于多一次往返）。
-    sections: store.sections.map((s) => ({
+    // 0.43：条目模板降级成模板。bootstrap 仍下发 templates（模板库 + 空白底座都带），
+    // 但左侧导航只认 `tree`——条目父子关系才是唯一层级。
+    templates: store.templates.map((s) => ({
       id: s.id, title: s.title, description: s.description, order: s.order, template: s.template,
-      kv: s.kv === true, titleLabel: s.titleLabel, fields: s.fields.length, entries: bySection[s.id] || 0,
+      blank: s.blank === true || s.id === BLANK_TEMPLATE_ID,
+      titleLabel: s.titleLabel, fields: s.fields.length, entries: byTemplate[s.id] || 0,
     })),
-    counts: { sections: store.sections.length, entries: store.entries.length, commands: commands.length },
+    tree: buildTree(store),
+    counts: {
+      templates: store.templates.filter((s) => !(s.blank || s.id === BLANK_TEMPLATE_ID)).length,
+      entries: store.entries.length,
+      commands: commands.length,
+    },
     vault: await vaultStatus(),
-    templates: templateSummaries(),
+    presets: templateSummaries(),
     // 字段类型是**封闭枚举**（面板要按类型渲染控件，不能随便加）。这里下发唯一一份，
     // 面板的「新增字段」下拉框据此渲染 —— 面板自己再抄一份清单的话，
     // 「后端加了一种类型、下拉框里永远看不到」这种错没人会发现。
     fieldTypes: FIELD_TYPES,
     // 类型的中文名，只给面板下拉框用（渲染成「图文（可贴图）（md）」）
     fieldTypeLabels: FIELD_TYPE_LABELS,
-    // 每个非 KV 栏目自带的「原始资料」分组与字段：面板要在结构上把它们标成**不可删**
+    // 每个条目模板自带的「原始资料」分组与字段：面板要在结构上把它们标成**不可删**
     // （删了下回读又会被补回来，等于删了个寂寞）。常量在 core/fields.js，这里只做下发。
     builtin: { group: SOURCE_GROUP.key, field: SOURCE_FIELD.key },
     corrupt: corruptNote(),
@@ -77,13 +85,13 @@ export async function healthInfo() {
 
   let storeOk = true;
   let storeDetail = '';
-  let sections = 0;
+  let templates = 0;
   let entries = 0;
   try {
     const s = await loadStore();
-    sections = s.sections.length;
+    templates = s.templates.length;
     entries = s.entries.length;
-    storeDetail = `${sections} 栏目 / ${entries} 条目`;
+    storeDetail = `${templates} 条目模板 / ${entries} 条目`;
   } catch (e) {
     storeOk = false;
     storeDetail = String((e as Error)?.message ?? e);
@@ -105,7 +113,7 @@ export async function healthInfo() {
       { checks },
     );
   }
-  return { status: 'ok', app: APP_NAME, version: VERSION, cwd: process.cwd(), sections, entries, vault, checks };
+  return { status: 'ok', app: APP_NAME, version: VERSION, cwd: process.cwd(), templates, entries, vault, checks };
 }
 
 export async function routesInfo({ module, http }: { module?: string; http?: string } = {}) {
@@ -135,12 +143,12 @@ export function renderBootstrap(info: Awaited<ReturnType<typeof bootstrapInfo>>)
   const lines = [
     `${info.app.label} v${info.app.version}（node ${info.app.node} · ${info.app.platform}）`,
     `存储:   ${info.storePath}`,
-    `栏目:   ${info.counts.sections} 个 · 条目 ${info.counts.entries} 条 · 命令 ${info.counts.commands} 条`,
+    `条目模板:   ${info.counts.templates} 个 · 条目 ${info.counts.entries} 条 · 命令 ${info.counts.commands} 条`,
     `密钥:   ${info.vault.source === 'env' ? '口令模式（NX_SK_PASSPHRASE）' : `本机密钥文件 ${info.vault.keyFile}`}`,
   ];
   if (info.corrupt) lines.push(`注意: 上次读取时发现损坏文件，已挪到 ${info.corrupt.to}`);
-  lines.push('', '栏目一览：');
-  for (const s of info.sections) lines.push(`  ${s.id.padEnd(12)} ${s.title}　${s.entries} 条 / ${s.fields} 字段`);
+  lines.push('', '条目模板一览：');
+  for (const s of info.templates) lines.push(`  ${s.id.padEnd(12)} ${s.title}　${s.entries} 条 / ${s.fields} 字段`);
   lines.push('', `提示: ${APP_NAME} help 看全部命令；加 --json 得机器可读输出。`);
   return lines.join('\n');
 }

@@ -15,7 +15,7 @@ test('前端源码路径交回 Vite，接口路径走代理', () => {
   assert.ok(shouldServeLocally('/components/ui.jsx'));
 
   assert.equal(shouldServeLocally('/api/bootstrap'), undefined, '真接口要交给代理');
-  assert.equal(shouldServeLocally('/api/sections/job/dump'), undefined);
+  assert.equal(shouldServeLocally('/api/templates/job/dump'), undefined);
   assert.equal(shouldServeLocally('/api/entries'), undefined);
   assert.equal(shouldServeLocally('/'), undefined);
   assert.equal(shouldServeLocally(''), undefined);

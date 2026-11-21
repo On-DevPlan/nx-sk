@@ -1,7 +1,7 @@
 {
   "name": "nx-sk",
-  "version": "0.41.0",
-  "description": "nx-sk · 本机个人资源管理器（server-cli-web 骨架）：栏目化存储个人信息与大模型密钥，CLI 与 Web 同源，敏感字段密文落盘。",
+  "version": "0.44.0",
+  "description": "nx-sk · 本机个人资源管理器（server-cli-web 骨架）：条目模板化存储个人信息与大模型密钥，CLI 与 Web 同源，敏感字段密文落盘。",
   "type": "module",
   "bin": {
     "nx-sk": "bin/nx-sk.mjs"
@@ -36,13 +36,13 @@
     "unlink:local": "node scripts/link-local.mjs --unlink",
     "dev:vite": "vite",
     "dev:serve": "pnpm run build && node bin/nx-sk.mjs serve --no-open",
-    "build": "tsc -p tsconfig.build.json && node scripts/copy-migrations.mjs && vite build && node scripts/link-local.mjs --auto",
+    "build": "node scripts/clean.mjs && tsc -p tsconfig.build.json && node scripts/copy-migrations.mjs && vite build && node scripts/link-local.mjs --auto",
     "start": "pnpm run build && node bin/nx-sk.mjs serve",
     "lint": "eslint .",
     "typecheck": "tsc -b",
     "test:unit": "node --test \"tests/**/*.test.mjs\" \"tests/**/*.test.ts\"",
     "test:smoke": "node tests/smoke.mjs",
-    "test:web": "node --test tests/web-sop.mjs",
+    "test:web": "node --test tests/web-sop.mjs tests/web-grill.mjs",
     "test": "pnpm run lint && pnpm run typecheck && pnpm run build && pnpm run test:smoke && pnpm run test:unit"
   },
   "dependencies": {

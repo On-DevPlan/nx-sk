@@ -1,5 +1,5 @@
 // 字段编辑器：按字段字典的 type 决定控件。
-// 字典来自后端（section.fields），所以**面板能填的字段与 CLI 能填的字段天然一致**。
+// 字典来自后端（template.fields），所以**面板能填的字段与 CLI 能填的字段天然一致**。
 //
 // 控件的分派收在 `./fields/index.ts` 的 `FIELD_CONTROLS: Record<FieldType, Control>`：
 // 每种类型一个 `.tsx`，漏实现由 `tsc -b` 拦住；运行时对历史脏类型兜底到单行文本。
@@ -20,15 +20,17 @@ export interface FieldGroupProps {
   fields: FieldDef[];
   draft: Record<string, unknown>;
   onPatch: (key: string, value: any) => void;
-  sectionTitle?: string;
+  templateTitle?: string;
   entryTitle?: string;
-  /** peek 头部的「新标签页」要能拼出 `#/<栏目>?entry=<id>`。 */
-  sectionId?: string;
+  /** peek 头部的「新标签页」要能拼出 `#/<条目模板>?entry=<id>`。 */
+  templateId?: string;
   entryId?: string;
+  /** 字段级直接回写（grill 确认按钮用）。 */
+  onCommitField?: (key: string, value: unknown) => Promise<boolean | undefined>;
 }
 
 /** 一整组字段（同一 group）的矩阵。 */
-export function FieldGroup({ title, fields, draft, onPatch, sectionTitle, entryTitle, sectionId, entryId }: FieldGroupProps) {
+export function FieldGroup({ title, fields, draft, onPatch, templateTitle, entryTitle, templateId, entryId, onCommitField }: FieldGroupProps) {
   return (
     <>
       <div className="group-title">{title}</div>
@@ -36,7 +38,7 @@ export function FieldGroup({ title, fields, draft, onPatch, sectionTitle, entryT
         <div className="grid">
           {fields.map((def) => (
             // data-block：#18 侧栏全局搜索「定位字段块」的锚点（与 blockBoard 的 .blk 同词汇）
-            <div key={def.key} data-block={def.key} className={`field ${['textarea', 'file', 'md', 'entrylist', 'table', 'source', 'shortcut', 'debug'].includes(def.type) ? 'wide' : ''}`}>
+            <div key={def.key} data-block={def.key} className={`field ${['textarea', 'file', 'md', 'entrylist', 'table', 'source', 'shortcut', 'debug', 'grill'].includes(def.type) ? 'wide' : ''}`}>
               <div className="flabel">
                 <span>{def.label}</span>
                 {def.sensitive ? <span className="tag bad">密文</span> : null}
@@ -50,7 +52,7 @@ export function FieldGroup({ title, fields, draft, onPatch, sectionTitle, entryT
                   def={def}
                   value={draft[def.key]}
                   onChange={(v) => onPatch(def.key, v)}
-                  ctx={{ sectionTitle, entryTitle, sectionId, entryId }}
+                  ctx={{ templateTitle, entryTitle, templateId, entryId, onCommitField }}
                 />
               </div>
             </div>

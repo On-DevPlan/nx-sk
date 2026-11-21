@@ -7,9 +7,9 @@ import { identityRemap, identityReveal, noSubFields } from './common.ts';
  * `{ v: 1, refs: string[] }`——与 entrylist / table 同一条「形状住在数据里」的纪律。
  *
  * 第四条（任务 #21 验收反馈：「debug字段引用具体的字段数据 不要引用结构」
- * 「结果至少是条目/条目-字段」）：**结构引用不收**——`nx-sk://section/…` 在
+ * 「结果至少是条目/条目-字段」）：**结构引用不收**——`nx-sk://template/…` 在
  * coerce 层就丢弃进 warnings（语法上无歧义，不用查库）；模板字段引用
- * `nx-sk://field/<栏目id>/<key>` 要查库才知道 head 是栏目还是条目，那条在
+ * `nx-sk://field/<条目模板id>/<key>` 要查库才知道 head 是条目模板还是条目，那条在
  * 写入封装 `seal/debug.ts` 里执行。引用要绑到**数据位置**（条目/条目-字段/附件），
  * 面板的格子才可能内联显示绑定位置的实时值（内联数据板）。
  *
@@ -18,7 +18,7 @@ import { identityRemap, identityReveal, noSubFields } from './common.ts';
  *     敏感的是被引用的内容（密文值在 resolve/预览侧打码，见 modules/resources）。
  *   - **非法引用丢弃并计入 warnings，不炸**：引用是「贴进来的文本」，
  *     脏一条不该让整次写入失败；丢掉的原文进 `warnings` 键，台账与面板都看得见。
- *   - **只收规范形态**（`nx-sk://…`）：复合串 `section:key` 是磁盘旧格式，
+ *   - **只收规范形态**（`nx-sk://…`）：复合串 `template:key` 是磁盘旧格式，
  *     解析层兼容读它（locator.parseLocator），但新写入一律立即可复制、可粘给 agent 的规范串。
  */
 export const debugBehavior: FieldBehavior = {
@@ -46,12 +46,12 @@ export const debugBehavior: FieldBehavior = {
       // 只认规范形态：parse 认旧复合串，但写入点不收（存进库的必须能一眼认出是 locator）
       const parts = text.startsWith(LOCATOR_SCHEME) ? parseLocator(text) : null;
       if (!parts) { warnings.push(text); continue; }
-      // #21：栏目引用 = 结构，不是数据位置，不收（模板字段引用在 seal 层查库拒）
-      if (parts.kind === 'section') {
+      // #21：条目模板引用 = 结构，不是数据位置，不收（模板字段引用在 seal 层查库拒）
+      if (parts.kind === 'template') {
         warnings.push(`${text}（结构引用不支持：至少引用到条目/条目-字段/附件）`);
         continue;
       }
-      const canonical = `${LOCATOR_SCHEME}${parts.kind}/${parts.kind === 'field' ? `${parts.entryId ?? parts.sectionId}/${parts.key}` : (parts.sectionId ?? parts.entryId ?? parts.fileId)}`;
+      const canonical = `${LOCATOR_SCHEME}${parts.kind}/${parts.kind === 'field' ? `${parts.entryId ?? parts.templateId}/${parts.key}` : (parts.templateId ?? parts.entryId ?? parts.fileId)}`;
       if (!refs.includes(canonical)) refs.push(canonical);
     }
     if (def?.maxItems && refs.length > def.maxItems) {
@@ -64,7 +64,7 @@ export const debugBehavior: FieldBehavior = {
   },
   reveal: identityReveal,
   // 引用附件库的 file locator 算附件引用（fileReferences 的探针认这条载体；
-  // 栏目/条目/字段引用不是附件引用）。
+  // 条目模板/条目/字段引用不是附件引用）。
   refs: (_def, value) => {
     const refs = (value && typeof value === 'object' && Array.isArray((value as RefDoc).refs))
       ? (value as RefDoc).refs

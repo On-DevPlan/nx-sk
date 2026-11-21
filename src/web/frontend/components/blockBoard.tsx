@@ -7,17 +7,19 @@
 // 四条刻意的选择（都跟「正文阅读优先」有关）：
 //   1. **高度跟着内容走**：块头 + 块体内容量到多少就长到多少（md 正文、附件列表、
 //      清单表格都是「内容多高就多高」）。存储的 h 只是**最小高**——版式 JSON 存的是
-//      「这个栏目怎么排」，不是「这一条内容有多高」，后者跟着每条记录变，不该落盘。
+//      「这个条目模板怎么排」，不是「这一条内容有多高」，后者跟着每条记录变，不该落盘。
 //   2. **只能改宽，不能改高**：高度既然由内容决定，再叠一个手动高度就互相打架；
 //      拖左右边缘改宽度（单列 → 多列），内容重排后高度自己会跟。
 //   3. **整个块头就是拖拽把手**（dragConfig.handle = '.blk-head'）。只有那个 10px 的 ⠿
 //      点点可拖太难瞄准了（真实反馈：拖不动）；块头里没有输入框，整条都能按下去。
 //      块体（输入区）仍然不能拖——否则选词会变成搬块。
-//   4. **版式与字段值两条保存链**：拖块只写 section.layout（防抖自动存），
+//   4. **版式与字段值两条保存链**：拖块只写 template.layout（防抖自动存），
 //      填字段仍然走「N 处改动 → 保存」。否则拖一下版式会把没填完的值一起提交。
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { DragEvent as ReactDragEvent, HTMLAttributes } from 'react';
 import { createPortal } from 'react-dom';
+import { Dropdown } from 'antd';
+import { MoreOutlined } from '@ant-design/icons';
 import { Responsive } from 'react-grid-layout';
 import 'react-grid-layout/css/styles.css';
 import {
@@ -30,7 +32,7 @@ import { reorderAt } from '../listSort.ts';
 import { useListDrag } from './listDrag.tsx';
 import { FieldControl, FieldGroup } from './fieldEditor.tsx';
 
-/** 块里要显示的分组 / 字段（来自 section 的 groups + fields）。 */
+/** 块里要显示的分组 / 字段（来自 template 的 groups + fields）。 */
 export interface BoardGroup {
   id: string;
   title: string;
@@ -39,10 +41,12 @@ export interface BoardGroup {
 
 /** 表格外的一层上下文，只有 source 控件用到。 */
 export type BoardContext = {
-  sectionTitle?: string;
+  templateTitle?: string;
   entryTitle?: string;
-  sectionId?: string;
+  templateId?: string;
   entryId?: string;
+  /** 字段控件要把「这次填写」直接落库时用（目前只有 grill 的确认按钮）。 */
+  onCommitField?: (key: string, value: unknown) => Promise<boolean | undefined>;
 };
 
 /** 块头「⋯」菜单的动作（任务 #24 的三个 + 任务 #27 的变化历史）。 */
@@ -72,7 +76,7 @@ interface BlockProps {
 /**
  * 块头右上角的「⋯」菜单。
  *
- * 不用 `<details>`（栏目「更多」那套）：块的根节点是 `overflow: hidden`（高度由网格锁着），
+ * 不用 `<details>`（条目模板「更多」那套）：块的根节点是 `overflow: hidden`（高度由网格锁着），
  * 绝对定位的下拉会被裁掉。所以浮层 portal 到 body、fixed 定位，位置按按钮实测。
  * 打开期间：点任意处 / Esc / 滚动 / 改窗口尺寸都关——菜单不该在页面上「漂着」。
  */
@@ -157,14 +161,12 @@ function Block({ def, value, onPatch, ctx, onMeasure, dragProps, fieldActions, .
     const report = () => {
       raf = 0;
       const head = body.parentElement?.querySelector('.blk-head');
-      // 量的是**内容自身**的自然高度：块体的高度被网格锁着，scrollHeight 在
-      // `overflow: visible` 下等于可视高度（量了也白量），只有里面那个控件会按内容长。
-      // 两处取大：控件的盒子可能比它实际占的地方小（标签换行、内嵌多行 chips 都会
-      // 顶出来），只量 firstElementChild 会把这块量矮 —— 差的那几像素就是被裁掉的一行
-      // （#44：同组里几个块挤在一起、tags 被浮层压住半行）。
       const inner = body.firstElementChild;
       const innerH = inner ? inner.getBoundingClientRect().height : 0;
-      const contentH = Math.max(innerH, body.scrollHeight);
+      // 量的是**内容自身**的自然高度。不能直接用 body.scrollHeight：块体被网格撑高后
+      // 它也跟着变大，会形成「越量越高」的反馈。取控件高度 + 当前被裁掉的那一点。
+      const overflow = Math.max(0, body.scrollHeight - body.clientHeight);
+      const contentH = innerH + overflow;
       const need = Math.ceil(((head as HTMLElement | null)?.offsetHeight || 0) + contentH + 8);
       if (Math.abs(need - last) < 2) return; // 抖 1px 不必重排
       last = need;
@@ -179,7 +181,10 @@ function Block({ def, value, onPatch, ctx, onMeasure, dragProps, fieldActions, .
     // 观察内容本身（不是块体）：块体高度被网格锁着，内容变高它不会变，只有内容会
     if (body.firstElementChild) ro.observe(body.firstElementChild);
     schedule();
-    return () => { if (raf) cancelAnimationFrame(raf); ro.disconnect(); };
+    // 条目页可能先渲染空控件、随后才填入异步读回的值；首帧量到的 54px 会锁在网格里，
+    // 而 body 自身高度不变、ResizeObserver 不会再报。补一次延迟量，防止「首帧量矮」。
+    const settle = setTimeout(schedule, 220);
+    return () => { if (raf) cancelAnimationFrame(raf); clearTimeout(settle); ro.disconnect(); };
   }, [def.key, onMeasure]);
 
   return (
@@ -199,6 +204,7 @@ function Block({ def, value, onPatch, ctx, onMeasure, dragProps, fieldActions, .
         <span className="blk-label nowrap" title={`${def.label}（${def.key}）`}>{def.label}</span>
         {def.sensitive ? <span className="tag bad">密文</span> : null}
         {def.fill && def.fill !== 'normal' ? <span className="tag">{def.fillLabel || def.fill}</span> : null}
+        {def.hint ? <span className="blk-hint" title={def.hint}>{def.hint}</span> : null}
         <span className="blk-key mono nowrap">{def.key}</span>
         {fieldActions ? <BlockMenu def={def} actions={fieldActions} /> : null}
       </div>
@@ -276,12 +282,13 @@ function PanelGrid({ group, layoutGroup, draft, onPatch, ctx, onLayouts, fieldAc
   const [bp, setBp] = useState('lg');
   const [measured, setMeasured] = useState<Record<string, number>>({}); // 字段 key → 内容需要的像素高
 
-  // 量到的高度只影响**当前断点**：不同断点列宽不同，内容折行后的高度本来就不同。
+  // 量到的高度影响**所有断点**：Responsive 回调的当前断点可能晚一拍，
+  // 只改 state 里的 bp 会让正在显示的 md 布局仍用旧高度（内容被裁 8px）。
   const effective = useMemo(() => {
-    const items = layouts[bp];
-    if (!items) return layouts;
-    return { ...layouts, [bp]: growHeights(items, measured) };
-  }, [layouts, measured, bp]);
+    const out: Record<string, GridItem[]> = {};
+    for (const [key, items] of Object.entries(layouts)) out[key] = growHeights(items, measured);
+    return out;
+  }, [layouts, measured]);
 
   const onMeasure = useCallback((key: string, px: number) => {
     setMeasured((prev) => (prev[key] === px ? prev : { ...prev, [key]: px }));
@@ -380,7 +387,7 @@ function PanelGrid({ group, layoutGroup, draft, onPatch, ctx, onLayouts, fieldAc
 function Panel({ group, layoutGroup, index, drag, draft, onPatch, ctx, onLayouts, onCollapse, onReset, fieldActions }: PanelProps) {
   const collapsed = layoutGroup?.collapsed === true;
   return (
-    <section
+    <div
       className={`panel${collapsed ? ' collapsed' : ''}${drag.draggingIndex === index ? ' dragging' : ''}${drag.dropClass(index)}`}
       {...drag.itemProps(index)}
     >
@@ -416,7 +423,7 @@ function Panel({ group, layoutGroup, index, drag, draft, onPatch, ctx, onLayouts
           fieldActions={fieldActions}
         />
       )}
-    </section>
+    </div>
   );
 }
 
@@ -426,11 +433,13 @@ export interface BlockBoardProps {
   onBoard: (next: BlockLayout) => void;
   draft: Record<string, unknown>;
   onPatch: (key: string, value: any) => void;
-  sectionTitle?: string;
+  templateTitle?: string;
   entryTitle?: string;
   /** 透传给 source / shortcut 的 peek 头部：「新标签页」深链。 */
-  sectionId?: string;
+  templateId?: string;
   entryId?: string;
+  /** 字段级直接回写（grill 确认按钮用；不传时控件只能改草稿）。 */
+  onCommitField?: (key: string, value: unknown) => Promise<boolean | undefined>;
   /** 任务 #24：块头「⋯」菜单的三个动作（查看 / 编辑 / 删除）。未传则不渲染。 */
   fieldActions?: FieldActions;
 }
@@ -441,12 +450,12 @@ export interface BlockBoardProps {
  * 所以这里可以假定「每个字段在版式里都有一块」。
  */
 export default function BlockBoard({
-  groups, board, onBoard, draft, onPatch, sectionTitle, entryTitle, sectionId, entryId, fieldActions,
+  groups, board, onBoard, draft, onPatch, templateTitle, entryTitle, templateId, entryId, onCommitField, fieldActions,
 }: BlockBoardProps) {
   const mode = board?.mode === 'flow' ? 'flow' : 'grid';
   const ctx = useMemo<BoardContext>(
-    () => ({ sectionTitle, entryTitle, sectionId, entryId }),
-    [sectionTitle, entryTitle, sectionId, entryId],
+    () => ({ templateTitle, entryTitle, templateId, entryId, onCommitField }),
+    [templateTitle, entryTitle, templateId, entryId, onCommitField],
   );
 
   // 面板顺序以版式为准：新分组（还没进版式）接在后面
@@ -498,12 +507,24 @@ export default function BlockBoard({
           <span className="board-tip nowrap">按字段顺序单列铺开；切回块布局版式不变。</span>
         )}
         <span className="right rowgap">
-          {mode === 'grid' ? (
-            <button type="button" className="btn small ghost" onClick={resetAll} title="全部面板回到默认编排（不影响字段值）">重置版式</button>
-          ) : null}
-          <button type="button" className="btn small ghost" onClick={toggleMode} title="块布局 / 表单视图">
-            {mode === 'grid' ? '表单视图' : '块布局'}
-          </button>
+          <Dropdown
+            trigger={['click']}
+            placement="bottomRight"
+            menu={{
+              items: [
+                ...(mode === 'grid' ? [{ key: 'reset', label: '重置版式（不影响字段值）' }] : []),
+                { key: 'mode', label: mode === 'grid' ? '切换为表单视图' : '切换为块布局' },
+              ],
+              onClick: ({ key }) => {
+                if (key === 'reset') resetAll();
+                else if (key === 'mode') toggleMode();
+              },
+            }}
+          >
+            <button type="button" className="btn small ghost icon-btn" aria-label="更多版式操作" title="更多版式操作">
+              <MoreOutlined />
+            </button>
+          </Dropdown>
         </span>
       </div>
 
@@ -514,10 +535,11 @@ export default function BlockBoard({
           fields={g.fields}
           draft={draft}
           onPatch={onPatch}
-          sectionTitle={sectionTitle}
+          templateTitle={templateTitle}
           entryTitle={entryTitle}
-          sectionId={sectionId}
+          templateId={templateId}
           entryId={entryId}
+          onCommitField={onCommitField}
         />
       )) : ordered.map((g, i) => (
         <Panel
@@ -535,7 +557,7 @@ export default function BlockBoard({
           fieldActions={fieldActions}
         />
       ))}
-      {!groups.length ? <div className="hint pad">这个栏目还没有可显示的字段。</div> : null}
+      {!groups.length ? <div className="hint pad">这个条目模板还没有可显示的字段。</div> : null}
     </div>
   );
 }

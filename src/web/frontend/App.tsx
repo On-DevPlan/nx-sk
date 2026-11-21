@@ -11,11 +11,13 @@ import { useStore, REFRESH_EVENT } from './store.tsx';
 import { api } from './api/client.ts';
 import { normalizeViewId, resolveActiveView } from './activeView.ts';
 import AppSidebar from './components/appSidebar.tsx';
-import type { EntryLite } from './components/appSidebar.tsx';
+import NewEntryModal from './components/NewEntryModal.tsx';
+import type { NewEntryForm } from './components/NewEntryModal.tsx';
+import { BLANK_TEMPLATE_ID } from '../../shared/tree.ts';
 
 /**
- * `#/<栏目>` 或 `#/<栏目>?entry=<id>`。
- * entry 是 #6 补的深链：侧栏条目与 peek 菜单的「新标签页」打开 `#/栏目?entry=id`，
+ * `#/<条目模板>` 或 `#/<条目模板>?entry=<id>`。
+ * entry 是 #6 补的深链：侧栏条目与 peek 菜单的「新标签页」打开 `#/条目模板?entry=id`，
  * 新标签页里必须直接选中这一条（entries/view 的 load 已经会读 ui.entry）。
  */
 function routeFromHash(): { view: string; entry: string } {
@@ -40,17 +42,24 @@ const SB_COLLAPSED_KEY = 'nx-sk-sidebar-collapsed';
 
 function loadCollapsed(): boolean {
   try {
-    return localStorage.getItem(SB_COLLAPSED_KEY) === '1';
+    const saved = localStorage.getItem(SB_COLLAPSED_KEY);
+    if (saved === '1') return true;
+    if (saved === '0') return false;
+  } catch { /* 隐私模式 */ }
+  // 从没选过时，窄屏默认收起：264px 侧栏会把正文挤成一条。
+  try {
+    return window.matchMedia('(max-width: 760px)').matches;
   } catch {
     return false;
   }
 }
 
-/** antd 主题对齐本面板的 Notion 口径单色系：主色即墨色，弱字色与边线用同一套 token。 */
+/** antd 主题对齐面板口径：文字用墨色，主色用柔和蓝（全站禁止黑色色块），
+ * Tooltip 也改白底浅影，避免 antd 默认的黑底提示。 */
 const ANTD_THEME: ThemeConfig = {
   token: {
-    colorPrimary: '#14161a',
-    colorInfo: '#14161a',
+    colorPrimary: '#2563eb',
+    colorInfo: '#2563eb',
     colorText: '#14161a',
     colorTextSecondary: '#7d7a75',
     borderRadius: 6,
@@ -59,23 +68,35 @@ const ANTD_THEME: ThemeConfig = {
     colorBorder: 'rgba(55, 53, 47, .16)',
     colorBorderSecondary: 'rgba(55, 53, 47, .09)',
     colorBgContainer: '#ffffff',
+    colorBgSpotlight: '#ffffff',
+    colorTextLightSolid: '#14161a',
+  },
+  components: {
+    Tooltip: {
+      colorBgSpotlight: '#ffffff',
+      colorTextLightSolid: '#14161a',
+      boxShadowSecondary: '0 6px 24px rgba(20, 22, 26, .12), 0 1px 2px rgba(20, 22, 26, .06)',
+    },
   },
 };
 
-/** 当前视图解析结果的最小形状（栏目带条目数，工具页带懒加载组件）。 */
+/** 当前视图解析结果的最小形状（条目模板带条目数，工具页带懒加载组件）。 */
 interface CurrentView {
   id: string;
   [k: string]: unknown;
   title: string;
-  kind: 'section' | 'view';
+  kind: 'template' | 'view';
   count?: number;
   component?: LazyExoticComponent<ComponentType<ViewProps>>;
 }
 
 export default function App() {
-  const { boot, bootError, ui, patchUi, reload, toast, dialog } = useStore();
+  const { boot, bootError, ui, patchUi, reload, toast } = useStore();
   // 侧栏收起：Notion 的面板开关——收起后内容区独占，面包屑左侧的开关负责展开
   const [collapsed, setCollapsed] = useState(loadCollapsed);
+  // 新建条目表单：父级只决定目录位置，模板选择在弹窗里独立决定。
+  const [createForm, setCreateForm] = useState<NewEntryForm | null>(null);
+  const [createBusy, setCreateBusy] = useState(false);
   const toggleCollapsed = useCallback(() => {
     setCollapsed((prev) => {
       const next = !prev;
@@ -86,54 +107,30 @@ export default function App() {
     });
   }, []);
 
-  // 侧栏条目缓存（栏目 id → 条目摘要）。App 持有：侧栏树用它画子节点，
-  // 面包屑用它把 ui.entry 翻译成条目标题——一处数据，两处使用。
-  const [entryMap, setEntryMap] = useState<Record<string, EntryLite[]>>({});
-
-  // 导航是**数据驱动**的：栏目来自 bootstrap.sections，分组与隐藏来自 settings（设置页可配），
-  // 静态工具页来自前端注册表。顺序：未分组栏目（按 order）→ 分组（按配置顺序）→ 工具（按 order）。
+  // 导航是**数据驱动**的：0.43 起左侧只有条目树（bootstrap.tree）；
+  // 条目模板只留在直达 / 模板库入口里，不再出现在左侧。
   const nav = useMemo(() => {
-    const sections = (boot?.sections || []).map((s) => ({
-      id: s.id, title: s.title, order: s.order, count: s.entries, kind: 'section' as const,
+    const templates = (boot?.templates || []).map((s) => ({
+      id: s.id, title: s.title, order: s.order, count: s.entries, kind: 'template' as const, blank: s.blank === true,
     }));
-    // 隐藏**只隐藏入口**：`#/栏目id` 直达仍然渲染，所以 all 里保留全部栏目
     const hidden = new Set(boot?.settings?.navHidden || []);
-    const visible = sections.filter((s) => !hidden.has(s.id));
-
-    // 分组是**显示配置**：成员栏目被删掉时优雅降级（过滤掉、配置保留），成员全没了就不显示这个组
-    const groups = (boot?.settings?.navGroups || [])
-      .map((g) => ({
-        title: g.title,
-        sections: (g.sections || [])
-          .map((sid) => visible.find((s) => s.id === sid))
-          .filter((s): s is NonNullable<typeof s> => Boolean(s)),
-      }))
-      .filter((g) => g.sections.length);
-    const grouped = new Set(groups.flatMap((g) => g.sections.map((s) => s.id)));
-    // 平铺顺序：settings.navOrder 里显式排过的优先（按它的次序），其余按栏目自己的 order 跟在后面
-    const rank = new Map((boot?.settings?.navOrder || []).map((id, i) => [id, i]));
-    const rankOf = (s: { id: string; order?: number }) =>
-      rank.has(s.id) ? Number(rank.get(s.id)) : Number.MAX_SAFE_INTEGER;
-    const flat = visible.filter((s) => !grouped.has(s.id))
-      .sort((a, b) => rankOf(a) - rankOf(b) || (a.order ?? 50) - (b.order ?? 50));
+    const visible = templates.filter((s) => !hidden.has(s.id) && !s.blank);
     const tools = VIEWS.filter((v) => v.tab !== false)
       .map((v) => ({ id: v.id, title: v.title, order: v.order, kind: 'view' as const, component: v.component }))
-      .filter((v) => !sections.some((s) => s.id === v.id))
+      .filter((v) => !templates.some((s) => s.id === v.id))
       .sort((a, b) => (a.order ?? 50) - (b.order ?? 50));
-    const all: CurrentView[] = [
-      ...flat, ...groups.flatMap((g) => g.sections), ...tools,
-      ...sections.filter((s) => hidden.has(s.id)),
-    ];
-    return { flat, groups, tools, all };
+    // 直达用：条目模板（含隐藏/空白）也要能 resolve 出视图；它们不出现在左侧树里。
+    const all: CurrentView[] = [...visible, ...tools, ...templates.filter((s) => hidden.has(s.id) || s.blank)];
+    return { tools, all };
   }, [boot]);
-  // 没 boot 之前**不要**拿第一个 tab 兜底：那时动态栏目还没到，nav 里只有静态视图，
+  // 没 boot 之前**不要**拿第一个 tab 兜底：那时动态条目模板还没到，nav 里只有静态视图，
   // 兜底会选中第一个静态视图并由下面的 effect 写进 ui —— 于是「默认视图」被顶掉。
-  // 规则本体在 ./activeView.js（纯函数，单测覆盖）：深链 > 本次选择 > 默认栏目 > 第一个 tab。
+  // 规则本体在 ./activeView.js（纯函数，单测覆盖）：深链 > 本次选择 > 默认条目模板 > 第一个 tab。
   const booted = !!boot;
-  const current = resolveActiveView(ui.view, nav.all, boot?.settings?.defaultSection, { booted });
+  const current = resolveActiveView(ui.view, nav.all, boot?.settings?.defaultTemplate, { booted });
   const currentId = current ? current.id : '';
 
-  // hash → ui：挂载时把深链里的选择（栏目 + 条目）写回 ui，之后交给 hashchange。
+  // hash → ui：挂载时把深链里的选择（条目模板 + 条目）写回 ui，之后交给 hashchange。
   useEffect(() => {
     const from = routeFromHash();
     if (from.view) patchUi({ view: from.view, ...(from.entry ? { entry: from.entry } : {}) });
@@ -150,88 +147,123 @@ export default function App() {
   }, [patchUi]);
 
   // 注意：这里**刻意不**给「兜底选出来的 tab」补一个 hash（规则见 activeView 的说明）：
-  // 地址栏里只有**用户真的点过**的栏目；没有就按默认栏目落地。
+  // 地址栏里只有**用户真的点过**的条目模板；没有就按默认条目模板落地。
   const go = useCallback((id: string) => {
     patchUi({ view: id });
     window.location.hash = `#/${id}`;
   }, [patchUi]);
 
   // 任务 #30：「刷新数据」只留这一个入口——先重拉 bootstrap（侧栏计数 / 设置），
-  // 再广播一次让当前页把自己那份数据也重拉（栏目页订阅 REFRESH 事件刷新 dump）。
+  // 再广播一次让当前页把自己那份数据也重拉（条目模板页订阅 REFRESH 事件刷新 dump）。
   const refreshAll = useCallback(() => {
     void reload();
     window.dispatchEvent(new Event(REFRESH_EVENT));
   }, [reload]);
 
-  // 当前条目的标题（面包屑第三级用）；侧栏还没加载过这个栏目就没有
-  const entryTitle = useMemo(() => {
-    if (!ui.entry) return '';
-    return entryMap[currentId]?.find((e) => e.id === ui.entry)?.title || '';
-  }, [entryMap, currentId, ui.entry]);
+  // 当前条目的祖先链（面包屑用）；数据直接来自 bootstrap.tree，不再依赖条目模板缓存。
+  const tree = useMemo(() => boot?.tree || [], [boot]);
+  const createParentTitle = createForm?.parent
+    ? tree.find((n) => n.id === createForm.parent)?.title
+    : undefined;
 
-  // 当前栏目落在哪个分组里（面包屑第一级）
-  const groupName = useMemo(
-    () => nav.groups.find((g) => g.sections.some((s) => s.id === currentId))?.title || '',
-    [nav.groups, currentId],
-  );
+  const entryPath = useMemo(() => {
+    if (!ui.entry) return [] as Array<{ id: string; title: string; template: string }>;
+    const byId = new Map(tree.map((n) => [n.id, n]));
+    const out: Array<{ id: string; title: string; template: string }> = [];
+    let cur = byId.get(ui.entry);
+    const seen = new Set<string>();
+    while (cur && !seen.has(cur.id)) {
+      seen.add(cur.id);
+      out.unshift({ id: cur.id, title: cur.title, template: cur.template });
+      cur = cur.parent ? byId.get(cur.parent) : undefined;
+    }
+    return out;
+  }, [tree, ui.entry]);
 
-  // #14：侧栏树里已经有当前栏目的条目（懒加载完成且非空）时，正文不再重复显示条目列表。
-  // 侧栏收起时列表照旧出现——它是收起态下唯一的条目导航，也保住「勾选导出」的入口。
-  const listHidden = !collapsed && (entryMap[currentId]?.length ?? 0) > 0;
+  // 侧栏树已经承载条目导航：正文不再重复列条目（除非侧栏收起）。
+  const listHidden = !collapsed && tree.length > 0;
 
   const crumbs = useMemo(() => {
     if (!current) return [];
-    const isSectionLike = current.kind === 'section';
+    const isTemplateLike = current.kind === 'template';
     const items: Array<{ key: string; title: ReactNode }> = [];
-    if (groupName) items.push({ key: 'group', title: <span className="crumb">{groupName}</span> });
-    if (isSectionLike) {
-      items.push({
-        key: 'section',
-        title: (
-          <a className="crumb crumb-link" onClick={(e) => { e.preventDefault(); go(current.id); }}>
-            {current.title}
-          </a>
-        ),
-      });
-      if (entryTitle) items.push({ key: 'entry', title: <span className="crumb crumb-entry">{entryTitle}</span> });
+    if (isTemplateLike) {
+      if (entryPath.length) {
+        for (const p of entryPath.slice(0, -1)) {
+          items.push({
+            key: `p:${p.id}`,
+            title: (
+              <a className="crumb crumb-link" onClick={(e) => { e.preventDefault(); patchUi({ view: p.template, entry: p.id, focus: '' }); window.location.hash = `#/${encodeURIComponent(p.template)}?entry=${encodeURIComponent(p.id)}`; }}>
+                {p.title}
+              </a>
+            ),
+          });
+        }
+        items.push({ key: 'entry', title: <span className="crumb crumb-entry">{entryPath[entryPath.length - 1].title}</span> });
+      } else {
+        items.push({
+          key: 'template',
+          title: (
+            <a className="crumb crumb-link" onClick={(e) => { e.preventDefault(); go(current.id); }}>
+              {current.title}
+            </a>
+          ),
+        });
+      }
     } else {
       items.push({ key: 'view', title: <span className="crumb">{current.title}</span> });
     }
     return items;
-  }, [current, groupName, entryTitle, go]);
+  }, [current, entryPath, go, patchUi]);
 
-  // 任务 #28：「新建条目」从栏目工具条挪到侧栏——每个栏目行右侧一个「＋」，
-  // 点它不必先打开栏目：读一次该栏目的 dump 拿到名字标签/名字字段 → 问名字 →
-  // POST 建条目 → 侧栏缓存补一条（树里立刻可见）→ 直接跳到新条目。
-  // 侧栏收起时侧栏上的「＋」看不见，由工具条的「新建条目」兜底（见 SectionToolbar 的 showAdd）。
-  const addEntryInSection = useCallback(async (sid: string) => {
+  // 任务 #49：新建条目统一走一个弹窗——父级只决定目录位置，模板选择在创建时机显式决定。
+  // 子条目默认空白，不再继承父条目的模板；根条目也默认空白，需要结构时再选模板。
+  const openAddEntry = useCallback((parent: string | null, defaultTemplate = BLANK_TEMPLATE_ID) => {
+    setCreateForm({ parent, template: defaultTemplate, title: '' });
+  }, []);
+
+  const createEntry = useCallback(async () => {
+    if (!createForm || createBusy || !createForm.title.trim()) return;
+    setCreateBusy(true);
     try {
-      const dump = await api<{ section: { title: string; titleLabel?: string; titleField?: string } }>(
-        `/api/sections/${encodeURIComponent(sid)}/dump`,
-      );
-      const sec = dump.section;
-      const label = sec.titleLabel || '名称';
-      const answer = await dialog({
-        message: `在「${sec.title}」新建条目，${label}是？`,
-        input: { placeholder: `例如 ${sec.titleField || '名称'}` },
-      });
-      if (!answer) return;
-      const name = String(answer);
-      const body: { section: string; title: string; set?: Record<string, string> } = { section: sid, title: name };
-      if (sec.titleField) body.set = { [sec.titleField]: name };
-      const created = await api<{ id: string; title: string }>('/api/entries', { method: 'POST', body });
-      setEntryMap((m) => ({ ...m, [sid]: [...(m[sid] || []), { id: created.id, title: created.title }] }));
-      toast(`已新建：${created.title}`);
-      patchUi({ view: sid, entry: created.id, focus: '' });
-      window.location.hash = `#/${encodeURIComponent(sid)}?entry=${encodeURIComponent(created.id)}`;
-      // 这个栏目可能本来就开着：sectionId 没变，SectionView 不会重新 load，
-      // 而手里的 dump 是创建之前的——广播一次让它重拉，新条目才进 entries。
-      window.dispatchEvent(new Event(REFRESH_EVENT));
+      const tid = createForm.template || BLANK_TEMPLATE_ID;
+      const dump = tid === BLANK_TEMPLATE_ID
+        ? null
+        : await api<{ template: { title: string; titleLabel?: string; titleField?: string } }>(
+          `/api/templates/${encodeURIComponent(tid)}/dump`,
+        );
+      const sec = dump?.template;
+      const name = createForm.title.trim();
+      const body: { template?: string; parent?: string; title: string; set?: Record<string, string> } = {
+        template: tid, title: name,
+      };
+      if (createForm.parent) body.parent = createForm.parent;
+      if (sec?.titleField) body.set = { [sec.titleField]: name };
+      const created = await api<{ id: string; title: string; template: string; parent?: string | null }>('/api/entries', { method: 'POST', body });
+      const tplTitle = tid === BLANK_TEMPLATE_ID
+        ? '空白条目'
+        : (boot?.templates.find((t) => t.id === tid)?.title || created.template);
+      setCreateForm(null);
+      toast(`已新建：${created.title} · ${tplTitle}`);
+      patchUi({ view: created.template, entry: created.id, focus: '' });
+      window.location.hash = `#/${encodeURIComponent(created.template)}?entry=${encodeURIComponent(created.id)}`;
       await reload();
     } catch (e) {
       toast((e as Error)?.message || String(e), 'bad');
+    } finally {
+      setCreateBusy(false);
     }
-  }, [dialog, patchUi, reload, toast]);
+  }, [boot, createBusy, createForm, patchUi, reload, toast]);
+
+  // Notion 式拖拽落盘：拖进条目 = parent 设成它；拖到行上/下缘 = 同父级的前/后。
+  // 后端会把该父级的 sort 重新编号，所以拖动一次就能稳定落到目标位置。
+  const moveEntry = useCallback(async (id: string, parent: string | null, before?: string, after?: string) => {
+    const body: { parent: string; before?: string; after?: string } = { parent: parent || 'root' };
+    if (before) body.before = before;
+    if (after) body.after = after;
+    await api(`/api/entries/${encodeURIComponent(id)}/move`, { method: 'POST', body });
+    await reload();
+  }, [reload]);
 
   return (
     <ConfigProvider theme={ANTD_THEME}>
@@ -242,10 +274,10 @@ export default function App() {
             nav={nav}
             currentId={currentId}
             entryId={ui.entry}
-            entryMap={entryMap}
-            setEntryMap={setEntryMap}
+            tree={tree}
             onGo={go}
-            onAddEntry={addEntryInSection}
+            onAddEntry={openAddEntry}
+            onMoveEntry={moveEntry}
             onOpenEntry={(sid, eid, focus) => {
               // #18：focus = 进入条目后要把哪个字段块滚进视口并短暂高亮（侧栏全局搜索用）
               patchUi({ view: sid, entry: eid, focus: focus || '' });
@@ -255,7 +287,7 @@ export default function App() {
         ) : null}
 
         <div className="main">
-          {/* 面包屑栏：替代被删掉的头部——左边是收起开关，中间是「分组 › 栏目 › 条目」定位，
+          {/* 面包屑栏：替代被删掉的头部——左边是收起开关，中间是「分组 › 条目模板 › 条目」定位，
               右边只留一个刷新。元信息（版本 / 存储路径）已迁到侧栏顶部与底部。 */}
           <div className="crumbs">
             <button
@@ -287,8 +319,8 @@ export default function App() {
             {!bootError && booted && current ? (
               <ErrorBoundary key={current.id}>
                 <Suspense fallback={<div className="pad muted">加载中…</div>}>
-                  {current.kind === 'section'
-                    ? <SectionPane sectionId={current.id} listHidden={listHidden} sidebarCollapsed={collapsed} />
+                  {current.kind === 'template'
+                    ? <TemplatePane templateId={current.id} listHidden={listHidden} sidebarCollapsed={collapsed} onCreateEntry={(tid) => openAddEntry(null, tid)} />
                     : <ToolPane view={current} />}
                 </Suspense>
               </ErrorBoundary>
@@ -297,16 +329,25 @@ export default function App() {
         </div>
       </div>
 
+      <NewEntryModal
+        form={createForm}
+        parentTitle={createParentTitle}
+        templates={boot?.templates || []}
+        busy={createBusy}
+        onChange={setCreateForm}
+        onClose={() => { if (!createBusy) setCreateForm(null); }}
+        onSubmit={createEntry}
+      />
       <Toasts />
       <DialogHost />
     </ConfigProvider>
   );
 }
 
-/** 栏目视图的动态挂载点：共用 entries 模块的视图，把 sectionId 传进去。 */
-function SectionPane({ sectionId, listHidden, sidebarCollapsed }: { sectionId: string; listHidden: boolean; sidebarCollapsed: boolean }) {
+/** 条目模板视图的动态挂载点：共用 entries 模块的视图，把 templateId 传进去。 */
+function TemplatePane({ templateId, listHidden, sidebarCollapsed, onCreateEntry }: { templateId: string; listHidden: boolean; sidebarCollapsed: boolean; onCreateEntry: (templateId?: string) => void }) {
   const View = SECTION_VIEW;
-  return <View sectionId={sectionId} listHidden={listHidden} sidebarCollapsed={sidebarCollapsed} />;
+  return <View templateId={templateId} listHidden={listHidden} sidebarCollapsed={sidebarCollapsed} onCreateEntry={onCreateEntry} />;
 }
 
 /** 工具页的动态挂载点：component 在注册表里必有，这里只为收窄类型。 */

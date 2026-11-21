@@ -18,7 +18,7 @@ description: 按步骤给 nx-sk 新增一种字段类型（0.28.0 起的注册�
 | 带类型/公式/统计的二维表 | `table` |
 | 交互形态本质不同（评分、色板、坐标、关系引用） | 才新增 type |
 
-> 新增 type 会同时改：store 里已有栏目的字段字典、面板下拉顺序、表格列可选类型、以及所有读出口。
+> 新增 type 会同时改：store 里已有条目模板的字段字典、面板下拉顺序、表格列可选类型、以及所有读出口。
 > 能用现成类型组合出来的，不要加。
 
 ## 1. 词汇表：`src/shared/fields/types.ts`（第一处，必改）
@@ -152,8 +152,8 @@ className={`field ${['textarea', 'file', 'md', 'entrylist', 'table', 'source', '
 | 文件 | 加什么 |
 | --- | --- |
 | `tests/unit/fields.test.ts` | `coerce` 合法/非法/空；`format` 人读；`sensitive`/`subFields` 判据 |
-| `tests/unit/contract.test.ts` | 已自动遍历 `FIELD_TYPES`：label 齐全、demo 栏目覆盖全部类型（新类型要进 demo 种子） |
-| 新建 `tests/unit/<type>.test.mjs` | `section update --add-field` → `entry add --set` → `entry get --json` → `section dump --json` 往返形状不变 |
+| `tests/unit/contract.test.ts` | 已自动遍历 `FIELD_TYPES`：label 齐全、demo 条目模板覆盖全部类型（新类型要进 demo 种子） |
+| 新建 `tests/unit/<type>.test.mjs` | `template update --add-field` → `entry add --set` → `entry get --json` → `template dump --json` 往返形状不变 |
 | `tests/smoke.mjs` | CLI 写一条 + HTTP 读一条（两条出口都要覆盖） |
 
 > **demo 种子的值必须写成 `coerce` 的输出形状**（包括 `coerce` 自动补的 id / 默认键）。
@@ -165,7 +165,7 @@ className={`field ${['textarea', 'file', 'md', 'entrylist', 'table', 'source', '
 cd D:/a_js/js_proj/nx-sk
 node --test tests/unit/fields.test.ts        # 注册表 + 强转
 node --test tests/unit/<type>.test.mjs       # 往返
-node bin/nx-sk.mjs section dump demo --json  # 人工复核 values 形状
+node bin/nx-sk.mjs template dump demo --json  # 人工复核 values 形状
 pnpm test                                    # 五连：lint / typecheck / build / smoke / unit
 ```
 
@@ -188,7 +188,7 @@ pnpm test                                    # 五连：lint / typecheck / build
 - [ ] `FieldValue` 加值形态 → 漏：读出口类型不符，容易顺手 `as any`
 - [ ] `behaviors/<type>.ts` 八钩子 + `FIELD_BEHAVIOR` 一行 → 漏：`assertFieldRegistry()` 启动即抛，CLI/面板全起不来
 - [ ] `coerce` 覆盖非法输入 → 漏：脏值静默入库，排序/公式错
-- [ ] `format` → 漏：`entry get` / `section dump` 显示 `[object Object]` 或空
+- [ ] `format` → 漏：`entry get` / `template dump` 显示 `[object Object]` 或空
 - [ ] `FIELD_SEAL` 加键（有子密文就写 hook）→ 漏键：`tsc` 红；该写 hook 却填 `null`：**敏感值明文落盘**
 - [ ] `subFields` / `sensitive` 判据 → 漏：vault 不加密子值、`--reveal` 不打码
 - [ ] `refs` → 漏：附件中心「谁引用它」查不到；清理未引用附件会误删；导出漏文件
@@ -236,10 +236,10 @@ pnpm test
 | 面板 | 渲染成一行小标题（`GroupControl`），不是输入框；`FIELD_CONTROLS` 里必须有 `group` 键 | `src/web/frontend/components/fields/group.tsx` + `fields/index.ts` |
 
 **改组的正确姿势**：不要给字段加 `group` 键，也不要另写一份 groups 数组。所有结构变更走
-`src/modules/sections/structure.ts` 的算子（`moveMemberTo` / `moveWithinGroup` / `addGroupField` /
+`src/modules/templates/structure.ts` 的算子（`moveMemberTo` / `moveWithinGroup` / `addGroupField` /
 `renameGroupField` / `removeGroupField`），它们只改组字段的 `keys`，字段本身不动。
 
-**读侧**：`fieldListOf()`（`src/modules/sections/common.ts`）与 `dumpSection` 会在字段上补
+**读侧**：`fieldListOf()`（`src/modules/templates/common.ts`）与 `dumpSection` 会在字段上补
 **派生的** `group`（归属）并展开成「组 → 成员」的显示顺序。面板依赖这个派生键，
 但它**不落盘**——别在写入路径里把它当存储字段。
 

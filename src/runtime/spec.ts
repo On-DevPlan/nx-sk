@@ -79,7 +79,7 @@ export function flagSpecsOf(action: Action): ResolvedFlag[] {
   return Object.entries(action.flags || {}).map(([name, spec]) => ({ name, type: 'string', required: false, ...spec }) as ResolvedFlag);
 }
 
-/** 用法串：`nx-sk entry update <id> [--section <section>] [--mask]` */
+/** 用法串：`nx-sk entry update <id> [--template <template>] [--mask]` */
 export function usageOf(action: Action) {
   const paths = cliPathsOf(action);
   const parts = [APP_NAME, ...(paths[0] || [action.id])];
@@ -205,7 +205,7 @@ export function compileRoute(http: string[]): RouteShape {  const [method, path]
 
 /**
  * 路由按「字面量段优先」排序，让**声明顺序不影响匹配**。
- * 否则 `GET /api/sections/templates` 会被 `GET /api/sections/:id` 遮蔽，
+ * 否则 `GET /api/templates/presets` 会被 `GET /api/templates/:id` 遮蔽，
  * 而命中哪条取决于 actions 数组的顺序——有人调整顺序就静默错乱。
  */
 export function compareRoutes(a: RouteShape, b: RouteShape): number {

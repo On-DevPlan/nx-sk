@@ -111,7 +111,7 @@ export default [
     },
   },
 
-  // 聚合模块是刻意的例外（system 读各模块状态；transfer 负责栏目导出导入的跨模块编排，
+  // 聚合模块是刻意的例外（system 读各模块状态；transfer 负责条目模板导出导入的跨模块编排，
   // 依赖方向单向 transfer → entries/sections，不构成环）
   {
     files: ['src/modules/system/**/*.{js,ts}', 'src/modules/transfer/**/*.{js,ts}'],

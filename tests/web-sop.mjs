@@ -1,7 +1,7 @@
 // 浏览器 SOP：**一条新条目在 Web 上的完整生命周期**。
 //
-//   新建栏目（带模板）→ 新建条目 → 条目内加扩展字段 → 填值 → 保存 →
-//   组内拖块换序 → 栏目属性编辑器里组内字段换序 → 删条目 → 删栏目
+//   新建条目模板（带模板）→ 新建条目 → 条目内加扩展字段 → 填值 → 保存 →
+//   组内拖块换序 → 条目模板属性编辑器里组内字段换序 → 删条目 → 删条目模板
 //
 // 全程真起服务、真开 Chrome、真点按钮；数据住在一次性 NX_SK_HOME 里，
 // 绝不碰用户的真实库。跑法：
@@ -13,12 +13,14 @@
 // 只用单测 / 冒烟覆盖不到；这条是它们唯一的回归网。
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
+
+import { readZip } from '../src/core/zip.ts';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const BIN = join(ROOT, 'bin', 'nx-sk.mjs');
@@ -55,7 +57,7 @@ function startServer(port, home) {
 async function waitUp(base, tries = 80) {
   for (let i = 0; i < tries; i += 1) {
     try {
-      const r = await fetch(`${base}/api/sections`);
+      const r = await fetch(`${base}/api/templates`);
       if (r.ok) return await r.json();
     } catch { /* 还没起来 */ }
     await new Promise((r) => setTimeout(r, 250));
@@ -67,7 +69,7 @@ const noPlaywright = !(await havePlaywright());
 const noChrome = !chromePath();
 const skip = noPlaywright ? 'playwright-core 未安装（pnpm i 后再跑）' : (noChrome ? '本机没有 Chrome（用 NX_SK_CHROME 指定）' : false);
 
-test('web SOP：栏目 / 条目 / 字段 / 保存 / 拖拽 / 删除', { skip, timeout: 240_000 }, async () => {
+test('web SOP：条目模板 / 条目 / 字段 / 保存 / 拖拽 / 删除', { skip, timeout: 240_000 }, async () => {
   const { chromium } = await import('playwright-core');
   const home = await mkdtemp(join(tmpdir(), 'nx-sk-web-'));
   const port = 7900 + Math.floor(Math.random() * 90);
@@ -75,6 +77,7 @@ test('web SOP：栏目 / 条目 / 字段 / 保存 / 拖拽 / 删除', { skip, ti
   const { child, log } = startServer(port, home);
   let browser;
   let page;
+  let sopEntryId = '';
   const dag = [];
   const shot = async (name) => { if (page) await page.screenshot({ path: join(ROOT, '.tmp', `web-sop-${name}.png`), fullPage: false }).catch(() => {}); };
   const step = async (name, fn) => {
@@ -96,32 +99,69 @@ test('web SOP：栏目 / 条目 / 字段 / 保存 / 拖拽 / 删除', { skip, ti
     page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
     page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
 
-    await step('新建栏目（用项目模板起步）', async () => {
-      const tpl = await fetch(`${base}/api/sections/templates`).then((r) => r.json());
-      const list = tpl.data?.templates || tpl.templates || [];
+    await step('新建条目模板（用项目模板起步）', async () => {
+      const tpl = await fetch(`${base}/api/templates/presets`).then((r) => r.json());
+      const list = tpl.data?.presets || tpl.presets || [];
       const projects = list.find((x) => x.id === 'projects') || list[0];
       assert.ok(projects, '没有可用模板');
-      await page.goto(`${base}/#/sections`, { waitUntil: 'networkidle' });
-      await page.getByRole('button', { name: '新建栏目' }).click();
+      await page.goto(`${base}/#/templates`, { waitUntil: 'networkidle' });
+      await page.getByRole('button', { name: '新建条目模板' }).click();
       const mask = page.locator('.mask');
       await mask.locator('input').nth(0).fill('sop');
       await mask.locator('input').nth(1).fill('SOP 用例');
       await mask.locator('select').selectOption(projects.id);
       await mask.getByRole('button', { name: '创建' }).click();
       await page.locator('.tree-row', { hasText: 'SOP 用例' }).first().waitFor({ timeout: 15_000 });
-      const r = await fetch(`${base}/api/sections/sop`);
-      assert.equal(r.ok, true, '栏目没建出来');
+      const r = await fetch(`${base}/api/templates/sop`);
+      assert.equal(r.ok, true, '条目模板没建出来');
     });
 
-    await step('打开栏目并新建条目', async () => {
-      await page.goto(`${base}/#/sop`, { waitUntil: 'networkidle' });
-      await page.locator('.col').first().getByRole('button', { name: /新建/ }).first().click();
+    await step('从侧栏新建条目（创建时选模板）', async () => {
+      // 任务 #49：根目录「新建条目」必须走统一弹窗，在创建时选择条目模板；
+      // 不再默认空白后让用户去条目里自己补字段。
+      await page.locator('.sb-new-btn').click();
       const mask = page.locator('.mask');
-      await mask.locator('input').first().fill('生命周期条目');
-      await mask.getByRole('button', { name: /新建|创建|确定/ }).last().click();
+      await mask.locator('select').selectOption('sop');
+      await mask.locator('input').fill('生命周期条目');
+      await mask.getByRole('button', { name: '创建条目' }).click();
+      await mask.waitFor({ state: 'detached', timeout: 15_000 });
       await page.locator('.entry-title-input').waitFor({ timeout: 15_000 });
-      assert.match(page.url(), /entry=/, '新建后没跳到条目页');
+      assert.match(page.url(), /entry=/, '没跳到条目页');
       assert.equal(await page.locator('.entry-title-input').inputValue(), '生命周期条目');
+      const id = await page.evaluate(() => (location.hash.match(/entry=([^&]+)/) || [])[1]);
+      sopEntryId = id;
+      const boot = await fetch(`${base}/api/bootstrap`).then((r) => r.json());
+      const node = boot.data.tree.find((n) => n.id === id);
+      assert.equal(node?.template, 'sop', '创建时选的模板没生效');
+    });
+
+    await step('在条目下新建子条目默认空白', async () => {
+      const pid = sopEntryId;
+      await page.getByRole('button', { name: '在「生命周期条目」下新建子条目' }).click();
+      const mask = page.locator('.mask');
+      assert.equal(await mask.locator('select').inputValue(), '__blank__', '子条目默认继承了父条目的模板');
+      await mask.locator('input').fill('生命周期子条目');
+      await mask.getByRole('button', { name: '创建条目' }).click();
+      await mask.waitFor({ state: 'detached', timeout: 15_000 });
+      const cid = await page.evaluate(() => (location.hash.match(/entry=([^&]+)/) || [])[1]);
+      const boot = await fetch(`${base}/api/bootstrap`).then((r) => r.json());
+      const child = boot.data.tree.find((n) => n.id === cid);
+      assert.equal(child?.template, '__blank__', '子条目不是空白模板');
+      assert.equal(child?.parent, pid, '子条目的父级不对');
+      // 回到父条目，后面继续测编辑链路
+      await page.goto(`${base}/#/sop?entry=${pid}`, { waitUntil: 'networkidle' });
+      await page.locator('.entry-title-input').waitFor({ timeout: 15_000 });
+    });
+
+    await step('条目模板页的新建入口也走统一弹窗', async () => {
+      await page.goto(`${base}/#/sop`, { waitUntil: 'networkidle' });
+      await page.getByRole('button', { name: '收起侧栏' }).click();
+      await page.getByRole('button', { name: '新建条目', exact: true }).first().click();
+      const mask = page.locator('.mask');
+      assert.equal(await mask.locator('select').inputValue(), 'sop', '模板页新建没有默认当前模板');
+      await mask.getByRole('button', { name: '取消' }).click();
+      await page.getByRole('button', { name: '展开侧栏' }).click();
+      await page.goto(`${base}/#/sop?entry=${sopEntryId}`, { waitUntil: 'networkidle' });
     });
 
     await step('条目内加扩展字段', async () => {
@@ -151,6 +191,62 @@ test('web SOP：栏目 / 条目 / 字段 / 保存 / 拖拽 / 删除', { skip, ti
       assert.equal(one.data.title, '生命周期条目（改）', '条目名没落库');
     });
 
+    await step('编辑条目标签（Web 弹窗直接 PATCH）', async () => {
+      await page.getByRole('button', { name: '编辑条目标签', exact: true }).click();
+      const mask = page.locator('.mask');
+      const input = mask.locator('input').first();
+      await input.fill('sop, E2E, 临时');
+      await mask.getByRole('button', { name: '保存标签' }).click();
+      await mask.waitFor({ state: 'detached', timeout: 10_000 });
+      const id = await page.evaluate(() => (location.hash.match(/entry=([^&]+)/) || [])[1]);
+      const one = await fetch(`${base}/api/entries/${id}`).then((r) => r.json());
+      assert.deepEqual(one.data.tags, ['sop', 'E2E', '临时'], '条目标签没保存');
+    });
+
+    await step('导出树：勾文件夹覆盖子条目，快速导出整棵子树', async () => {
+      const parentTitle = '生命周期条目（改）';
+      const childTitle = '生命周期子条目';
+      const boot = await fetch(`${base}/api/bootstrap`).then((r) => r.json());
+      const parent = boot.data.tree.find((n) => n.title === parentTitle);
+      const child = boot.data.tree.find((n) => n.title === childTitle);
+      assert.ok(parent && child, '父/子条目不见了');
+      await page.goto(`${base}/#/export`, { waitUntil: 'networkidle' });
+      const row = page.locator('.tp-tree-row').filter({ hasText: parentTitle }).first();
+      await row.locator('input[type="checkbox"]').check();
+      assert.match(await page.locator('.tp-headacts .hint').innerText(), /含子条目 2 条/, '勾文件夹没有覆盖子条目');
+      const downloadPromise = page.waitForEvent('download');
+      await row.locator('.tp-tree-quick').click();
+      const download = await downloadPromise;
+      const path = await download.path();
+      assert.ok(path, '下载没有落盘');
+      const outer = readZip(Buffer.from(await readFile(path)));
+      const bundle = JSON.parse(outer.find((f) => f.name === 'bundle.json').data.toString('utf8'));
+      assert.equal(bundle.counts.entries, 2, '快速导出没带子条目');
+      const childNode = bundle.tree.find((n) => n.id === child.id);
+      assert.ok(childNode, '包里的 tree 缺子条目');
+      assert.equal(childNode.parent, parent.id, '包里的 tree 丢了父子边');
+      // 回到条目页，后面的「存为模板 / 拖块 / 删除」都从这里继续
+      await page.goto(`${base}/#/sop?entry=${parent.id}`, { waitUntil: 'networkidle' });
+      await page.locator('.entry-title-input').waitFor({ timeout: 15_000 });
+    });
+
+    await step('条目快速保存为模板（只抄结构，不抄值）', async () => {
+      // 低频动作已收进顶栏「更多」，先展开菜单再点。
+      await page.getByRole('button', { name: '更多条目操作', exact: true }).click();
+      await page.getByRole('menuitem', { name: /存为模板/ }).click();
+      const mask = page.locator('.mask');
+      await mask.locator('input').nth(0).fill('sop-copy');
+      await mask.locator('input').nth(1).fill('生命周期模板');
+      await mask.getByRole('button', { name: '保存为模板' }).click();
+      await mask.waitFor({ state: 'detached', timeout: 15_000 });
+      const saved = await fetch(`${base}/api/templates/sop-copy`).then((r) => r.json());
+      assert.equal(saved.ok, true, '条目另存模板没建出来');
+      assert.equal(saved.data.entries, 0, '模板不该带条目');
+      assert.ok(saved.data.fieldList.some((f) => f.key === 'budget'), '条目里的扩展字段没抄进模板');
+      const source = await fetch(`${base}/api/entries/${await page.evaluate(() => (location.hash.match(/entry=([^&]+)/) || [])[1])}`).then((r) => r.json());
+      assert.equal(source.ok, true, '另存模板不应影响原条目');
+    });
+
     await step('块内容不被裁（附图 2 回归）', async () => {
       await page.waitForTimeout(900);
       const clipped = await page.evaluate(() => [...document.querySelectorAll('.blk-body')]
@@ -169,7 +265,7 @@ test('web SOP：栏目 / 条目 / 字段 / 保存 / 拖拽 / 删除', { skip, ti
       const after = await panel.evaluate((p) => [...p.querySelectorAll('.blk')].map((b) => b.getAttribute('data-block')));
       assert.notDeepEqual(after, before, '拖块头没有换序');
       await page.waitForTimeout(1600);
-      const sec = await fetch(`${base}/api/sections/sop`).then((r) => r.json());
+      const sec = await fetch(`${base}/api/templates/sop`).then((r) => r.json());
       // 在版式里找同时含这两块的那一组，按 y/x 排序后的首个应该是拖动后的第一块
       const hit = Object.values(sec.data.layout.groups).find((g) => {
         const items = Object.values(g.layouts)[0] || [];
@@ -184,9 +280,21 @@ test('web SOP：栏目 / 条目 / 字段 / 保存 / 拖拽 / 删除', { skip, ti
       assert.ok(ordered.includes(after[0]), `没有任何断点记下新顺序（首块: ${ordered.join(' / ')}）`);
     });
 
-    await step('栏目属性编辑器里组内字段换序', async () => {
-      await page.goto(`${base}/#/sections`, { waitUntil: 'networkidle' });
-      await page.locator('.tree-row', { hasText: 'SOP 用例' }).getByRole('button', { name: '编辑' }).click();
+    await step('条目模板批量删除默认收起', async () => {
+      await page.goto(`${base}/#/templates`, { waitUntil: 'networkidle' });
+      assert.equal(await page.locator('.tree-check').count(), 0, '默认页不该摆批量勾选框');
+      await page.getByRole('button', { name: '更多条目模板操作' }).click();
+      await page.getByRole('menuitem', { name: '批量删除…' }).click();
+      await page.locator('.tree-batch').waitFor({ timeout: 10_000 });
+      assert.ok(await page.locator('.tree-check').count() > 0, '批量模式没有出现勾选框');
+      await page.getByRole('button', { name: '退出', exact: true }).click();
+      assert.equal(await page.locator('.tree-batch').count(), 0, '退出后批量条还在');
+    });
+
+    await step('条目模板属性编辑器里组内字段换序', async () => {
+      await page.goto(`${base}/#/templates`, { waitUntil: 'networkidle' });
+      await page.locator('.tree-row', { hasText: 'SOP 用例' }).getByRole('button', { name: '更多操作：SOP 用例' }).click();
+      await page.getByRole('menuitem', { name: '编辑字段与结构' }).click();
       await page.waitForSelector('.dict');
       const panel = page.locator('.dgrp').filter({ has: page.locator('.drow') }).first();
       const rows = panel.locator('.drow');
@@ -196,7 +304,7 @@ test('web SOP：栏目 / 条目 / 字段 / 保存 / 拖拽 / 删除', { skip, ti
       await page.waitForTimeout(1200);
       const after = await rows.evaluateAll((els) => els.map((e) => e.querySelector('.d-key')?.textContent?.trim()));
       assert.notDeepEqual(after, before, '字段拖不动（组内换序回归）');
-      const full = await fetch(`${base}/api/sections/sop`).then((r) => r.json());
+      const full = await fetch(`${base}/api/templates/sop`).then((r) => r.json());
       const gid = await panel.locator('.dgrp-id').inputValue();
       const keys = full.data.fieldList.find((f) => f.type === 'group' && f.key === gid)?.keys;
       assert.deepEqual(keys, after, '字段顺序没落库');
@@ -204,7 +312,7 @@ test('web SOP：栏目 / 条目 / 字段 / 保存 / 拖拽 / 删除', { skip, ti
       assert.equal(await page.locator('.dgrp.orphans .drow').count(), 0, '「未归组」里出现了组字段');
     });
 
-    // 放在删除之前：删完栏目再读 /api/sections/sop 会自带一个 404，那是测试自己造的噪音
+    // 放在删除之前：删完条目模板再读 /api/templates/sop 会自带一个 404，那是测试自己造的噪音
     await step('浏览器零报错', async () => {
       const real = errors.filter((x) => !/favicon|ERR_ABORTED|net::ERR_FAILED/.test(x));
       assert.deepEqual(real, [], `浏览器里报了错: ${real.slice(0, 3).join(' | ')}`);
@@ -212,21 +320,23 @@ test('web SOP：栏目 / 条目 / 字段 / 保存 / 拖拽 / 删除', { skip, ti
 
     await step('删除条目', async () => {
       await page.goto(`${base}/#/sop`, { waitUntil: 'networkidle' });
-      await page.getByRole('button', { name: '删除条目' }).click();
+      await page.getByRole('button', { name: '更多条目操作', exact: true }).click();
+      await page.getByRole('menuitem', { name: /删除条目/ }).click();
       const mask = page.locator('.mask');
       await mask.locator('button').last().click();
       await page.waitForTimeout(1200);
-      const r = await fetch(`${base}/api/sections/sop`).then((x) => x.json());
+      const r = await fetch(`${base}/api/templates/sop`).then((x) => x.json());
       assert.equal(r.data.entries, 0, '条目没删掉');
     });
 
-    await step('删除栏目', async () => {
-      await page.goto(`${base}/#/sections`, { waitUntil: 'networkidle' });
-      await page.locator('.tree-row', { hasText: 'SOP 用例' }).getByRole('button', { name: /删除/ }).first().click();
+    await step('删除条目模板', async () => {
+      await page.goto(`${base}/#/templates`, { waitUntil: 'networkidle' });
+      await page.locator('.tree-row', { hasText: 'SOP 用例' }).getByRole('button', { name: '更多操作：SOP 用例' }).click();
+      await page.getByRole('menuitem', { name: '删除条目模板' }).click();
       const mask = page.locator('.mask');
       await mask.locator('button').last().click();
       await page.waitForTimeout(1000);
-      assert.equal((await fetch(`${base}/api/sections/sop`)).ok, false, '栏目还在');
+      assert.equal((await fetch(`${base}/api/templates/sop`)).ok, false, '条目模板还在');
     });
   } finally {
     await browser?.close().catch(() => {});

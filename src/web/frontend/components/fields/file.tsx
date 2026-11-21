@@ -1,7 +1,7 @@
 // `file` 字段控件（**多值**）：值 = 附件 id 的列表，一个字段能挂多个附件
 // （简历多版本、头像多张……）。
 //
-// **上传 / 选择就发生在这里**（「文件在栏目中链接」）；「附件」中心只负责统一展示与
+// **上传 / 选择就发生在这里**（「文件在条目模板中链接」）；「附件」中心只负责统一展示与
 // 库存管理，不在这里做指派，也不预定义任何槽位。
 // 列表逐行显示：缩略图/扩展名徽标 + 名称（内联预览）+ 下载 + 复制物理路径 + 移除；
 // 底部是添加入口（可**多选**上传、或从库里选一个追加）。
@@ -212,7 +212,6 @@ export function FileControl({ def, value, onChange }: ControlProps) {
         </div>
       ) : null}
       {full ? <span className="hint">已达上限（{max} 个）：先移除一个，或把字段的 maxItems 调大。</span> : null}
-      {def.hint ? <span className="hint">{def.hint}</span> : null}
     </div>
   );
 }

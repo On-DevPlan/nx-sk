@@ -2,7 +2,7 @@
 // 把 nx-sk 里的凭据**渲染成配置文件**（nx-sk 的主用途：凭据 → 能直接用的东西）。
 //
 // 用法：
-//   nx-sk entry get "prod 部署" --section deploy --json > entry.json
+//   nx-sk entry get "prod 部署" --template deploy --json > entry.json
 //   node render-config.js entry.json ./docker-compose.local.yml
 //   node render-config.js entry.json ./out.yml --var DB_PASSWORD=xxx
 //
@@ -45,7 +45,7 @@ try {
   entry = JSON.parse(readFileSync(inPath, 'utf8'));
 } catch (e) {
   console.error(`读不到或解析不了 ${inPath}: ${e.message}`);
-  console.error('先跑 `nx-sk entry get <条目> --section <栏目> --json > entry.json`');
+  console.error('先跑 `nx-sk entry get <条目> --template <条目模板> --json > entry.json`');
   process.exit(1);
 }
 

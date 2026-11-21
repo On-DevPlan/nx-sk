@@ -83,10 +83,10 @@ export function ShortcutControl({ def, value, onChange, ctx }: ControlProps) {
   // 「编辑默认视图」可改写默认形态；没存过就是 fullpage（#5 的原始要求）。
   const [mode, setMode] = useState<PeekMode>(() => peekDefault('shortcut', 'fullpage'));
   const total = groups.reduce((n, g) => n + g.shortcuts.length, 0);
-  const sectionId = typeof ctx?.sectionId === 'string' ? ctx.sectionId : '';
+  const templateId = typeof ctx?.templateId === 'string' ? ctx.templateId : '';
   const entryId = typeof ctx?.entryId === 'string' ? ctx.entryId : '';
-  const newTabHref = sectionId && entryId
-    ? `#/${encodeURIComponent(sectionId)}?entry=${encodeURIComponent(entryId)}`
+  const newTabHref = templateId && entryId
+    ? `#/${encodeURIComponent(templateId)}?entry=${encodeURIComponent(entryId)}`
     : undefined;
 
   return (

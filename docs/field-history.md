@@ -19,7 +19,7 @@
 
 **不做的（本期）**
 
-- 不做跨条目的「栏目级时间旅行」。
+- 不做跨条目的「条目模板级时间旅行」。
 - 不记录字段结构的变更史（`entry_fields` 的增删改），只记值。
 - 不在运行时兼容旧结构；历史表是新表，升级时刻起开始记。
 
@@ -191,7 +191,7 @@ POST /api/entries/:ref/fields/:key/history/:rev/restore   { dryRun?: boolean }
 
 | 初稿 | 实际 | 原因 |
 | --- | --- | --- |
-| `REFERENCES entry_fields ON DELETE CASCADE` | 无外键，writeStore 重建后清理孤儿历史 | 全量重写每次 DELETE sections，CASCADE 会把历史整份清空 |
+| `REFERENCES entry_fields ON DELETE CASCADE` | 无外键，writeStore 重建后清理孤儿历史 | 全量重写每次 DELETE templates，CASCADE 会把历史整份清空 |
 | 5 分钟合并窗口 | 不做合并，逐次记录 | 版本号要能解释「我存了几次」；噪声交给保留策略 |
 | `field_data.rev` 当前版本指针 | 未加列，按需 `MAX(rev)` | 避免动热表；本地规模聚合查询成本可忽略 |
 | `actor` / `source` 枚举 | 只留 `source`（默认 `ui`，恢复为 `restore`） | 当前写入路径拿不到可靠来源，先不伪造 |

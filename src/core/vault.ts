@@ -11,9 +11,9 @@ import fsp from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { ENV_PASSPHRASE, displayPath, vaultKeyFile, vaultSaltFile } from './paths.ts';
 import { chmodPrivate, ensureDir, pathExists } from './fsx.ts';
-import { KEY_BYTES, decryptValue, deriveKey, isCipherBlob, keyId, newKey } from './crypto.ts';
+import { KEY_BYTES, decryptValue, deriveKey, isCipherBlob, newKey } from './crypto.ts';
 import { behaviorOf } from './fields/registry.ts';
-import type { StoreEntry, StoreSection } from './store.ts';
+import type { StoreEntry, StoreTemplate } from './store.ts';
 import type { EntryFieldView } from './store-shape.ts';
 import type { FieldDef } from '../shared/fields/types.ts';
 
@@ -89,29 +89,23 @@ export async function vaultStatus() {
   };
 }
 
-/** 当前指纹，用于排查「密钥换过没有」。 */
-export async function currentKeyId() {
-  const { key } = await resolveVaultKey();
-  return keyId(key);
-}
-
 /**
  * 造一个 `decrypt(blob) => 明文`，交给 core/render.js 做展示层解密。
  *
  * 为什么放在这里：render 是纯函数（可单测、无 IO），而「什么时候允许解密」
  * 是安全决策——把它收成**一个**函数，就不会出现「某个出口忘了打码」。
- * 只有当栏目里真有密文字段、且条目里真有密文时才去解析密钥（避免无谓地生成密钥文件）。
+ * 只有当条目模板里真有密文字段、且条目里真有密文时才去解析密钥（避免无谓地生成密钥文件）。
  *
  * v3：传 `structures` 时敏感/清单字段的判据用「字典 ∪ 条目自身行」（同行键以行为准）——
  * 扩展行里 `--set 密码=…` 推断出的 secret 键也要解得开。
  */
 export async function sensitiveViewer(
-  section: StoreSection | null | undefined,
+  template: StoreTemplate | null | undefined,
   entries: StoreEntry[] = [],
   structures?: Map<string, EntryFieldView[]>,
 ) {
   const defs = new Map<string, FieldDef>();
-  for (const f of section?.fields || []) defs.set(f.key, f as unknown as FieldDef);
+  for (const f of template?.fields || []) defs.set(f.key, f as unknown as FieldDef);
   if (structures) {
     for (const e of entries) {
       for (const r of structures.get(e.id) || []) defs.set(r.key, r.spec as unknown as FieldDef);

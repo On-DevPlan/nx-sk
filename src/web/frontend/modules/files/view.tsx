@@ -1,15 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { DragEvent as ReactDragEvent } from 'react';
+import { Dropdown } from 'antd';
+import type { MenuProps } from 'antd';
+import { MoreOutlined } from '@ant-design/icons';
 import { api } from '../../api/client.ts';
 import { fileToDataUrl, refreshAttachments } from '../../api/files.ts';
 import { useStore } from '../../store.tsx';
-import { Copyable, Empty, Modal, Tag } from '../../components/ui.tsx';
+import { Copyable, Empty, Modal, Tag, copyText } from '../../components/ui.tsx';
 import type { Attachment } from '../../../../shared/model.ts';
 
 /** 反向引用的一条（`describeFile` 的 usedBy）。 */
 interface FileRefRow {
-  sectionId: string;
-  sectionTitle?: string;
+  templateId: string;
+  templateTitle?: string;
   entryId: string;
   entryTitle?: string;
   fieldKey: string;
@@ -27,8 +30,8 @@ type FileRow = Attachment & {
   downloadUrl: string;
 };
 
-/** `/api/files` 的栏目筛选片。 */
-interface FilesSectionRow {
+/** `/api/files` 的条目模板筛选片。 */
+interface FilesTemplateRow {
   id: string;
   title?: string;
   count: number;
@@ -42,7 +45,7 @@ interface FilesData {
   unlinked: number;
   root: string;
   rootRaw: string;
-  sections: FilesSectionRow[];
+  templates: FilesTemplateRow[];
   page: { limit: number; offset: number; count: number; total: number; hasMore: boolean };
   files: FileRow[];
 }
@@ -60,7 +63,7 @@ function fmtBytes(n: number) {
   return `${(n / (1024 * 1024)).toFixed(2)} MB`;
 }
 
-const refText = (u: FileRefRow) => `${u.sectionTitle} / ${u.entryTitle || '（无名）'} / ${u.fieldLabel}`;
+const refText = (u: FileRefRow) => `${u.entryTitle || '（无名）'} / ${u.fieldLabel}`;
 
 // 附件库可能上千个文件：一次渲染全部卡片会把所有图片拉进内存（OOM）。
 // 面板每页 24 个；CLI 不传 limit，仍是全量。
@@ -69,14 +72,14 @@ const PAGE_SIZE = 24;
 /**
  * 附件工作台：统一**展示与库存管理**（上传 / 本机路径导入、预览、下载、编辑、还原、删除）。
  *
- * 组织方式**完全由栏目驱动**——按「哪些栏目在引用附件」筛选，不预定义任何分类或槽位。
- * 真正的「上传并挂到某条条目」发生在本栏目条目的 `file` 字段里；这里只是所有原件的总览。
+ * 附件始终挂在条目上；这里只是所有原件的总览与库存管理，不按条目模板分栏。
+ * 真正的「上传并挂到某条条目」发生在本条目的 `file` 字段里。
  */
 export default function FilesView() {
   const { toast, guard, dialog, reload } = useStore();
   const [data, setData] = useState<FilesData | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [filter, setFilter] = useState(''); // '' 全部 | 'none' 未引用 | <栏目 id>
+  const [filter, setFilter] = useState(''); // '' 全部 | 'none' 未引用
   const [q, setQ] = useState('');
   const [dragOver, setDragOver] = useState(false);
   const [page, setPage] = useState(0);
@@ -87,7 +90,7 @@ export default function FilesView() {
   const load = useCallback(async () => {
     try {
       const params = new URLSearchParams();
-      if (filter) params.set('section', filter);
+      if (filter) params.set('template', filter);
       if (q) params.set('q', q);
       params.set('limit', String(PAGE_SIZE));
       params.set('offset', String(page * PAGE_SIZE));
@@ -125,7 +128,7 @@ export default function FilesView() {
         toast(`${file.name} 上传失败：${(e as Error).message}`, 'bad');
       }
     }
-    if (ok) toast(`已导入 ${ok} 个附件（到栏目条目里选它即可链接）`);
+    if (ok) toast(`已导入 ${ok} 个附件（到条目里选它即可链接）`);
     await refreshAttachments();
     await load();
     await reload();
@@ -224,6 +227,34 @@ export default function FilesView() {
     await reload();
   });
 
+  const copyOne = async (value: string, label: string) => {
+    const ok = await copyText(value);
+    toast(ok ? `已复制${label}` : '复制失败', ok ? '' : 'bad');
+  };
+
+  // 卡片只留「下载」一个主操作；导出副本 / 还原 / 编辑 / 复制路径与链接 / 删除都收进 More。
+  const fileMenu = (file: FileRow): MenuProps => ({
+    items: [
+      { key: 'edit', label: '编辑名称 / 备注' },
+      { key: 'export', label: '导出副本' },
+      { key: 'restore', label: '还原到导入位置' },
+      { type: 'divider' },
+      { key: 'path', label: '复制物理路径' },
+      { key: 'link', label: '复制链接' },
+      { type: 'divider' },
+      { key: 'remove', label: '删除', danger: true },
+    ],
+    onClick: ({ key, domEvent }) => {
+      domEvent.stopPropagation();
+      if (key === 'edit') openEdit(file);
+      else if (key === 'export') exportCopy(file);
+      else if (key === 'restore') restore(file);
+      else if (key === 'path') void copyOne(file.path, '物理路径');
+      else if (key === 'link') void copyOne(file.url, '链接');
+      else if (key === 'remove') remove(file);
+    },
+  });
+
   /**
    * 一键清理**未引用**的附件（孤儿附件）。
    *
@@ -248,12 +279,22 @@ export default function FilesView() {
     await reload();
   });
 
+  const toolMenu: MenuProps = {
+    items: [
+      { key: 'path', label: '本机路径导入' },
+      { key: 'cleanup', label: data?.unlinked ? `清理未引用（${data.unlinked}）` : '清理未引用', danger: true, disabled: !data?.unlinked },
+    ],
+    onClick: ({ key, domEvent }) => {
+      domEvent.stopPropagation();
+      if (key === 'path') openPathImport();
+      else if (key === 'cleanup') cleanup();
+    },
+  };
+
   if (err) {
     return <div className="pad stack"><div className="bad"><strong>附件库读不到</strong></div><pre className="block">{err}</pre></div>;
   }
   if (!data) return <div className="pad muted">加载中…</div>;
-
-  const sections = data.sections || [];
 
   return (
     <div
@@ -270,26 +311,21 @@ export default function FilesView() {
       <div className="toolbar rowgap pad">
         <strong>附件</strong>
         <span className="muted">{data.total} 个 · {fmtBytes(data.totalBytes)}</span>
-        <span className="hint" title="被栏目条目的 file 字段或 md 正文图片引用的附件数">被引用 {data.total - data.unlinked}/{data.total}</span>
+        <span className="hint" title="被条目的 file 字段或 md 正文图片引用的附件数">被引用 {data.total - data.unlinked}/{data.total}</span>
         <Copyable className="hint" text={data.rootRaw} title="点击复制附件库目录">{data.root}</Copyable>
         <span className="grow" />
         <input
-          style={{ width: 180 }}
+          style={{ width: 260 }}
           placeholder="搜索名称 / 备注 / 标签 / 引用它的条目"
           value={q}
           onChange={(e) => setQ(e.target.value)}
         />
-        <button className="btn small ghost" onClick={load}>刷新</button>
-        <button
-          className="btn small ghost danger-ghost"
-          disabled={!data.unlinked}
-          onClick={cleanup}
-          title="删除所有没有任何条目引用的附件（物理原件一并删除，不可撤销）"
-        >
-          清理未引用{data.unlinked ? `（${data.unlinked}）` : ''}
-        </button>
-        <button className="btn small ghost" onClick={openPathImport}>本机路径导入</button>
         <button className="btn small" onClick={() => pickerRef.current?.click()}>上传文件</button>
+        <Dropdown menu={toolMenu} trigger={['click']} placement="bottomRight">
+          <button type="button" className="btn small ghost icon-btn" aria-label="更多附件操作" title="更多附件操作">
+            <MoreOutlined />
+          </button>
+        </Dropdown>
         <input
           ref={pickerRef}
           type="file"
@@ -299,21 +335,11 @@ export default function FilesView() {
         />
       </div>
 
-      {/* 筛选按**栏目**驱动：栏目有 file 或 md 字段就会出现一个筛选片，不预定义任何分类 */}
+      {/* 附件不按模板分栏：只有「全部 / 未引用」与搜索；要找某条目的附件，直接搜条目名 */}
       <div className="rowgap pad file-filters">
         <button className={`tab small ${!filter ? 'active' : ''}`} onClick={() => setFilter('')}>
           全部<span className="count">{data.total}</span>
         </button>
-        {sections.map((s) => (
-          <button
-            key={s.id}
-            className={`tab small ${filter === s.id ? 'active' : ''}`}
-            onClick={() => setFilter(s.id)}
-            title={`被「${s.title}」栏目引用的附件`}
-          >
-            {s.title}<span className="count">{s.count}</span>
-          </button>
-        ))}
         <button className={`tab small ${filter === 'none' ? 'active' : ''}`} onClick={() => setFilter('none')}>
           未引用<span className="count">{data.unlinked}</span>
         </button>
@@ -338,24 +364,28 @@ export default function FilesView() {
                 </div>
                 {file.usedBy?.length
                   ? <div className="hint" title="条目的 file 字段或 md 正文图片引用了本附件">被引用：{file.usedBy.map(refText).join('、')}</div>
-                  : <div className="hint">未被任何条目引用（到栏目条目里选它即可链接）</div>}
+                  : <div className="hint">未被任何条目引用（到条目里选它即可链接）</div>}
               </div>
               <div className="file-acts">
                 <a className="btn small ghost" href={file.downloadUrl}>下载</a>
-                <button className="btn small ghost" onClick={() => exportCopy(file)}>导出副本</button>
-                <button className="btn small ghost" onClick={() => restore(file)}>还原</button>
-                <button className="btn small ghost" onClick={() => openEdit(file)}>编辑</button>
-                <button className="btn small ghost danger-ghost" onClick={() => remove(file)}>删除</button>
                 <span className="grow" />
-                <Copyable className="hint" text={file.path} title="点击复制物理路径">路径</Copyable>
-                <Copyable className="hint" text={file.url} title="点击复制链接">链接</Copyable>
+                <Dropdown menu={fileMenu(file)} trigger={['click']} placement="bottomRight">
+                  <button
+                    type="button"
+                    className="btn small ghost icon-btn"
+                    aria-label={`更多操作：${file.name}`}
+                    title="更多操作"
+                  >
+                    <MoreOutlined />
+                  </button>
+                </Dropdown>
               </div>
             </div>
           ))}
         </div>
       ) : (
         <div className="pad">
-          <Empty>还没有附件。把文件拖到这里、点「上传文件」，或用「本机路径导入」把原件移动进库；随后到栏目的条目里选它。</Empty>
+          <Empty>还没有附件。把文件拖到这里、点「上传文件」，或用「本机路径导入」把原件移动进库；随后到条目里选它。</Empty>
           <div className="hint pad">CLI：nx-sk file add --path "D:\简历\张三-简历.pdf"（默认移动；--copy 仅复制）</div>
         </div>
       )}
@@ -449,7 +479,7 @@ function EditForm({ form, onChange, onSubmit }: {
       </div>
       <div className="rowgap">
         <button className="btn" onClick={onSubmit}>保存</button>
-        <span className="hint">改文件名时，物理原件会随之移动。要链接到条目，请在栏目条目的 file 字段里选本附件，或在 md 正文里写 <code>![说明](本附件id)</code>。</span>
+        <span className="hint">改文件名时，物理原件会随之移动。要链接到条目，请在条目的 file 字段里选本附件，或在 md 正文里写 <code>![说明](本附件id)</code>。</span>
       </div>
     </div>
   );

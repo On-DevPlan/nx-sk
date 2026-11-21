@@ -9,7 +9,7 @@ const {
 } = await import('../../src/shared/locator.ts');
 
 const GOOD = [
-  ['nx-sk://section/demo', { kind: 'section', sectionId: 'demo' }],
+  ['nx-sk://template/demo', { kind: 'template', templateId: 'demo' }],
   ['nx-sk://entry/e_9f8e7d6c', { kind: 'entry', entryId: 'e_9f8e7d6c' }],
   ['nx-sk://field/e_1/name', { kind: 'field', entryId: 'e_1', key: 'name' }],
   ['nx-sk://field/e_1/微信号', { kind: 'field', entryId: 'e_1', key: '微信号' }],
@@ -25,13 +25,13 @@ test('四类规范形态：parse 出各段，format 原样回去（往返恒等�
   }
 });
 
-test('旧复合串 section:key：parse 认它（等价 field 定位），aliases 给出规范写法', () => {
+test('旧复合串 template:key：parse 认它（等价 field 定位），aliases 给出规范写法', () => {
   const parts = parseLocator('demo:name');
-  assert.deepEqual(parts, { kind: 'field', sectionId: 'demo', key: 'name' });
+  assert.deepEqual(parts, { kind: 'field', templateId: 'demo', key: 'name' });
   assert.equal(kindOf('demo:name'), 'field');
   assert.deepEqual(locatorAliases('demo:name'), ['demo:name', 'nx-sk://field/demo/name'], 'aliases 给出全部等价写法（含自身）');
-  // 反向：规范 field locator（sectionId 段）的等价旧写法就是复合串
-  assert.deepEqual(locatorAliases({ kind: 'field', sectionId: 'demo', key: 'name' }),
+  // 反向：规范 field locator（templateId 段）的等价旧写法就是复合串
+  assert.deepEqual(locatorAliases({ kind: 'field', templateId: 'demo', key: 'name' }),
     ['demo:name', 'nx-sk://field/demo/name']);
   // identity.fieldTargetKey 的构造口径 = formatFieldComposite（落盘串一字不改）
   assert.equal(formatFieldComposite('demo', 'name'), 'demo:name');
@@ -40,13 +40,13 @@ test('旧复合串 section:key：parse 认它（等价 field 定位），aliases
 test('脏输入一律 null 不抛：空/空白/未知 kind/段数不对/注入样串/超长/控制字符', () => {
   const BAD = [
     '', ' ', '\n', null, undefined, 123, {}, [], true,
-    'nx-sk://', 'nx-sk:///', 'nx-sk://section/', 'nx-sk://section', 'nx-sk://section//',
-    'nx-sk://section/a/b', 'nx-sk://entry/e_1/x', 'nx-sk://field/e_1', 'nx-sk://field/e_1/a/b',
+    'nx-sk://', 'nx-sk:///', 'nx-sk://template/', 'nx-sk://template', 'nx-sk://template//',
+    'nx-sk://template/a/b', 'nx-sk://entry/e_1/x', 'nx-sk://field/e_1', 'nx-sk://field/e_1/a/b',
     'nx-sk://file/f_1/x', 'nx-sk://unknown/x', 'nx-sk://FIELD/e_1/k',
-    'nx-sk://section/a b', 'nx-sk://section/a\\b',
-    'http://nx-sk/section/a', 'https://example.com', 'javascript:alert(1)',
+    'nx-sk://template/a b', 'nx-sk://template/a\\b',
+    'http://nx-sk/template/a', 'https://example.com', 'javascript:alert(1)',
     'C:\\Users\\x', '/api/entries', 'e_1', 'demo', 'f_abc',
-    'nx-sk://section/ x',
+    'nx-sk://template/ x',
     'a:b:c', ':b', 'a:', '::', '://', 'nx-sk://field//k',
     'x'.repeat(4096),
     'nx-sk://' + 'y'.repeat(600),
@@ -62,20 +62,20 @@ test('脏输入一律 null 不抛：空/空白/未知 kind/段数不对/注入�
 });
 
 test('前后空白容忍（粘贴场景），但段内空白/斜杠仍拒绝', () => {
-  assert.deepEqual(parseLocator('  nx-sk://section/demo  '), { kind: 'section', sectionId: 'demo' });
-  assert.equal(parseLocator('nx-sk://section/a b'), null);
+  assert.deepEqual(parseLocator('  nx-sk://template/demo  '), { kind: 'template', templateId: 'demo' });
+  assert.equal(parseLocator('nx-sk://template/a b'), null);
 });
 
 test('format 对坏 parts 抛错（构造层是程序 bug 的关口，不是脏输入关口）', () => {
   assert.throws(() => formatLocator(null));
-  assert.throws(() => formatLocator({ kind: 'section' }));
+  assert.throws(() => formatLocator({ kind: 'template' }));
   assert.throws(() => formatLocator({ kind: 'field', entryId: 'e_1' }));
   assert.throws(() => formatLocator({ kind: 'field', entryId: 'e 1', key: 'a' }));
-  assert.throws(() => formatLocator({ kind: 'nope', sectionId: 'x' }));
+  assert.throws(() => formatLocator({ kind: 'nope', templateId: 'x' }));
 });
 
-test('aliases：section/entry/file 的旧写法就是裸 id；解析不出来的输入返回空数组', () => {
-  assert.deepEqual(locatorAliases('nx-sk://section/demo'), ['demo']);
+test('aliases：template/entry/file 的旧写法就是裸 id；解析不出来的输入返回空数组', () => {
+  assert.deepEqual(locatorAliases('nx-sk://template/demo'), ['demo']);
   assert.deepEqual(locatorAliases('nx-sk://entry/e_1'), ['e_1']);
   assert.deepEqual(locatorAliases('nx-sk://file/f_1'), ['f_1']);
   assert.deepEqual(locatorAliases('nx-sk://field/e_1/k'), ['nx-sk://field/e_1/k']);
@@ -84,17 +84,17 @@ test('aliases：section/entry/file 的旧写法就是裸 id；解析不出来的
 });
 
 test('kind 清单封闭：LOCATOR_KINDS 与 parse 认的段一致', () => {
-  assert.deepEqual([...LOCATOR_KINDS], ['section', 'entry', 'field', 'file']);
+  assert.deepEqual([...LOCATOR_KINDS], ['template', 'entry', 'field', 'file']);
   assert.equal(LOCATOR_SCHEME, 'nx-sk://');
 });
 
-test('B4 entryRefText：原三行 CLI 文案逐字不变 + 末尾补一行 locator', async () => {
+test('B4 entryRefText：条目是唯一存储单元，命令只带条目 id，不再要求 --template', async () => {
   const { entryRefText } = await import('../../src/web/frontend/entryRef.ts');
-  const lines = entryRefText({ id: 'demo', title: '字段样例' }, { id: 'e_1', title: '示例条目' }).split('\n');
+  const lines = entryRefText({ id: 'e_1', title: '示例条目' }).split('\n');
   assert.equal(lines.length, 4);
-  assert.equal(lines[0], 'nx-sk 条目 · 栏目「字段样例」(demo) › 条目「示例条目」(e_1)');
-  assert.equal(lines[1], '读: nx-sk entry get --section demo e_1');
-  assert.equal(lines[2], '改: nx-sk entry update --section demo e_1 --set 字段=值');
+  assert.equal(lines[0], 'nx-sk 条目「示例条目」(e_1)');
+  assert.equal(lines[1], '读: nx-sk entry get e_1');
+  assert.equal(lines[2], '改: nx-sk entry update e_1 --set 字段=值');
   assert.equal(lines[3], '定位: nx-sk://entry/e_1');
 });
 

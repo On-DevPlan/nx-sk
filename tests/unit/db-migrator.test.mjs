@@ -12,23 +12,29 @@ const { planMigrationPath, DIRECT_EDGES } = await import('../../src/core/db/migr
 const { CURRENT_SCHEMA_VERSION } = await import('../../src/core/db/version.ts');
 const { tx } = await import('../../src/core/db/tx.ts');
 
-test('空库 → 当前版本：建齐表并走完 v1…v6，版本写进 meta.schema_version 与 PRAGMA user_version', () => {
+test('空库 → 当前版本：建齐表并走完 v1…v9，版本写进 meta.schema_version 与 PRAGMA user_version', () => {
   const db = openRaw(':memory:');
   assert.equal(countTables(db), 0);
   const applied = migrate(db, { from: 0 });
-  assert.deepEqual(applied, [1, 2, 3, 4, 5, 6]);
+  assert.deepEqual(applied, [1, 2, 3, 4, 5, 6, 7, 8, 9]);
   assert.equal(schemaVersion(db), CURRENT_SCHEMA_VERSION);
   assert.equal(userVersion(db), CURRENT_SCHEMA_VERSION);
   assert.equal(getMeta(db, 'schema_version'), String(CURRENT_SCHEMA_VERSION));
   const names = db.all("SELECT name FROM sqlite_master WHERE type = 'table'").map((r) => r.name);
-  for (const t of ['meta', 'settings', 'ui_state', 'sections', 'fields', 'entries',
-    'attachments', 'entry_fields', 'field_data', 'entry_attach', 'field_history']) {
+  for (const t of ['meta', 'settings', 'ui_state', 'templates', 'template_fields', 'entries',
+    'folders', 'attachments', 'entry_fields', 'field_data', 'entry_attach', 'field_history']) {
     assert.ok(names.includes(t), `缺表 ${t}`);
   }
+  for (const gone of ['sections', 'fields']) assert.ok(!names.includes(gone), `${gone} 应已被 v7 改名/退役`);
   // v2 裁决：结构级边表必须已退役，role=source 必须被 CHECK 拒绝
   for (const gone of ['section_attach', 'field_attach']) {
     assert.ok(!names.includes(gone), `${gone} 应已被 v2 删除`);
   }
+  // v8 裁决：templates 不再带 KV 标记列，模板结构只剩字段 + 条目
+  const tplCols = db.all("SELECT name FROM pragma_table_info('templates')").map((r) => r.name);
+  assert.ok(!tplCols.includes('kv'), 'templates.kv 应已被 v8 删除');
+  // v9 裁决：模板默认标签列存在
+  assert.ok(tplCols.includes('tags'), 'templates.tags 应已由 v9 添加');
   // v6 裁决：groups 表退役（分组就是字段）
   assert.ok(!names.includes('groups'), 'groups 表应已被 v6 删除');
   // v3 裁决：values 列退役（entries 不再带它），边表挂 entry_field_id（不再有 field_key）
@@ -37,12 +43,12 @@ test('空库 → 当前版本：建齐表并走完 v1…v6，版本写进 meta.s
   const edgeCols = db.all("SELECT name FROM pragma_table_info('entry_attach')").map((r) => r.name);
   assert.ok(!edgeCols.includes('field_key') && edgeCols.includes('entry_field_id'), '边表应改挂 entry_field_id');
   // v4 裁决：字段类型不再被 DB CHECK 约束（加新类型不需要 schema 迁移）
-  for (const t of ['fields', 'entry_fields']) {
+  for (const t of ['template_fields', 'entry_fields']) {
     const sql = String(db.get("SELECT sql FROM sqlite_master WHERE name = :t", { t }).sql);
     assert.ok(!/CHECK\s*\(\s*type\s+IN/i.test(sql), `${t} 不该再有 type 的 CHECK IN 枚举`);
   }
-  db.exec("INSERT INTO sections (id, title, description, \"order\", kv, title_label, created_at, updated_at) VALUES ('s','S','',50,0,'名称','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z')");
-  db.exec("INSERT INTO entries (id, section_id, title, tags, created_at, updated_at) VALUES ('e1','s','t','[]','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z')");
+  db.exec("INSERT INTO templates (id, title, description, \"order\", title_label, created_at, updated_at) VALUES ('s','S','',50,'名称','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z')");
+  db.exec("INSERT INTO entries (id, template_id, title, tags, created_at, updated_at) VALUES ('e1','s','t','[]','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z')");
   db.exec("INSERT INTO entry_fields (id, entry_id, key, label, type, spec, position) VALUES ('ef_x','e1','x','X','text','{\"key\":\"x\"}',0)");
   db.exec("INSERT INTO attachments (id, kind, name, created_at, updated_at) VALUES ('f_x','file','x','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z')");
   assert.throws(() => db.exec("INSERT INTO entry_attach (entry_field_id, attachment_id, role, position, note, created_at) VALUES ('ef_x','f_x','source',0,'','2026-01-01T00:00:00.000Z')"), /CHECK/, 'role=source 必须被 CHECK 拒绝');
@@ -55,7 +61,28 @@ test('migrate 幂等：已到当前版本的库重跑等于空转', () => {
   migrate(db, { from: 0 });
   assert.deepEqual(migrate(db), [], '第二次不该再执行任何步骤');
   assert.equal(schemaVersion(db), CURRENT_SCHEMA_VERSION);
-  assert.equal(countTables(db), 11);
+  assert.equal(countTables(db), 12);
+  db.close();
+});
+
+test('v8 → v9：模板补默认 tag，存量条目合并模板 tags 且保留原有 tag', () => {
+  const db = openRaw(':memory:');
+  migrate(db, { from: 0, to: 8 });
+  // 空库迁移会播种内置模板；这条用例只关心 v9 回填，先清空再放自己的样本。
+  db.exec('DELETE FROM entries; DELETE FROM templates;');
+  db.exec("INSERT INTO templates (id, title, description, \"order\", title_label, created_at, updated_at) VALUES ('demo','字段样例','',10,'名称','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z')");
+  db.exec("INSERT INTO templates (id, title, description, \"order\", title_label, created_at, updated_at) VALUES ('__blank__','空白','',50,'名称','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z')");
+  db.exec("INSERT INTO entries (id, template_id, title, tags, created_at, updated_at) VALUES ('e1','demo','样例','[\"mine\"]','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z')");
+  db.exec("INSERT INTO entries (id, template_id, title, tags, created_at, updated_at) VALUES ('e2','__blank__','自由','[]','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z')");
+  assert.deepEqual(migrate(db), [9]);
+  const demo = db.get("SELECT tags FROM templates WHERE id = 'demo'");
+  assert.deepEqual(JSON.parse(demo.tags), ['demo', '字段样例']);
+  const blank = db.get("SELECT tags FROM templates WHERE id = '__blank__'");
+  assert.deepEqual(JSON.parse(blank.tags), []);
+  const e1 = db.get("SELECT tags FROM entries WHERE id = 'e1'");
+  assert.deepEqual(JSON.parse(e1.tags), ['mine', 'demo', '字段样例']);
+  const e2 = db.get("SELECT tags FROM entries WHERE id = 'e2'");
+  assert.deepEqual(JSON.parse(e2.tags), []);
   db.close();
 });
 

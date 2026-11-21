@@ -1,4 +1,4 @@
-// 字段字典：栏目的字段模板是**数据**，不是代码分支。
+// 字段字典：条目模板的字段模板是**数据**，不是代码分支。
 // agent 与面板都从同一份声明渲染，所以「CLI 能填的字段」与「面板能填的字段」不可能分叉。
 //
 // type 取值：text | textarea | number | date | month | bool | select | tags | entrylist | table | source | secret | file | md
@@ -38,8 +38,9 @@ export {
   SOURCE_FIELD,
   SOURCE_GROUP,
   ensureSourceBuiltin,
-  seedSections,
+  seedTemplates,
   seedEntries,
+  blankTemplate,
 } from './fields/seed.ts';
 
 export {
@@ -54,9 +55,7 @@ export {
 export { normalizeStructure, structureOf, boardGroupsOf, isGroupDef, groupKeysOf } from '../shared/fields/structure.ts';
 
 export {
-  findSection,
-  sectionNames,
-  findKvSection,
-  kvSections,
+  findTemplate,
+  templateNames,
 } from './fields/lookup.ts';
 

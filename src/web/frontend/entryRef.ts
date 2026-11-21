@@ -5,14 +5,15 @@
 import { formatLocator } from '../../shared/locator.ts';
 
 /**
- * 条目定位文本（点击复制用）：人读的路径 + agent 可直接执行的 CLI。
- * id 与标题都带——标题可能重名/被改，id 是唯一事实；命令里用 id 定位最稳。
+ * 条目定位文本（点击复制用）：人读的标题 + agent 可直接执行的 CLI。
+ * 条目是唯一存储单元，命令只认条目 id；条目模板只在创建初始化时用过，
+ * 后续读写不参与定位，所以这里不生成 `--template` 参数。
  */
-export function entryRefText(section: { id: string; title: string }, entry: { id: string; title: string }) {
+export function entryRefText(entry: { id: string; title: string }) {
   return [
-    `nx-sk 条目 · 栏目「${section.title}」(${section.id}) › 条目「${entry.title}」(${entry.id})`,
-    `读: nx-sk entry get --section ${section.id} ${entry.id}`,
-    `改: nx-sk entry update --section ${section.id} ${entry.id} --set 字段=值`,
+    `nx-sk 条目「${entry.title}」(${entry.id})`,
+    `读: nx-sk entry get ${entry.id}`,
+    `改: nx-sk entry update ${entry.id} --set 字段=值`,
     `定位: ${formatLocator({ kind: 'entry', entryId: entry.id })}`,
   ].join('\n');
 }

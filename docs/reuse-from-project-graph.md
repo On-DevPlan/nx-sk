@@ -19,7 +19,7 @@ nx-sk 的注册表方案正是「保留骨架、替换掉分发与注册的坏�
 ### 1.1 一种类型一个文件，集中分发表只做转交
 
 - project-graph：`app/src/core/render/canvas2d/entityRenderer/` 下按类型分目录
-  （`textNode/`、`svgNode/`、`urlNode/`、`section/`、`edge/concrete/`），每个渲染器是独立类；
+  （`textNode/`、`svgNode/`、`urlNode/`、`template/`、`edge/concrete/`），每个渲染器是独立类；
   上层只负责「拿到实体 → 调用对应渲染器」。
 - nx-sk 落点：
   - `src/shared/fields/<type>.ts`（一种字段一个行为体）

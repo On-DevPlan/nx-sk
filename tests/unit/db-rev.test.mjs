@@ -23,9 +23,9 @@ test('两个并发 mutate：第二个提交报 BLOCKED（rev 不匹配），数�
   // 模拟两个进程各自「读 → 改 → 写」：同一份基线读两次
   const p1 = await loadStore();
   const p2 = await loadStore();
-  p1.sections.push({ id: 's1', title: '进程一建的', description: '', order: 60, template: null, kv: false,
+  p1.templates.push({ id: 's1', title: '进程一建的', description: '', order: 60, template: null,
     titleField: null, titleLabel: '名称', groups: [], fields: [], layout: null, createdAt: null, updatedAt: null });
-  p2.sections.push({ id: 's2', title: '进程二建的', description: '', order: 70, template: null, kv: false,
+  p2.templates.push({ id: 's2', title: '进程二建的', description: '', order: 70, template: null,
     titleField: null, titleLabel: '名称', groups: [], fields: [], layout: null, createdAt: null, updatedAt: null });
 
   await saveStore(p1); // 先提交的赢
@@ -39,13 +39,13 @@ test('两个并发 mutate：第二个提交报 BLOCKED（rev 不匹配），数�
   assert.equal(revFromDisk(), revBefore, '撞墙的提交不能动库（rev 都没涨）');
 
   const after = await loadStore();
-  assert.ok(after.sections.some((s) => s.id === 's1'), '先提交的数据必须在');
-  assert.ok(!after.sections.some((s) => s.id === 's2'), '撞墙的提交一条都不能写进去');
+  assert.ok(after.templates.some((s) => s.id === 's1'), '先提交的数据必须在');
+  assert.ok(!after.templates.some((s) => s.id === 's2'), '撞墙的提交一条都不能写进去');
 });
 
 test('mutateStore 走同一条 rev 校验；顺序 mutate 正常推进 rev', async () => {
   const r0 = revFromDisk();
-  await mutateStore((s) => { s.entries.push({ id: 'e_rev', section: 'demo', title: 'R', tags: [], values: {}, createdAt: null, updatedAt: null }); });
+  await mutateStore((s) => { s.entries.push({ id: 'e_rev', template: 'demo', title: 'R', tags: [], values: {}, createdAt: null, updatedAt: null }); });
   await mutateStore((s) => { s.entries = s.entries.filter((e) => e.id !== 'e_rev'); });
   assert.equal(revFromDisk(), r0 + 2, '每次成功提交 rev +1');
   assert.ok(!(await loadStore()).entries.some((e) => e.id === 'e_rev'));
@@ -56,7 +56,7 @@ test('同一个对象重复 save 不撞墙（rev 随提交前进）；外部构�
   await saveStore(s);
   await saveStore(s); // 同一对象第二次保存：revOf 已随第一次前进，不该报冲突
   const fresh = await loadStore();
-  fresh.settings.defaultSection = 'demo';
+  fresh.settings.defaultTemplate = 'demo';
   await saveStore(fresh); // 刚读的，正常
 });
 

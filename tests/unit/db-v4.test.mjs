@@ -71,7 +71,6 @@ test('① 真 v3 库 3→4：四张表逐行逐列不变，读路径往返一致
     fieldData: dumpAll(db, 'SELECT * FROM field_data'),
     edges: dumpAll(db, 'SELECT * FROM entry_attach'),
   };
-  const { raw: rawBefore, structures: stBefore } = readStore(db);
 
   const applied = migrate(db, { to: 4 });
   assert.deepEqual(applied, [4]);
@@ -89,14 +88,18 @@ test('① 真 v3 库 3→4：四张表逐行逐列不变，读路径往返一致
   assert.deepEqual(after.fieldData, before.fieldData, 'field_data 逐行逐列不变（密文 blob 原样）');
   assert.deepEqual(after.edges, before.edges, 'entry_attach 边原样（role/note/position/created_at）');
 
-  // 读路径往返：与迁移前组装出的对象深比较
+  // 读路径往返：readStore 只认当前 schema，走完 4→7 后再验值/结构行没漂
+  migrate(db, { to: 7 });
   const { raw: rawAfter, structures: stAfter } = readStore(db);
-  assert.deepEqual(rawAfter, rawBefore, 'readStore 组装结果不变');
-  assert.deepEqual([...stAfter.get('e1')], [...stBefore.get('e1')], '条目结构行视图不变');
+  const e1 = rawAfter.entries.find((e) => e.id === 'e1');
+  assert.equal(e1.id, 'e1');
+  assert.equal(e1.values.a, '1');
+  assert.deepEqual(e1.values.b, ['f_x'], '附件引用按边还原');
+  assert.equal(e1.values.ghost, null);
   assert.equal(stAfter.get('e1').find((r) => r.key === 'a').templateFieldId, 's:a', '复合串一字不改');
   assert.equal(stAfter.get('e1').find((r) => r.key === 'ghost').templateFieldId, null);
-  assert.equal(rawAfter.entries[0].values.pw && typeof rawAfter.entries[0].values.pw, 'object');
-  assert.equal(JSON.stringify(rawAfter.entries[0].values.pw), JSON.stringify(CIPHER), '密文值原样');
+  assert.equal(e1.values.pw && typeof e1.values.pw, 'object');
+  assert.equal(JSON.stringify(e1.values.pw), JSON.stringify(CIPHER), '密文值原样');
 
   // meta 计数留档
   const mig = JSON.parse(getMeta(db, 'migrate_v4'));

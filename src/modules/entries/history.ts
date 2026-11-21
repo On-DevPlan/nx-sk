@@ -40,8 +40,8 @@ function present(def: FieldDef | undefined, text: string | null, decrypt?: (blob
   return raw;
 }
 
-async function viewerFor(store: Awaited<ReturnType<typeof loadStore>>, entryId: string, sectionId: string) {
-  const sec = store.sections.find((s) => s.id === sectionId) || null;
+async function viewerFor(store: Awaited<ReturnType<typeof loadStore>>, entryId: string, templateId: string) {
+  const sec = store.templates.find((s) => s.id === templateId) || null;
   const entry = store.entries.find((e) => e.id === entryId) || null;
   return sensitiveViewer(sec, entry ? [entry] : [], entryStructures(store));
 }
@@ -53,11 +53,11 @@ function limitOf(raw: unknown, fallback: number): number {
 }
 
 /** 条目内单个字段的历史（rev 倒序）。key 可以是字段 key 或中文标签。 */
-export async function getFieldHistory(ref: unknown, key: unknown, { section, limit }: { section?: string; limit?: unknown } = {}) {
+export async function getFieldHistory(ref: unknown, key: unknown, { template, limit }: { template?: string; limit?: unknown } = {}) {
   const store = await loadStore();
-  const entry = resolveEntry(store, ref, section);
-  const sec = store.sections.find((s) => s.id === entry.section);
-  if (!sec) throw notFound(`条目 ${entry.id} 指向的栏目已不存在: ${entry.section}`);
+  const entry = resolveEntry(store, ref, template);
+  const sec = store.templates.find((s) => s.id === entry.template);
+  if (!sec) throw notFound(`条目 ${entry.id} 指向的条目模板已不存在: ${entry.template}`);
   const ownRows = entryStructures(store).get(entry.id) || null;
   const def = resolveOwnRow(ownRows, key) || resolveFieldDef(sec, key);
   if (!def) throw notFound(`条目「${entry.title}」没有字段: ${String(key)}`);
@@ -74,7 +74,7 @@ export async function getFieldHistory(ref: unknown, key: unknown, { section, lim
     sensitive: def.sensitive === true,
   }));
   return {
-    id: entry.id, title: entry.title, section: sec.id, sectionTitle: sec.title,
+    id: entry.id, title: entry.title, template: sec.id, templateTitle: sec.title,
     field: { key: def.key, label: def.label || def.key, type: def.type },
     current: present(def, data.current, decrypt),
     count: items.length,
@@ -83,11 +83,11 @@ export async function getFieldHistory(ref: unknown, key: unknown, { section, lim
 }
 
 /** 一个条目的全字段变化时间线（按时间倒序；已脱离字段不出现）。 */
-export async function getEntryHistory(ref: unknown, { section, limit }: { section?: string; limit?: unknown } = {}) {
+export async function getEntryHistory(ref: unknown, { template, limit }: { template?: string; limit?: unknown } = {}) {
   const store = await loadStore();
-  const entry = resolveEntry(store, ref, section);
-  const sec = store.sections.find((s) => s.id === entry.section);
-  if (!sec) throw notFound(`条目 ${entry.id} 指向的栏目已不存在: ${entry.section}`);
+  const entry = resolveEntry(store, ref, template);
+  const sec = store.templates.find((s) => s.id === entry.template);
+  if (!sec) throw notFound(`条目 ${entry.id} 指向的条目模板已不存在: ${entry.template}`);
   const ownRows = entryStructures(store).get(entry.id) || null;
   const defs = new Map<string, FieldDef>(defsForEntry(sec, ownRows).map((d) => [d.key, d]));
   const decrypt = await viewerFor(store, entry.id, sec.id);
@@ -106,17 +106,17 @@ export async function getEntryHistory(ref: unknown, { section, limit }: { sectio
       };
     });
   return {
-    id: entry.id, title: entry.title, section: sec.id, sectionTitle: sec.title,
+    id: entry.id, title: entry.title, template: sec.id, templateTitle: sec.title,
     count: items.length, items,
   };
 }
 
 /** 恢复到某个版本；`--dry-run` 只预览。 */
-export async function restoreFieldVersion(ref: unknown, key: unknown, { section, rev, 'dry-run': dryRun }: { section?: string; rev?: unknown; 'dry-run'?: boolean } = {}) {
+export async function restoreFieldVersion(ref: unknown, key: unknown, { template, rev, 'dry-run': dryRun }: { template?: string; rev?: unknown; 'dry-run'?: boolean } = {}) {
   const store = await loadStore();
-  const entry = resolveEntry(store, ref, section);
-  const sec = store.sections.find((s) => s.id === entry.section);
-  if (!sec) throw notFound(`条目 ${entry.id} 指向的栏目已不存在: ${entry.section}`);
+  const entry = resolveEntry(store, ref, template);
+  const sec = store.templates.find((s) => s.id === entry.template);
+  if (!sec) throw notFound(`条目 ${entry.id} 指向的条目模板已不存在: ${entry.template}`);
   const ownRows = entryStructures(store).get(entry.id) || null;
   const def = resolveOwnRow(ownRows, key) || resolveFieldDef(sec, key);
   if (!def) throw notFound(`条目「${entry.title}」没有字段: ${String(key)}`);

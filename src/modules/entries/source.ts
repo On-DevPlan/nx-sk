@@ -7,12 +7,12 @@ import { mdImageIds, rewriteMdImages } from '../../core/mdimages.ts';
 import { displayPath } from '../../core/paths.ts';
 import { normalizeSourceItem, normalizeSourceItems, resolveSourceConflicts, sourceItemTimeLabel } from '../../core/source.ts';
 import type { SourceItem } from '../../shared/fields/types.ts';
-import { mustFindSection, resolveEntry } from './shared.ts';
+import { mustFindTemplate, resolveEntry } from './shared.ts';
 
 // —— 原始资料袋（source 字段）——
 //
 // 袋是**乱入区**：先原样收下杂乱资料（邮件、截图、PDF 摘录、手抄的表），
-// 之后由 agent 或人按栏目字段字典整理成结构化字段。
+// 之后由 agent 或人按条目模板字段字典整理成结构化字段。
 // 命令族：source list / get / add / remove / ensure。
 
 /** 某条目的袋内容（原始形状）。 */
@@ -45,15 +45,15 @@ function sourceFiles(store: Store, items: SourceItem[]): Record<string, { id: st
   return files;
 }
 
-/** source list：各栏目的袋子概况。 */
-export async function listSource({ section }: { section?: string } = {}) {
+/** source list：各条目模板的袋子概况。 */
+export async function listSource({ template }: { template?: string } = {}) {
   const store = await loadStore();
-  const secs = section
-    ? [mustFindSection(store, section)]
-    : store.sections.filter((s) => s.kv !== true);
+  const secs = template
+    ? [mustFindTemplate(store, template)]
+    : store.templates.filter((s) => !s.blank);
   const out = [];
   for (const sec of secs) {
-    const mine = store.entries.filter((e) => e.section === sec.id);
+    const mine = store.entries.filter((e) => e.template === sec.id);
     let items = 0;
     let filled = 0;
     for (const e of mine) {
@@ -61,28 +61,28 @@ export async function listSource({ section }: { section?: string } = {}) {
       if (n) { filled += 1; items += n; }
     }
     out.push({
-      section: sec.id,
-      sectionTitle: sec.title,
+      template: sec.id,
+      templateTitle: sec.title,
       hasField: sec.fields.some((f) => f.type === 'source'),
       entries: mine.length,
       filled,
       items,
     });
   }
-  return { count: out.length, sections: out };
+  return { count: out.length, templates: out };
 }
 
 /** source get：某条目的袋明细。 */
-export async function getSource(ref: unknown, { section }: { section?: string } = {}) {
+export async function getSource(ref: unknown, { template }: { template?: string } = {}) {
   const store = await loadStore();
-  const entry = resolveEntry(store, ref, section);
-  const sec = mustFindSection(store, entry.section);
+  const entry = resolveEntry(store, ref, template);
+  const sec = mustFindTemplate(store, entry.template);
   const items = sourceItemsOf(entry);
   return {
     id: entry.id,
     title: entry.title,
-    section: sec.id,
-    sectionTitle: sec.title,
+    template: sec.id,
+    templateTitle: sec.title,
     hasField: sec.fields.some((f) => f.type === 'source'),
     count: items.length,
     // 当前版本 = 没被取代的；旧的留痕但不算数
@@ -95,8 +95,8 @@ export async function getSource(ref: unknown, { section }: { section?: string } 
 }
 
 /** source add：往袋里加一条（文字 / 文件 / 网址）。 */
-export async function addSourceItem(ref: unknown, { section, text, file, url, name, note, mapped, at, supersedes, 'dry-run': dryRun }: {
-  section?: string;
+export async function addSourceItem(ref: unknown, { template, text, file, url, name, note, mapped, at, supersedes, 'dry-run': dryRun }: {
+  template?: string;
   text?: unknown;
   file?: string;
   url?: string;
@@ -108,10 +108,10 @@ export async function addSourceItem(ref: unknown, { section, text, file, url, na
   'dry-run'?: boolean;
 } = {}) {
   const store = await loadStore();
-  const target = resolveEntry(store, ref, section);
-  const sec = mustFindSection(store, target.section);
+  const target = resolveEntry(store, ref, template);
+  const sec = mustFindTemplate(store, target.template);
   if (!sec.fields.some((f) => f.type === 'source')) {
-    throw badInput(`栏目「${sec.title}」没有「原始资料」字段（source）——先跑 nx-sk source ensure 补上`);
+    throw badInput(`条目模板「${sec.title}」没有「原始资料」字段（source）——先跑 nx-sk source ensure 补上`);
   }
   const items = sourceItemsOf(target);
   let item = null;
@@ -139,7 +139,7 @@ export async function addSourceItem(ref: unknown, { section, text, file, url, na
     e.values.source = next;
     e.updatedAt = nowIso();
   });
-  return { status: 'ok', added: item, count: next.length, current: next.filter((x) => !x.superseded).length, id: target.id, title: target.title, section: sec.id };
+  return { status: 'ok', added: item, count: next.length, current: next.filter((x) => !x.superseded).length, id: target.id, title: target.title, template: sec.id };
 }
 
 /**
@@ -149,8 +149,8 @@ export async function addSourceItem(ref: unknown, { section, text, file, url, na
  * 记在它自己身上，下次同步就能知道「这条已经用过」，不会重复整理。
  * 注意**不改正文**（text 永远是原文；改内容 = 删掉重加）。
  */
-export async function updateSourceItem(ref: unknown, { section, id, name, note, mapped, at, superseded, 'dry-run': dryRun }: {
-  section?: string;
+export async function updateSourceItem(ref: unknown, { template, id, name, note, mapped, at, superseded, 'dry-run': dryRun }: {
+  template?: string;
   id?: unknown;
   name?: unknown;
   note?: unknown;
@@ -160,7 +160,7 @@ export async function updateSourceItem(ref: unknown, { section, id, name, note, 
   'dry-run'?: boolean;
 } = {}) {
   const store = await loadStore();
-  const target = resolveEntry(store, ref, section);
+  const target = resolveEntry(store, ref, template);
   const items = sourceItemsOf(target);
   const key = String(id || '').trim();
   const idx = items.findIndex((x) => x.id === key);
@@ -190,9 +190,9 @@ export async function updateSourceItem(ref: unknown, { section, id, name, note, 
 }
 
 /** source remove：从袋里删掉一条。 */
-export async function removeSourceItem(ref: unknown, { section, id, 'dry-run': dryRun }: { section?: string; id?: unknown; 'dry-run'?: boolean } = {}) {
+export async function removeSourceItem(ref: unknown, { template, id, 'dry-run': dryRun }: { template?: string; id?: unknown; 'dry-run'?: boolean } = {}) {
   const store = await loadStore();
-  const target = resolveEntry(store, ref, section);
+  const target = resolveEntry(store, ref, template);
   const items = sourceItemsOf(target);
   const key = String(id || '').trim();
   const idx = items.findIndex((x) => x.id === key);
@@ -211,18 +211,19 @@ export async function removeSourceItem(ref: unknown, { section, id, 'dry-run': d
 }
 
 /**
- * source ensure：给所有缺「原始资料」字段的栏目补上。
+ * source ensure：给所有缺「原始资料」字段的条目模板补上。
  *
- * 为什么需要它：栏目是**持久化数据**，模板后来新增的字段不会回溯到已建好的栏目
- * （老问题的同一形状，见 `section sync`）。source 字段是「每个栏目都该有」的那种，
- * 所以给一条命令把缺口一次补齐，而不是让用户逐个栏目加。
+ * 为什么需要它：条目模板是**持久化数据**，模板后来新增的字段不会回溯到已建好的条目模板
+ * （老问题的同一形状，见 `template sync`）。source 字段是「每个条目模板都该有」的那种，
+ * 所以给一条命令把缺口一次补齐，而不是让用户逐个条目模板加。
  */
 export async function ensureSourceFields({ 'dry-run': dryRun }: { 'dry-run'?: boolean } = {}) {
   const store = await loadStore();
   const added: string[] = [];
   const skipped: Array<{ id: string; title: string; why: string }> = [];
-  for (const sec of store.sections) {
-    if (sec.kv) { skipped.push({ id: sec.id, title: sec.title, why: 'KV 表（形状固定，不加字段）' }); continue; }
+  for (const sec of store.templates) {
+    // 空白模板是内部底座，永远不补 source 袋（它必须能真从空开始）。
+    if (sec.blank) continue;
     if (sec.fields.some((f) => f.type === 'source')) { skipped.push({ id: sec.id, title: sec.title, why: '已有' }); continue; }
     added.push(sec.id);
   }
@@ -230,10 +231,10 @@ export async function ensureSourceFields({ 'dry-run': dryRun }: { 'dry-run'?: bo
   if (!added.length) return { status: 'ok', added: [], skipped, count: 0 };
   await mutateStore((s) => {
     for (const id of added) {
-      const sec = s.sections.find((x) => x.id === id);
+      const sec = s.templates.find((x) => x.id === id);
       if (!sec) continue;
       // 0.42：袋子是「组字段 + source 字段」两件套，规则只此一份（ensureSourceBuiltin）。
-      sec.fields = ensureSourceBuiltin(sec.fields as any, { kv: sec.kv }) as typeof sec.fields;
+      sec.fields = ensureSourceBuiltin(sec.fields as any) as typeof sec.fields;
       sec.updatedAt = nowIso();
     }
   });
@@ -244,17 +245,17 @@ export async function ensureSourceFields({ 'dry-run': dryRun }: { 'dry-run'?: bo
 const SOURCE_KIND_LABEL = { text: '文字', file: '附件', url: '网址' };
 
 export function renderSourceList(d: Awaited<ReturnType<typeof listSource>>) {
-  const lines = [`原始资料袋 · ${d.count} 个栏目`];
-  for (const s of d.sections) {
+  const lines = [`原始资料袋 · ${d.count} 个条目模板`];
+  for (const s of d.templates) {
     const tag = s.hasField ? '' : '　[缺 source 字段：nx-sk source ensure 补上]';
-    lines.push(`  ${s.section.padEnd(14)}${s.sectionTitle}　${s.items} 条资料 / ${s.filled} 个条目有袋（栏目共 ${s.entries} 条目）${tag}`);
+    lines.push(`  ${s.template.padEnd(14)}${s.templateTitle}　${s.items} 条资料 / ${s.filled} 个条目有袋（条目模板共 ${s.entries} 条目）${tag}`);
   }
   lines.push('', '看某个条目的袋: nx-sk source get <条目id>　　加一条: nx-sk source add <条目id> --text "…"');
   return lines.join('\n');
 }
 
 export function renderSourceGet(d: Awaited<ReturnType<typeof getSource>>) {
-  const lines = [`${d.title || d.id}（${d.id}）· 栏目 ${d.section} · 原始资料 ${d.count} 条`
+  const lines = [`${d.title || d.id}（${d.id}）· 条目模板 ${d.template} · 原始资料 ${d.count} 条`
     + (d.superseded ? `（当前 ${d.current} 条，另有 ${d.superseded} 条被更新的取代、留痕可查）` : '')];
   if (!d.count) {
     lines.push('  （袋子是空的）');
@@ -297,12 +298,12 @@ interface SourceChangeView {
 
 export function renderSourceChange(d: SourceChangeView) {
   if (d.status === 'skipped') {
-    // 顺序要紧：ensure 的 wouldAdd 是**栏目 id 数组**，add 的是**一条资料对象**——
+    // 顺序要紧：ensure 的 wouldAdd 是**条目模板 id 数组**，add 的是**一条资料对象**——
     // 数组也是真值，先判 item 会把数组当成资料渲染成 "[undefined] undefined"。
     if (Array.isArray(d.wouldAdd)) {
       return d.wouldAdd.length
-        ? `试运行（未落盘）：将给 ${d.wouldAdd.length} 个栏目补上「原始资料」字段：${d.wouldAdd.join('、')}`
-        : '试运行（未落盘）：所有栏目都已有「原始资料」字段，无需补';
+        ? `试运行（未落盘）：将给 ${d.wouldAdd.length} 个条目模板补上「原始资料」字段：${d.wouldAdd.join('、')}`
+        : '试运行（未落盘）：所有条目模板都已有「原始资料」字段，无需补';
     }
     if (d.wouldAdd) return `试运行（未落盘）：将加入一条资料 [${(d.wouldAdd as SourceItem).kind}] ${(d.wouldAdd as SourceItem).name}`;
     if (d.wouldRemove) return `试运行（未落盘）：将移除 ${(d.wouldRemove as SourceItem).id}（${(d.wouldRemove as SourceItem).name}）`;
@@ -312,8 +313,8 @@ export function renderSourceChange(d: SourceChangeView) {
   if (d.added && !Array.isArray(d.added)) return `已加入资料 [${(d.added as SourceItem).kind}] ${(d.added as SourceItem).name} · 袋里共 ${d.count} 条`;
   if (Array.isArray(d.added)) {
     return d.added.length
-      ? `已给 ${d.added.length} 个栏目补上「原始资料」字段：${d.added.join('、')}`
-      : '所有栏目都已有「原始资料」字段，无需补';
+      ? `已给 ${d.added.length} 个条目模板补上「原始资料」字段：${d.added.join('、')}`
+      : '所有条目模板都已有「原始资料」字段，无需补';
   }
   return '没有改动';
 }

@@ -12,7 +12,7 @@ export interface ControlProps {
   onChange: (value: any) => void;
   /** 只有 secret 控件使用（与重构前一致：其余控件忽略它）。 */
   disabled?: boolean;
-  /** 表格外的一层上下文（sectionTitle / entryTitle），只有 source 控件用到。 */
+  /** 表格外的一层上下文（templateTitle / entryTitle），只有 source 控件用到。 */
   ctx?: Record<string, unknown>;
 }
 

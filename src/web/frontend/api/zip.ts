@@ -1,4 +1,4 @@
-// 栏目 ZIP 的前端入口：导入走**原始二进制** body（不 JSON/base64）。
+// 条目模板 ZIP 的前端入口：导入走**原始二进制** body（不 JSON/base64）。
 // 文件名用 x-file-name 头带过去，后端只用于展示，不参与路径。
 export async function postZip<T = any>(url: string, buffer: Blob | ArrayBuffer, fileName: string): Promise<T> {
   const res = await fetch(url, {

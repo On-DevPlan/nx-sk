@@ -85,17 +85,17 @@ export function importOrSeed(conn: Conn, jsonPath: string | null): ImportOutcome
   const mig = store._migration;
   delete store._migration;
 
-  // 预检：条目指向不存在的栏目 → entries.section_id 外键会当场拒插入，
+  // 预检：条目指向不存在的条目模板 → entries.section_id 外键会当场拒插入，
   // 但那句报错指不出「是哪几条、指向谁」。手动改过 store.json 的人值得一条能照做的错。
-  const sectionIds = new Set(store.sections.map((s) => s.id));
-  const orphans = store.entries.filter((e) => !sectionIds.has(e.section));
+  const templateIds = new Set(store.templates.map((s) => s.id));
+  const orphans = store.entries.filter((e) => !templateIds.has(e.template));
   if (orphans.length) {
     throw badInput(
-      `store.json 里有 ${orphans.length} 条条目指向不存在的栏目（外键不允许）：` +
-        orphans.slice(0, 5).map((e) => `${e.id}→${e.section || '(空)'}`).join('、') +
+      `store.json 里有 ${orphans.length} 条条目指向不存在的条目模板（外键不允许）：` +
+        orphans.slice(0, 5).map((e) => `${e.id}→${e.template || '(空)'}`).join('、') +
         (orphans.length > 5 ? '…' : '') +
         '。请修正 store.json 后重试（文件不会被改动，也不会被半份导入）。',
-      { orphans: orphans.map((e) => ({ id: e.id, section: e.section })) },
+      { orphans: orphans.map((e) => ({ id: e.id, template: e.template })) },
     );
   }
 

@@ -1,4 +1,4 @@
-// 纯渲染逻辑（不碰磁盘、不碰平台）——值格式化、条目序列化、栏目全量视图。
+// 纯渲染逻辑（不碰磁盘、不碰平台）——值格式化、条目序列化、条目模板全量视图。
 // 放 core 是为了能单测：这些函数决定了「读出去的形状」，是最该被钉住的契约。
 //
 // 这里**不解密**：解密需要密钥（异步、且属于安全边界），所以由调用方把一个
@@ -10,6 +10,7 @@ import { FILL_LABELS, fillPolicy, isExcludedField, isSensitiveField } from './fi
 import { isBlank, isPlainRow, isStoredEmpty } from './values.ts';
 import { displaySensitive } from './sensitive.ts';
 import { behaviorOf } from './fields/registry.ts';
+import { grillBrief } from './fields/behaviors/grill.ts';
 import type { FieldDef, TableColumnDef } from '../shared/fields/types.ts';
 import type { SerializedEntry } from '../shared/model.ts';
 import type { EntryFieldView } from './store-shape.ts';
@@ -42,33 +43,34 @@ export interface ReadField {
 }
 
 /**
- * 栏目定义的读取侧形状。
+ * 条目模板定义的读取侧形状。
  *
  * 这里区分「永远存在」与「真正可选」：除 `layout` 外，store 归一化后这些键一定在
- * （见 core/store.ts 的 StoreSection / normalizeSection）；`layout` 在播种草稿、
+ * （见 core/store.ts 的 StoreTemplate / normalizeTemplate）；`layout` 在播种草稿、
  * 归一之前可能没有，读路径会过 reconcileLayout 自愈。
  */
-export interface SectionLike {
+export interface TemplateLike {
   id: string;
   title: string;
   description: string;
   order: number;
   template: string | null;
-  kv: boolean;
   titleField: string | null;
   titleLabel: string;
-  // 0.42：分组不是栏目级字段——组是 `fields` 里 type='group' 的一条（keys 引用成员）。
+  // v9：模板默认标签；旧草稿/测试夹具可能没有，读取侧按空数组处理。
+  tags?: string[] | null;
+  // 0.42：分组不是条目模板级字段——组是 `fields` 里 type='group' 的一条（keys 引用成员）。
   layout?: unknown;
   fields: ReadField[];
 }
 
 /**
- * 条目的读取侧形状。归一化后 id/section/title/tags/values/时间戳全都在
+ * 条目的读取侧形状。归一化后 id/template/title/tags/values/时间戳全都在
  * （见 core/store.ts 的 StoreEntry），所以这里不留可选。
  */
 export interface EntryLike {
   id: string;
-  section: string;
+  template: string;
   title: string;
   tags: string[];
   createdAt: string | null;
@@ -79,13 +81,18 @@ export interface EntryLike {
 /** 值 → 人读字符串（bool / tags / 数组 / 标量 / entrylist 行 / 引用文档）。 */
 export function formatValue(value: unknown): string {
   if (isBlank(value)) return '';
+  // 对齐单：台账只报「确认状态 + 必答进度」，问题正文留给字段自己的面板。
+  if (typeof value === 'object' && value && ('schema' in value || Array.isArray((value as { questions?: unknown }).questions))) {
+    const brief = grillBrief(value);
+    if (brief) return brief;
+  }
   // 引用文档（debug）：计数 + locator 列表，**不展开被引用内容**（台账不刷屏）
   const refDoc = value as { refs?: unknown };
   if (typeof value === 'object' && Array.isArray(refDoc.refs)) {
     const refs = refDoc.refs as unknown[];
     return refs.length ? `引用 ${refs.length} 个：${refs.map(String).join('、')}` : '';
   }
-  // 表格文档：按「列名=值 · 列名=值；下一行」压成一行（section dump 的表格放不下多行版）
+  // 表格文档：按「列名=值 · 列名=值；下一行」压成一行（template dump 的表格放不下多行版）
   const doc = value as { rows?: unknown; columns?: unknown };
   if (typeof value === 'object' && Array.isArray(doc.rows)) {
     const cols = (Array.isArray(doc.columns) ? doc.columns : []) as Array<{ key: string; label?: string }>;
@@ -96,7 +103,7 @@ export function formatValue(value: unknown): string {
       .join(' · ')).filter(Boolean).join('；');
   }
   if (Array.isArray(value)) {
-    // 结构清单的行：`k=v · k=v；k=v` 压成一行——section dump 的表格里放不下多行版
+    // 结构清单的行：`k=v · k=v；k=v` 压成一行——template dump 的表格里放不下多行版
     if (value.length && value.every((x) => isPlainRow(x))) {
       return value.map((row) => Object.entries(row as Record<string, unknown>)
         .filter(([, v]) => !isBlank(v))
@@ -113,14 +120,14 @@ export function formatValue(value: unknown): string {
 export type { SerializedEntry };
 
 /**
- * 条目的**唯一序列化出口**（面板、`entry list`、`section dump` 共用一份）。
+ * 条目的**唯一序列化出口**（面板、`entry list`、`template dump` 共用一份）。
  * 两个出口各写一遍序列化，迟早会分叉成「CLI 看得到、面板看不到」。
  *
  * v3：传 `ownRows`（条目自身结构行）时按**行**序列化——扩展行里的值也带得出去，
- * 字典改了 label 也不回刷存量条目；不传则退回栏目字典（旧行为，纯函数调用方不受影响）。
+ * 字典改了 label 也不回刷存量条目；不传则退回条目模板字典（旧行为，纯函数调用方不受影响）。
  */
 export function serializeEntry(
-  section: SectionLike,
+  template: TemplateLike,
   entry: EntryLike,
   { mask = false, decrypt, ownRows }: { mask?: boolean; decrypt?: (blob: unknown) => string; ownRows?: EntryFieldView[] | null } = {},
 ): SerializedEntry {
@@ -131,11 +138,11 @@ export function serializeEntry(
   const detachedRows = ownRows ? ownRows.filter((r) => isDetachedField(r)) : [];
   const rawDefs: ReadField[] = liveRows
     ? liveRows.map((r) => ({ ...(r.spec as unknown as ReadField), template: r.templateFieldId != null }))
-    : section.fields;
+    : template.fields;
   // 归属（`group`）是**推导**出来的：组=字段之后，结构只住在组字段的 keys 里，
   // 但笔者的读侧（面板块、`entry get`）一直要「这条字段属于哪组」。字典里找不到的
   // 扩展字段按不变量归根组——与 normalizeStructure 的孤儿处理同一口径。
-  const view = structureOf(section.fields as unknown as FieldDef[]);
+  const view = structureOf(template.fields as unknown as FieldDef[]);
   const fallbackGroup = view.roots[0];
   // 组字段（type='group'）只是容器：它没有值，也不该作为「一行字段」出现在表单/读侧。
   // 组标题由 `groups`（boardGroupsOf）下发、面板按块渲染；这里滤掉组行，否则每个块里
@@ -146,7 +153,7 @@ export function serializeEntry(
       ...d,
       group: view.parentOf.get(String(d.key)) || fallbackGroup,
     }) as ReadField);
-  const c = completeness(section, entry, liveRows);
+  const c = completeness(template, entry, liveRows);
   const values: Record<string, unknown> = {};
   for (const def of defs) {
     const raw = entry.values?.[def.key];
@@ -157,8 +164,13 @@ export function serializeEntry(
       continue;
     }
     // 表格读出去永远是**自描述的完整文档**：columns / rows / 可选 totals。
-    // 列存在数据里，所以读的人（面板、agent、导出）不必再去查栏目字典才知道有哪些列。
+    // 列存在数据里，所以读的人（面板、agent、导出）不必再去查条目模板字典才知道有哪些列。
     if (def.type === 'table') {
+      values[def.key] = behaviorOf(def.type).reveal(def, raw, { mask, decrypt });
+      continue;
+    }
+    // 对齐单：读出去也先归一（旧文档、agent 手写的最小形状都能被面板接住）。
+    if (def.type === 'grill') {
       values[def.key] = behaviorOf(def.type).reveal(def, raw, { mask, decrypt });
       continue;
     }
@@ -168,7 +180,7 @@ export function serializeEntry(
   }
   return {
     id: entry.id,
-    section: entry.section,
+    template: entry.template,
     title: entry.title,
     tags: entry.tags || [],
     createdAt: entry.createdAt,
@@ -185,7 +197,7 @@ export function serializeEntry(
     // 两者混在一起会让「补全清单」和「不填清单」分不开。
     excluded: c.excluded,
     values,
-    // v3：条目自身的字段定义（有结构行时=行，含扩展字段；没有时回退栏目字典）。
+    // v3：条目自身的字段定义（有结构行时=行，含扩展字段；没有时回退条目模板字典）。
     // 面板的块渲染必须跟着它走——只读字典的话，条目内新加的扩展字段渲染不出来。
     // 任务 #20：脱离行不在其中（defs 已过滤），每项带 template 出身标记供移除入口分文案。
     entryFields: defs as unknown as FieldDef[],
@@ -207,13 +219,13 @@ export function serializeEntry(
  * 任务 #20：脱离行（meta.detached）同样不统计——从本条目移除的字段不该再欠一个「未填」。
  */
 export function completeness(
-  section: SectionLike | null | undefined,
+  template: TemplateLike | null | undefined,
   entry: { values?: Record<string, unknown> } | null | undefined,
   ownRows?: EntryFieldView[] | null,
 ) {
   const fields: ReadField[] = ownRows
     ? ownRows.filter((r) => r.templateFieldId != null && !isDetachedField(r)).map((r) => r.spec as unknown as ReadField)
-    : section?.fields || [];
+    : template?.fields || [];
   // 组字段是**容器**不是值：它没有可填的内容，不能进分母（否则一个空组能凭空把完成度拉低）。
   const valued = fields.filter((d) => !isGroupDef(d) && d.type !== 'group');
   const counted = valued.filter((d) => !isExcludedField(d));
@@ -235,32 +247,33 @@ export function completeness(
   };
 }
 
-/** 栏目的纯数据视图：所有条目 + 全部字段（含未填），供 `section dump` 与面板用。 */
-export function dumpSection(
-  section: SectionLike,
+/** 条目模板的纯数据视图：所有条目 + 全部字段（含未填），供 `template dump` 与面板用。 */
+export function dumpTemplate(
+  template: TemplateLike,
   entries: EntryLike[],
   { mask = false, decrypt, structures }: { mask?: boolean; decrypt?: (blob: unknown) => string; structures?: Map<string, EntryFieldView[]> } = {},
 ) {
-  const mine = entries.filter((e) => e.section === section.id);
-  const parentOf = structureOf(section.fields as any).parentOf;
+  const mine = entries.filter((e) => e.template === template.id);
+  const parentOf = structureOf(template.fields as any).parentOf;
   return {
-    section: {
-      id: section.id,
-      title: section.title,
-      description: section.description,
-      order: section.order,
-      template: section.template,
-      kv: section.kv === true,
-      titleField: section.titleField,
-      titleLabel: section.titleLabel,
-      fields: section.fields.length,
+    template: {
+      id: template.id,
+      title: template.title,
+      description: template.description,
+      order: template.order,
+      template: template.template,
+      blank: (template as { blank?: boolean }).blank === true,
+      titleField: template.titleField,
+      titleLabel: template.titleLabel,
+      tags: template.tags || [],
+      fields: template.fields.length,
     },
     // 分组清单由字段推导（组=字段）：对外仍给 {id,title}，CLI/面板的读法不变。
-    groups: boardGroupsOf(section.fields as any).map((g) => ({ id: g.id, title: String(g.title) })),
+    groups: boardGroupsOf(template.fields as any).map((g) => ({ id: g.id, title: String(g.title) })),
     // 正文版式：分组面板的顺序、每块的位置/宽度/高度（按断点）。字段增删后在这里
     // 对齐一次，所以读到的永远能直接渲染——不会出现「引用了已删字段的空块」。
-    layout: reconcileLayout(section.layout, groupsForLayout(section)),
-    fields: section.fields.map((x) => ({
+    layout: reconcileLayout(template.layout, groupsForLayout(template)),
+    fields: template.fields.map((x) => ({
       key: x.key,
       label: x.label,
       type: x.type,
@@ -276,14 +289,13 @@ export function dumpSection(
       totals: x.totals || null,
       summary: x.summary === false ? false : undefined,
       maxRows: x.maxRows || null,
-      kind: x.kind || '',
-      sensitive: isSensitiveField(section, x.key),
+      sensitive: isSensitiveField(template, x.key),
       // 填写策略要跟着字段字典出去，否则面板与 agent 不知道哪个格子「不用填」
       fill: fillPolicy(x),
       fillLabel: FILL_LABELS[fillPolicy(x) as keyof typeof FILL_LABELS],
     })),
     count: mine.length,
-    entries: mine.map((e) => serializeEntry(section, e, { mask, decrypt, ownRows: structures?.get(e.id) })),
+    entries: mine.map((e) => serializeEntry(template, e, { mask, decrypt, ownRows: structures?.get(e.id) })),
   };
 }
 

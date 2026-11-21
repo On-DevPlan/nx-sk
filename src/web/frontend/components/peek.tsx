@@ -133,7 +133,7 @@ export interface PeekProps {
   ariaLabel: string;
   /** 头部主标题。 */
   title: ReactNode;
-  /** 头部副标题（栏目 · 条目名之类）。 */
+  /** 头部副标题（条目模板 · 条目名之类）。 */
   subtitle?: ReactNode;
   /** 头部右侧的小标记（条数等），模式按钮之前。 */
   meta?: ReactNode;
@@ -142,7 +142,7 @@ export interface PeekProps {
   onClose: () => void;
   /** 附加类名（内容自己的样式挂在它下面）。 */
   className?: string;
-  /** 「新标签页」的目标（`#/<栏目>?entry=<id>`）；不给则菜单里不出现这一项。 */
+  /** 「新标签页」的目标（`#/<条目模板>?entry=<id>`）；不给则菜单里不出现这一项。 */
   newTabHref?: string;
   /** 「编辑默认视图」的持久化键（source / shortcut）；不给则二级菜单不出现。 */
   persistKey?: string;

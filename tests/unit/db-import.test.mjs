@@ -25,20 +25,21 @@ test('带 version 的 store.json：导入 + 改名留证，无数据迁移记录
   const dir = await freshHome('nx-sk-imp-v3-');
   const legacy = {
     version: 3,
-    settings: { defaultSection: 'demo', navGroups: [] },
-    sections: [{ id: 'demo', title: 'D', description: '', order: 10, template: null, kv: false,
+    settings: { defaultTemplate: 'demo', navGroups: [] },
+    templates: [{ id: 'demo', title: 'D', description: '', order: 10, template: null,
       titleField: 'a', titleLabel: '名称',
       groups: [{ id: 'main', title: '基本' }],
       fields: [{ key: 'a', label: 'A', type: 'text', group: 'main' }] }],
-    entries: [{ id: 'e1', section: 'demo', title: 'T', tags: [], values: { a: '1' } }],
+    entries: [{ id: 'e1', template: 'demo', title: 'T', tags: [], values: { a: '1' } }],
     files: [],
   };
   await fsp.writeFile(process.env.NX_SK_STORE, JSON.stringify(legacy), 'utf8');
 
   const store = await loadStore();
-  assert.equal(store.sections.length, 1);
+  assert.equal(store.templates.filter((s) => !s.blank).length, 1);
   assert.equal(store.entries[0].values.a, '1');
-  assert.equal(store.sections[0].fields.some((f) => f.key === 'source'), true, '读边界仍会补 source 袋');
+  const demoSec = store.templates.find((s) => s.id === 'demo');
+  assert.equal(demoSec.fields.some((f) => f.key === 'source'), true, '读边界仍会补 source 袋');
 
   const files = await listDir(dir);
   assert.ok(!files.includes('store.json'), 'store.json 应从原位置挪走');
@@ -55,10 +56,10 @@ test('带 version 的 store.json：导入 + 改名留证，无数据迁移记录
 
 test('不带 version 的 store.json：按 v1 处理，过 normalize 迁移并留 from→to 记录', async () => {
   const dir = await freshHome('nx-sk-imp-v0-');
-  // 旧「密钥」栏目：8 字段模板形状（v1→v2 的迁移对象）
+  // 旧「密钥」条目模板：8 字段模板形状（v1→v2 的迁移对象）
   const legacy = {
     settings: {},
-    sections: [{
+    templates: [{
       id: 'secret', title: '密钥', description: 'old', order: 20, template: 'secret',
       titleField: 'provider', titleLabel: '密钥名',
       groups: [{ id: 'key', title: '密钥信息' }],
@@ -67,14 +68,15 @@ test('不带 version 的 store.json：按 v1 处理，过 normalize 迁移并留
         { key: 'keyValue', label: '密钥值', type: 'secret', group: 'key' },
       ],
     }],
-    entries: [{ id: 'e_old', section: 'secret', title: 'OpenAI', tags: [], values: { provider: 'OpenAI', keyValue: 'sk-old' } }],
+    entries: [{ id: 'e_old', template: 'secret', title: 'OpenAI', tags: [], values: { provider: 'OpenAI', keyValue: 'sk-old' } }],
     files: [],
   };
   await fsp.writeFile(process.env.NX_SK_STORE, JSON.stringify(legacy), 'utf8');
 
   const store = await loadStore();
-  const sec = store.sections.find((x) => x.id === 'secret');
-  assert.deepEqual(sec.fields.map((f) => f.key).filter((k) => k !== 'source'), ['value'], '旧字典应被搬成单字段 KV');
+  const sec = store.templates.find((x) => x.id === 'secret');
+  assert.deepEqual(sec.fields.map((f) => f.key).filter((k) => !['key', 'source', 'sourceGroup'].includes(k)), ['value'], '旧字典应被搬成单值字段');
+  assert.equal('kv' in sec, false, '不再有 KV 特殊标记');
   assert.equal(store.entries[0].values.value, 'sk-old');
 
   const note = migrationNote();
@@ -87,10 +89,10 @@ test('不带 version 的 store.json：按 v1 处理，过 normalize 迁移并留
     '留证文件必须是迁移前的原始 JSON');
 });
 
-test('没有 store.json：建库 + 播种（demo 栏目 + 示例条目），不留 imported 证据', async () => {
+test('没有 store.json：建库 + 播种（demo 条目模板 + 示例条目），不留 imported 证据', async () => {
   const dir = await freshHome('nx-sk-imp-seed-');
   const store = await loadStore();
-  assert.deepEqual(store.sections.map((s) => s.id), ['demo']);
+  assert.deepEqual(store.templates.filter((s) => !s.blank).map((s) => s.id), ['demo']);
   assert.equal(store.entries.length, 1);
   const files = await listDir(dir);
   assert.ok(files.includes('nxsk.db'), '播种必须落盘（id 跨读取稳定）');
@@ -112,14 +114,14 @@ test('导入失败（孤儿条目）：整体回滚，store.json 一字节不动
   const dir = await freshHome('nx-sk-imp-fail-');
   const legacy = {
     version: 3, settings: {},
-    sections: [{ id: 'demo', title: 'D', groups: [], fields: [] }],
-    entries: [{ id: 'e_ghost', section: 'no_such', title: 'G', tags: [], values: {} }],
+    templates: [{ id: 'demo', title: 'D', groups: [], fields: [] }],
+    entries: [{ id: 'e_ghost', template: 'no_such', title: 'G', tags: [], values: {} }],
     files: [],
   };
   const raw = JSON.stringify(legacy, null, 2);
   await fsp.writeFile(process.env.NX_SK_STORE, raw, 'utf8');
 
-  await assert.rejects(() => loadStore(), (e) => /指向不存在的栏目/.test(e.message));
+  await assert.rejects(() => loadStore(), (e) => /指向不存在的条目模板/.test(e.message));
   assert.equal(await fsp.readFile(process.env.NX_SK_STORE, 'utf8'), raw, '失败时 JSON 必须原样');
   const files = await listDir(dir);
   assert.ok(!files.includes('nxsk.db'), `半成品库必须被清掉：${files.join(', ')}`);
@@ -127,7 +129,7 @@ test('导入失败（孤儿条目）：整体回滚，store.json 一字节不动
 
   // 修好后重试：同一目录、同一 store.json 能正常导入（回滚没留下任何毒）
   const fixed = JSON.parse(raw);
-  fixed.entries[0].section = 'demo';
+  fixed.entries[0].template = 'demo';
   await fsp.writeFile(process.env.NX_SK_STORE, JSON.stringify(fixed), 'utf8');
   const store = await loadStore();
   assert.equal(store.entries.length, 1);

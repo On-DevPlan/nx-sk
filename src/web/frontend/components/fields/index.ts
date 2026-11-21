@@ -26,6 +26,7 @@ import { FileControl } from './file.tsx';
 import { MdControl } from './md.tsx';
 import { GroupControl } from './group.tsx';
 import { DebugControl } from './debug.tsx';
+import { GrillControl } from './grill.tsx';
 
 export const FIELD_CONTROLS: Record<FieldType, Control> = {
   text: TextControl,
@@ -45,6 +46,7 @@ export const FIELD_CONTROLS: Record<FieldType, Control> = {
   md: MdControl,
   group: GroupControl,
   debug: DebugControl,
+  grill: GrillControl,
 };
 
 /**

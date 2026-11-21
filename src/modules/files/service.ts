@@ -8,7 +8,7 @@ import { badInput, external, notFound } from '../../core/errors.ts';
 import { nowIso } from '../../core/ids.ts';
 import { openPath } from '../../core/open.ts';
 import {
-  CATEGORY_IDS, collectFileSections, describeFile, fileReferences,
+  CATEGORY_IDS, collectFileTemplates, describeFile, fileReferences,
   deletePhysical, fileRecordAbs, findFileRecord, importContent, importLocalFile,
   relocateFile, restoreFile, streamRecord,
 } from '../../core/attachments.ts';
@@ -29,11 +29,11 @@ function assertCategory(cat: unknown) {
 }
 
 /**
- * 列附件。组织方式**完全由栏目驱动**：`sections` 给出「哪些栏目在引用附件」，
- * `section` 参数按栏目过滤（`none` = 只列没有任何条目引用的）。不预定义分类/槽位。
+ * 列附件。组织方式**完全由条目模板驱动**：`templates` 给出「哪些条目模板在引用附件」，
+ * `template` 参数按条目模板过滤（`none` = 只列没有任何条目引用的）。不预定义分类/槽位。
  */
-export async function listFiles({ category, q, section, limit = 0, offset = 0 }: {
-  category?: string; q?: string; section?: string; limit?: number; offset?: number;
+export async function listFiles({ category, q, template, limit = 0, offset = 0 }: {
+  category?: string; q?: string; template?: string; limit?: number; offset?: number;
 } = {}) {
   const store = await loadStore();
   const structures = entryStructures(store);
@@ -41,18 +41,18 @@ export async function listFiles({ category, q, section, limit = 0, offset = 0 }:
   const withRefs = store.files.map((rec) => ({ rec, usedBy: fileReferences(store, rec, structures) }));
   let list = withRefs;
   if (category) list = list.filter((x) => x.rec.category === category);
-  if (section === 'none' || section === 'unlinked') {
+  if (template === 'none' || template === 'unlinked') {
     list = list.filter((x) => !x.usedBy.length);
-  } else if (section) {
-    const sec = store.sections.find((s) => s.id === section);
-    if (!sec) throw notFound(`找不到栏目: ${section}`);
-    list = list.filter((x) => x.usedBy.some((u) => u.sectionId === sec.id));
+  } else if (template) {
+    const sec = store.templates.find((s) => s.id === template);
+    if (!sec) throw notFound(`找不到条目模板: ${template}`);
+    list = list.filter((x) => x.usedBy.some((u) => u.templateId === sec.id));
   }
   if (q) {
     const needle = String(q).toLowerCase();
     list = list.filter((x) => [
       x.rec.name, x.rec.note, x.rec.originalName, ...x.rec.tags,
-      ...x.usedBy.map((u) => `${u.sectionTitle} ${u.entryTitle} ${u.fieldLabel}`),
+      ...x.usedBy.map((u) => `${u.templateTitle} ${u.entryTitle} ${u.fieldLabel}`),
     ].join('\n').toLowerCase().includes(needle));
   }
   list = list.slice().sort((a, b) => String(b.rec.createdAt || '').localeCompare(String(a.rec.createdAt || '')));
@@ -64,9 +64,9 @@ export async function listFiles({ category, q, section, limit = 0, offset = 0 }:
   const pageList = size > 0 ? list.slice(start, start + size) : [];
   let totalBytes = 0;
   for (const r of store.files) totalBytes += r.bytes;
-  // 分组素材：带 file 或 md 字段的栏目（栏目驱动）及其引用数
-  const sections = collectFileSections(store, structures).map((s) => ({
-    ...s, count: withRefs.filter((x) => x.usedBy.some((u) => u.sectionId === s.id)).length,
+  // 分组素材：带 file 或 md 字段的条目模板（条目模板驱动）及其引用数
+  const templates = collectFileTemplates(store, structures).map((s) => ({
+    ...s, count: withRefs.filter((x) => x.usedBy.some((u) => u.templateId === s.id)).length,
   }));
   return {
     count: filtered,
@@ -75,7 +75,7 @@ export async function listFiles({ category, q, section, limit = 0, offset = 0 }:
     unlinked: withRefs.filter((x) => !x.usedBy.length).length,
     root: displayPath(filesDir()),
     rootRaw: filesDir(),
-    sections,
+    templates,
     page: { limit: size, offset: start, count: pageList.length, total: filtered, hasMore: start + pageList.length < filtered },
     files: pageList.map((x) => describeFile(x.rec, store, structures)),
   };
@@ -272,19 +272,19 @@ function fmtBytes(n: number) {
 }
 
 function refLabel(u: FileReference) {
-  return `${u.sectionTitle} / ${u.entryTitle || '（无名）'} / ${u.fieldLabel}`;
+  return `${u.templateTitle} / ${u.entryTitle || '（无名）'} / ${u.fieldLabel}`;
 }
 
 export function renderFileList(d: Awaited<ReturnType<typeof listFiles>>) {
   const lines = [`附件库 ${d.total} 个 · 共 ${fmtBytes(d.totalBytes)} · 目录 ${d.root}`];
   lines.push(`被条目引用 ${d.total - d.unlinked} / ${d.total}（未引用 ${d.unlinked} 个）`);
-  if (d.sections.length) lines.push(`栏目：${d.sections.map((s) => `${s.title}(${s.count})`).join('　')}`);
+  if (d.templates.length) lines.push(`条目模板：${d.templates.map((s) => `${s.title}(${s.count})`).join('　')}`);
   for (const r of d.files) {
     lines.push(`  ${r.id}  [${r.categoryLabel}] ${r.name}　${fmtBytes(r.bytes)}`);
     if (r.usedBy?.length) lines.push(`      被引用: ${r.usedBy.map(refLabel).join('、')}`);
     if (r.note) lines.push(`      备注: ${r.note}`);
   }
-  lines.push('', '导入: nx-sk file add --path <文件>（默认移动）　链接: 在栏目条目的 file 字段选本附件，或在 md 正文写 ![说明](本附件id)');
+  lines.push('', '导入: nx-sk file add --path <文件>（默认移动）　链接: 在条目的 file 字段选本附件，或在 md 正文写 ![说明](本附件id)');
   return lines.join('\n');
 }
 
@@ -295,7 +295,7 @@ export function renderFileGet(d: Awaited<ReturnType<typeof getFile>>) {
     `链接:   ${d.url}`,
   ];
   if (d.usedBy?.length) lines.push(`被引用: ${d.usedBy.map(refLabel).join('、')}`);
-  else lines.push('被引用: （没有条目引用；在栏目的 file 字段里选本附件，或在 md 正文里写 ![说明](本附件id) 即建立链接）');
+  else lines.push('被引用: （没有条目引用；在条目模板的 file 字段里选本附件，或在 md 正文里写 ![说明](本附件id) 即建立链接）');
   if (d.sourceDisplay) lines.push(`原始:   ${d.sourceDisplay}（${d.mode === 'move' ? '移动导入' : '复制导入'}）`);
   if (d.tags.length) lines.push(`标签:   ${d.tags.join('、')}`);
   if (d.note) lines.push(`备注:   ${d.note}`);

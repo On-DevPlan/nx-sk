@@ -3,7 +3,7 @@ import { fmtBytes } from '../../api/zip.ts';
 import type { AskState, Conflict, ModalState, ZipState } from './viewTypes.ts';
 
 /**
- * 栏目导入相关的弹窗：加密包口令、导入预览/冲突处理，以及容器共用的通用 Modal。
+ * 条目模板导入相关的弹窗：加密包口令、导入预览/冲突处理，以及容器共用的通用 Modal。
  * 纯展示——口令、冲突策略、导入中标志都由容器持有。
  */
 export default function ImportModals({
@@ -84,9 +84,9 @@ export default function ImportModals({
             return (
               <div className="stack">
                 <div>
-                  来源：<strong>{p.section.source.title}</strong><span className="muted">（{p.section.source.id}）</span>
-                  {' → '}目标：<strong>{p.section.title}</strong><span className="muted">（{p.section.targetId}）</span>
-                  {p.section.willCreate ? <span className="bad">　将新建栏目</span> : null}
+                  来源：<strong>{p.template.source.title}</strong><span className="muted">（{p.template.source.id}）</span>
+                  {' → '}目标：<strong>{p.template.title}</strong><span className="muted">（{p.template.targetId}）</span>
+                  {p.template.willCreate ? <span className="bad">　将新建条目模板</span> : null}
                 </div>
                 <div className="hint">
                   导出时间 {p.exportedAt || '未知'}　·　{p.withSecrets ? '含凭据明文' : '凭据已打码'}
@@ -98,8 +98,8 @@ export default function ImportModals({
                   {p.entries.conflicts.length ? <span className="tag bad">冲突 {p.entries.conflicts.length}</span> : null}
                   <Tag>附件 新增 {p.files.new} / 复用 {p.files.reused}（{fmtBytes(p.files.bytes)}）</Tag>
                 </div>
-                {p.section.fieldsToAdd.length ? (
-                  <div className="hint">将补 {p.section.fieldsToAdd.length} 个字段：{p.section.fieldsToAdd.map((f) => f.label).join('、')}</div>
+                {p.template.fieldsToAdd.length ? (
+                  <div className="hint">将补 {p.template.fieldsToAdd.length} 个字段：{p.template.fieldsToAdd.map((f) => f.label).join('、')}</div>
                 ) : null}
                 {p.entries.conflicts.length ? (
                   <div className="block">

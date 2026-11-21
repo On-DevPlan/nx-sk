@@ -12,7 +12,7 @@ import { useTempHome } from '../helpers.mjs';
 
 await useTempHome();
 
-const sections = await import('../../src/modules/sections/service.ts');
+const templates = await import('../../src/modules/templates/service.ts');
 const entries = await import('../../src/modules/entries/service.ts');
 const { loadStore } = await import('../../src/core/store.ts');
 const { isCipherBlob, maskValue } = await import('../../src/core/crypto.ts');
@@ -31,37 +31,45 @@ const DEF = { key: 'tasks', label: '任务表', type: 'table', group: 'main', co
 // —— 字段定义：表格字段本身很轻，列只是「初始列」——
 
 test('validateFieldDef：table 不强制声明列；给了列才校验（key 唯一 / 下拉有选项 / 公式能编译）', () => {
-  const bare = sections.validateFieldDef({ key: 't', type: 'table' });
+  const bare = templates.validateFieldDef({ key: 't', type: 'table' });
   assert.equal(bare.type, 'table');
   assert.equal(bare.columns, undefined, '列可以不写在字段定义里 —— 结构归数据');
 
   assert.throws(
-    () => sections.validateFieldDef({ key: 't', type: 'table', columns: [{ key: 'a' }, { key: 'a' }] }),
+    () => templates.validateFieldDef({ key: 't', type: 'table', columns: [{ key: 'a' }, { key: 'a' }] }),
     /重复/,
   );
   assert.throws(
-    () => sections.validateFieldDef({ key: 't', type: 'table', columns: [{ key: 'a', type: 'select' }] }),
+    () => templates.validateFieldDef({ key: 't', type: 'table', columns: [{ key: 'a', type: 'select' }] }),
     /options/,
   );
   assert.throws(
-    () => sections.validateFieldDef({ key: 't', type: 'table', columns: [{ key: 'a', formula: 'b *' }] }),
+    () => templates.validateFieldDef({ key: 't', type: 'table', columns: [{ key: 'a', formula: 'b *' }] }),
     /公式/,
   );
   // 非表格声明 columns 一律拒绝（字典里不该有定义了也用不上的键）
-  assert.throws(() => sections.validateFieldDef({ key: 't', type: 'text', columns: [{ key: 'a' }] }), /table/);
+  assert.throws(() => templates.validateFieldDef({ key: 't', type: 'text', columns: [{ key: 'a' }] }), /table/);
 
-  const ok = sections.validateFieldDef(DEF);
+  const ok = templates.validateFieldDef(DEF);
   assert.equal(ok.columns.length, 5);
   assert.equal(ok.columns[4].formula, 'hours * rate');
   assert.equal(ok.columns[0].label, '任务');
 });
 
+test('validateFieldDef：maxRows 正数落定义，null = 清掉（面板「属性」可撤销上限）', () => {
+  const withLimit = templates.validateFieldDef({ key: 't', type: 'table', maxRows: 3 });
+  assert.equal(withLimit.maxRows, 3);
+  const cleared = templates.validateFieldDef({ key: 't', type: 'table', maxRows: null });
+  assert.equal(cleared.maxRows, undefined);
+  assert.throws(() => templates.validateFieldDef({ key: 't', type: 'table', maxRows: 0 }), /正数/);
+});
+
 test('validateFieldDef：统计行只认已声明的列与已知函数', () => {
   const base = { key: 't', type: 'table', columns: [{ key: 'a', type: 'number' }] };
-  assert.throws(() => sections.validateFieldDef({ ...base, totals: [{ label: '合计', agg: { zzz: 'sum' } }] }), /不存在的列/);
-  assert.throws(() => sections.validateFieldDef({ ...base, totals: [{ label: '合计', agg: { a: 'sum2' } }] }), /未知统计函数/);
-  assert.throws(() => sections.validateFieldDef({ ...base, totals: [{ label: '空行' }] }), /agg|expr/);
-  const ok = sections.validateFieldDef({ ...base, totals: [{ label: '合计', agg: { a: 'sum' } }, { label: '均', expr: 'avg(col("a"))' }] });
+  assert.throws(() => templates.validateFieldDef({ ...base, totals: [{ label: '合计', agg: { zzz: 'sum' } }] }), /不存在的列/);
+  assert.throws(() => templates.validateFieldDef({ ...base, totals: [{ label: '合计', agg: { a: 'sum2' } }] }), /未知统计函数/);
+  assert.throws(() => templates.validateFieldDef({ ...base, totals: [{ label: '空行' }] }), /agg|expr/);
+  const ok = templates.validateFieldDef({ ...base, totals: [{ label: '合计', agg: { a: 'sum' } }, { label: '均', expr: 'avg(col("a"))' }] });
   assert.equal(ok.totals.length, 2);
   assert.deepEqual(ok.totals[0].agg, { a: 'sum' });
 });
@@ -229,15 +237,15 @@ test('行公式能用 rows / col() 做跨行判断（如「占全表比重」）
 
 // —— 落盘 / 读回（service 层）——
 
-async function setupSection(id = 'work') {
-  await sections.addSection({ id, title: '工作', fields: [{ key: 'name', label: '名称', type: 'text', group: 'main' }] });
-  await sections.updateSection(id, { 'add-field': DEF });
+async function setupTemplate(id = 'work') {
+  await templates.addTemplate({ id, title: '工作', fields: [{ key: 'name', label: '名称', type: 'text', group: 'main' }] });
+  await templates.updateTemplate(id, { 'add-field': DEF });
 }
 
 test('写入读回：值是一份自描述文档（columns + rows），计算列不落盘', async () => {
-  await setupSection();
+  await setupTemplate();
   await entries.addEntry({
-    section: 'work',
+    template: 'work',
     title: '周报',
     data: {
       tasks: [
@@ -247,7 +255,7 @@ test('写入读回：值是一份自描述文档（columns + rows），计算列
       ],
     },
   });
-  const got = await entries.getEntry('周报', { section: 'work' });
+  const got = await entries.getEntry('周报', { template: 'work' });
   const doc = got.values.tasks;
   assert.ok(Array.isArray(doc.columns), '列必须跟着数据走');
   assert.deepEqual(doc.columns.map((c) => c.key), ['task', 'done', 'hours', 'rate', 'cost']);
@@ -266,9 +274,9 @@ test('写入读回：值是一份自描述文档（columns + rows），计算列
 });
 
 test('写入：列写在数据里就能加列，不必动字段字典', async () => {
-  await setupSection('work4');
+  await setupTemplate('work4');
   await entries.addEntry({
-    section: 'work4',
+    template: 'work4',
     title: '样例',
     data: {
       tasks: {
@@ -277,39 +285,39 @@ test('写入：列写在数据里就能加列，不必动字段字典', async ()
       },
     },
   });
-  const got = await entries.getEntry('样例', { section: 'work4' });
+  const got = await entries.getEntry('样例', { template: 'work4' });
   assert.equal(got.values.tasks.columns.length, 6);
   assert.equal(got.values.tasks.rows[0].note, '临时加的列');
 
   // 字段字典没被改（只有初始的 5 列）
-  const sec = await sections.getSection('work4');
+  const sec = await templates.getTemplate('work4');
   const field = sec.fieldList.find((f) => f.key === 'tasks');
-  assert.equal(field.columns.length, 5, '数据里加列不该改到栏目 schema');
+  assert.equal(field.columns.length, 5, '数据里加列不该改到条目模板 schema');
 });
 
 test('写入：类型不对 / 列名写错 / 下拉值不在候选里，都要报错而不是静默存 null', async () => {
-  await setupSection('work2');
-  await entries.addEntry({ section: 'work2', title: '样例', data: { tasks: [{ task: 'x' }] } });
+  await setupTemplate('work2');
+  await entries.addEntry({ template: 'work2', title: '样例', data: { tasks: [{ task: 'x' }] } });
 
   await assert.rejects(
-    () => entries.updateEntry('样例', { section: 'work2', set: { tasks: [{ task: 'x', hours: '两小时' }] } }),
+    () => entries.updateEntry('样例', { template: 'work2', set: { tasks: [{ task: 'x', hours: '两小时' }] } }),
     /需要数字/,
   );
   await assert.rejects(
-    () => entries.updateEntry('样例', { section: 'work2', set: { tasks: [{ 不存在的列: 1 }] } }),
+    () => entries.updateEntry('样例', { template: 'work2', set: { tasks: [{ 不存在的列: 1 }] } }),
     /没有列/,
   );
 
-  await sections.updateSection('work2', { 'add-field': { key: 'pick', label: '选一', type: 'table', group: 'main', columns: [{ key: 's', label: '状态', type: 'select', options: ['甲', '乙'] }] } });
+  await templates.updateTemplate('work2', { 'add-field': { key: 'pick', label: '选一', type: 'table', group: 'main', columns: [{ key: 's', label: '状态', type: 'select', options: ['甲', '乙'] }] } });
   await assert.rejects(
-    () => entries.updateEntry('样例', { section: 'work2', set: { pick: [{ s: '丙' }] } }),
+    () => entries.updateEntry('样例', { template: 'work2', set: { pick: [{ s: '丙' }] } }),
     /不在候选里/,
   );
 });
 
 test('表格的密文列：密文落盘、默认读原文、--mask 打码、占位回传保留原密文', async () => {
-  await sections.addSection({ id: 'acc', title: '账号', fields: [{ key: 'name', label: '名称', type: 'text', group: 'main' }] });
-  await sections.updateSection('acc', {
+  await templates.addTemplate({ id: 'acc', title: '账号', fields: [{ key: 'name', label: '名称', type: 'text', group: 'main' }] });
+  await templates.updateTemplate('acc', {
     'add-field': {
       key: 'list', label: '账号表', type: 'table', group: 'main',
       columns: [
@@ -318,17 +326,17 @@ test('表格的密文列：密文落盘、默认读原文、--mask 打码、占�
       ],
     },
   });
-  await entries.addEntry({ section: 'acc', title: '我的', data: { list: [{ site: 'a', pass: 'p@ss-1' }, { site: 'b', pass: 'p@ss-2' }] } });
+  await entries.addEntry({ template: 'acc', title: '我的', data: { list: [{ site: 'a', pass: 'p@ss-1' }, { site: 'b', pass: 'p@ss-2' }] } });
 
   const store = await loadStore();
   const raw = store.entries.find((e) => e.title === '我的').values.list;
   assert.ok(isCipherBlob(raw.rows[0].pass), '敏感列必须密文落盘');
   assert.equal(raw.rows[0].site, 'a');
 
-  const plain = await entries.getEntry('我的', { section: 'acc' });
+  const plain = await entries.getEntry('我的', { template: 'acc' });
   assert.equal(plain.values.list.rows[1].pass, 'p@ss-2', '默认读原文');
 
-  const masked = await entries.getEntry('我的', { section: 'acc', mask: true });
+  const masked = await entries.getEntry('我的', { template: 'acc', mask: true });
   assert.equal(masked.values.list.rows[0].pass, maskValue('p@ss-1'));
 
   // 面板「打码显示」时保存别的格子：打码占位原样回传 = 不修改
@@ -336,52 +344,52 @@ test('表格的密文列：密文落盘、默认读原文、--mask 打码、占�
     ...masked.values.list,
     rows: [{ site: 'a-改', pass: masked.values.list.rows[0].pass }, { site: 'b', pass: masked.values.list.rows[1].pass }],
   };
-  await entries.updateEntry('我的', { section: 'acc', set: { list: doc } });
+  await entries.updateEntry('我的', { template: 'acc', set: { list: doc } });
   const after = await loadStore();
   const raw2 = after.entries.find((e) => e.title === '我的').values.list;
   assert.ok(isCipherBlob(raw2.rows[0].pass), '仍是密文');
   assert.equal(raw2.rows[0].site, 'a-改');
-  const again = await entries.getEntry('我的', { section: 'acc' });
+  const again = await entries.getEntry('我的', { template: 'acc' });
   assert.equal(again.values.list.rows[0].pass, 'p@ss-1', '打码占位不能把掩码存成新密码');
 });
 
 test('表格的密文列：行被移动过，打码占位仍能按列认回自己的密文', async () => {
-  await sections.addSection({ id: 'acc2', title: '账号2', fields: [{ key: 'name', label: '名称', type: 'text', group: 'main' }] });
-  await sections.updateSection('acc2', {
+  await templates.addTemplate({ id: 'acc2', title: '账号2', fields: [{ key: 'name', label: '名称', type: 'text', group: 'main' }] });
+  await templates.updateTemplate('acc2', {
     'add-field': {
       key: 'list', label: '账号表', type: 'table', group: 'main',
       columns: [{ key: 'site', label: '站点' }, { key: 'pass', label: '密码', sensitive: true }],
     },
   });
-  await entries.addEntry({ section: 'acc2', title: '我的', data: { list: [{ site: 'a', pass: 'aaa111' }, { site: 'b', pass: 'bbbb2222' }] } });
-  const masked = await entries.getEntry('我的', { section: 'acc2', mask: true });
+  await entries.addEntry({ template: 'acc2', title: '我的', data: { list: [{ site: 'a', pass: 'aaa111' }, { site: 'b', pass: 'bbbb2222' }] } });
+  const masked = await entries.getEntry('我的', { template: 'acc2', mask: true });
 
   // 把两行**换序**后原样回传：只按行号对齐的话，密码会认到别人头上
   const swapped = {
     ...masked.values.list,
     rows: [{ site: 'b', pass: masked.values.list.rows[1].pass }, { site: 'a', pass: masked.values.list.rows[0].pass }],
   };
-  await entries.updateEntry('我的', { section: 'acc2', set: { list: swapped } });
-  const after = await entries.getEntry('我的', { section: 'acc2' });
+  await entries.updateEntry('我的', { template: 'acc2', set: { list: swapped } });
+  const after = await entries.getEntry('我的', { template: 'acc2' });
   assert.deepEqual(after.values.list.rows, [{ site: 'b', pass: 'bbbb2222' }, { site: 'a', pass: 'aaa111' }]);
 });
 
 test('表格的密文列：打码值一模一样又挪过行时按行号兜底（已知限制，文档写明）', async () => {
-  await sections.addSection({ id: 'acc3', title: '账号3', fields: [{ key: 'name', label: '名称', type: 'text', group: 'main' }] });
-  await sections.updateSection('acc3', {
+  await templates.addTemplate({ id: 'acc3', title: '账号3', fields: [{ key: 'name', label: '名称', type: 'text', group: 'main' }] });
+  await templates.updateTemplate('acc3', {
     'add-field': {
       key: 'list', label: '账号表', type: 'table', group: 'main',
       columns: [{ key: 'site', label: '站点' }, { key: 'pass', label: '密码', sensitive: true }],
     },
   });
   // 两个等长密码 → 打码后都是 ******，没有身份信息
-  await entries.addEntry({ section: 'acc3', title: '我的', data: { list: [{ site: 'a', pass: 'aaa111' }, { site: 'b', pass: 'bbb222' }] } });
-  const masked = await entries.getEntry('我的', { section: 'acc3', mask: true });
+  await entries.addEntry({ template: 'acc3', title: '我的', data: { list: [{ site: 'a', pass: 'aaa111' }, { site: 'b', pass: 'bbb222' }] } });
+  const masked = await entries.getEntry('我的', { template: 'acc3', mask: true });
   assert.equal(masked.values.list.rows[0].pass, masked.values.list.rows[1].pass);
 
   // 没挪行：按行认回，正确
-  await entries.updateEntry('我的', { section: 'acc3', set: { list: masked.values.list } });
-  const same = await entries.getEntry('我的', { section: 'acc3' });
+  await entries.updateEntry('我的', { template: 'acc3', set: { list: masked.values.list } });
+  const same = await entries.getEntry('我的', { template: 'acc3' });
   assert.deepEqual(same.values.list.rows.map((r) => r.pass), ['aaa111', 'bbb222']);
 
   // 挪了行：打码值相同无法区分，按行号兜底 —— 两格都是密文、都还能解开，
@@ -390,18 +398,18 @@ test('表格的密文列：打码值一模一样又挪过行时按行号兜底�
     ...masked.values.list,
     rows: [{ site: 'b', pass: masked.values.list.rows[1].pass }, { site: 'a', pass: masked.values.list.rows[0].pass }],
   };
-  await entries.updateEntry('我的', { section: 'acc3', set: { list: swapped } });
-  const moved = await entries.getEntry('我的', { section: 'acc3' });
+  await entries.updateEntry('我的', { template: 'acc3', set: { list: swapped } });
+  const moved = await entries.getEntry('我的', { template: 'acc3' });
   assert.ok(moved.values.list.rows.every((r) => ['aaa111', 'bbb222'].includes(r.pass)));
 });
 
 // —— 只读查询命令 ——
 
 test('entry table：给定条目与字段，返回算好的表；文本渲染带合计', async () => {
-  await setupSection('work3');
-  await entries.addEntry({ section: 'work3', title: '周报', data: { tasks: [{ task: 'a', hours: 2, rate: 50 }, { task: 'b', hours: 1, rate: 50 }] } });
+  await setupTemplate('work3');
+  await entries.addEntry({ template: 'work3', title: '周报', data: { tasks: [{ task: 'a', hours: 2, rate: 50 }, { task: 'b', hours: 1, rate: 50 }] } });
 
-  const d = await entries.getTable('周报', { section: 'work3', field: '任务表' });
+  const d = await entries.getTable('周报', { template: 'work3', field: '任务表' });
   assert.equal(d.field, 'tasks');
   assert.equal(d.table.count, 2);
   assert.equal(d.table.totals[0].values.cost, 150);
@@ -411,11 +419,11 @@ test('entry table：给定条目与字段，返回算好的表；文本渲染带
   assert.match(text, /合计/);
   assert.match(text, /150/);
 
-  await assert.rejects(() => entries.getTable('周报', { section: 'work3', field: '没有这个' }), /没有叫/);
+  await assert.rejects(() => entries.getTable('周报', { template: 'work3', field: '没有这个' }), /没有叫/);
 });
 
-test('section dump 与 entry get 都带上算好的表：合计与面板同源', async () => {
-  const d = await sections.dump('work3');
+test('template dump 与 entry get 都带上算好的表：合计与面板同源', async () => {
+  const d = await templates.dump('work3');
   const e = d.entries.find((x) => x.title === '周报');
   assert.ok(e.tables?.tasks, 'dump 里要有 tables');
   assert.equal(e.tables.tasks.totals[0].values.cost, 150);
@@ -424,40 +432,40 @@ test('section dump 与 entry get 都带上算好的表：合计与面板同源',
 // —— 写入即体检：公式跑不起来就不许保存 ——
 
 test('写入即体检：列名打错 / 引用后面的计算列 / 语法错 / 返回数组，一律拦在保存之前', async () => {
-  await sections.addSection({ id: 'chk', title: '体检', fields: [{ key: 'name', label: '名称', type: 'text', group: 'main' }] });
+  await templates.addTemplate({ id: 'chk', title: '体检', fields: [{ key: 'name', label: '名称', type: 'text', group: 'main' }] });
 
   // 列名打错
-  await assert.rejects(() => sections.updateSection('chk', {
+  await assert.rejects(() => templates.updateTemplate('chk', {
     'add-field': { key: 't1', label: '表1', type: 'table', group: 'main', columns: [{ key: 'a', type: 'number' }, { key: 'b', formula: 'a * qty' }] },
   }), /不存在的名字「qty」/);
 
   // 引用排在后面的计算列
-  await assert.rejects(() => sections.updateSection('chk', {
+  await assert.rejects(() => templates.updateTemplate('chk', {
     'add-field': { key: 't2', label: '表2', type: 'table', group: 'main', columns: [{ key: 'a', formula: 'c + 1' }, { key: 'c', formula: '1' }] },
   }), /后面.*计算列/);
 
   // 语法错
-  await assert.rejects(() => sections.updateSection('chk', {
+  await assert.rejects(() => templates.updateTemplate('chk', {
     'add-field': { key: 't3', label: '表3', type: 'table', group: 'main', columns: [{ key: 'a', formula: 'b *' }] },
   }), /语法错误/);
 
   // 结果不是单值
-  await assert.rejects(() => sections.updateSection('chk', {
+  await assert.rejects(() => templates.updateTemplate('chk', {
     'add-field': { key: 't4', label: '表4', type: 'table', group: 'main', columns: [{ key: 'a', formula: '[1, 2]' }] },
   }), /单值/);
 
   // 统计行引用不存在的列 / 用了统计行没有的 i
-  await assert.rejects(() => sections.updateSection('chk', {
+  await assert.rejects(() => templates.updateTemplate('chk', {
     'add-field': { key: 't5', label: '表5', type: 'table', group: 'main', columns: [{ key: 'a', type: 'number' }], totals: [{ label: '率', expr: 'col("nope")' }] },
   }), /没有叫「nope」的列/);
-  await assert.rejects(() => sections.updateSection('chk', {
+  await assert.rejects(() => templates.updateTemplate('chk', {
     'add-field': { key: 't6', label: '表6', type: 'table', group: 'main', columns: [{ key: 'a', type: 'number' }], totals: [{ label: '率', expr: 'i' }] },
   }), /不存在的名字「i」/);
 });
 
 test('写入即体检：好公式放行（前面的列 / 中文列名 / 内建 / col）', async () => {
-  await sections.addSection({ id: 'chk2', title: '体检2', fields: [{ key: 'name', label: '名称', type: 'text', group: 'main' }] });
-  await sections.updateSection('chk2', {
+  await templates.addTemplate({ id: 'chk2', title: '体检2', fields: [{ key: 'name', label: '名称', type: 'text', group: 'main' }] });
+  await templates.updateTemplate('chk2', {
     'add-field': {
       key: 't', label: '表', type: 'table', group: 'main',
       columns: [
@@ -470,41 +478,41 @@ test('写入即体检：好公式放行（前面的列 / 中文列名 / 内建 /
       totals: [{ label: '完成率', expr: 'pct(countTrue(rows.map(r => r.qty > 0)), n)', unit: '%' }],
     },
   });
-  const sec = await sections.getSection('chk2');
+  const sec = await templates.getTemplate('chk2');
   assert.equal(sec.fieldList.find((f) => f.key === 't').columns.length, 5);
 });
 
 test('空表合法：--set 表= / [] / {} 都能清空，有行的骨架也留得住', async () => {
-  // 没有初始列的栏目：空值就该真的是空
-  await sections.addSection({ id: 'blank', title: '空表', fields: [{ key: 'name', label: '名称', type: 'text', group: 'main' }] });
-  await sections.updateSection('blank', { 'add-field': { key: 't', label: '表', type: 'table', group: 'main' } });
-  await entries.addEntry({ section: 'blank', title: 'x', data: { t: [{ a: 1 }] }, set: undefined });
+  // 没有初始列的条目模板：空值就该真的是空
+  await templates.addTemplate({ id: 'blank', title: '空表', fields: [{ key: 'name', label: '名称', type: 'text', group: 'main' }] });
+  await templates.updateTemplate('blank', { 'add-field': { key: 't', label: '表', type: 'table', group: 'main' } });
+  await entries.addEntry({ template: 'blank', title: 'x', data: { t: [{ a: 1 }] }, set: undefined });
   // 上面这行会从行推断出列 a，先确认能存
-  let got = await entries.getEntry('x', { section: 'blank' });
+  let got = await entries.getEntry('x', { template: 'blank' });
   assert.equal(got.values.t.columns.length, 1, '没给列时从行推断');
 
   for (const blank of ['', '[]', '{}', '{"columns":[],"rows":[]}']) {
-    await entries.updateEntry('x', { section: 'blank', set: { t: blank } });
-    got = await entries.getEntry('x', { section: 'blank' });
+    await entries.updateEntry('x', { template: 'blank', set: { t: blank } });
+    got = await entries.getEntry('x', { template: 'blank' });
     assert.equal(got.values.t, null, `「${blank}」应当把表清成空`);
   }
 
   // 有列没行 = 骨架，留着（下一步就能往里填）
-  await entries.updateEntry('x', { section: 'blank', set: { t: { columns: [{ key: 'a', label: '甲', type: 'number' }], rows: [] } } });
-  got = await entries.getEntry('x', { section: 'blank' });
+  await entries.updateEntry('x', { template: 'blank', set: { t: { columns: [{ key: 'a', label: '甲', type: 'number' }], rows: [] } } });
+  got = await entries.getEntry('x', { template: 'blank' });
   assert.deepEqual(got.values.t.columns.map((c) => c.key), ['a']);
   assert.deepEqual(got.values.t.rows, []);
 
   // 有数据没列 = 真错（结构缺了，没法强转）
   await assert.rejects(
-    () => entries.updateEntry('x', { section: 'blank', set: { t: { columns: [], rows: [{ a: 1 }] } } }),
+    () => entries.updateEntry('x', { template: 'blank', set: { t: { columns: [], rows: [{ a: 1 }] } } }),
     /没有任何列/,
   );
 });
 
 test('默认值：按列类型强转后落盘，新增行时用它当初值', async () => {
-  await sections.addSection({ id: 'def1', title: '默认值', fields: [{ key: 'name', label: '名称', type: 'text', group: 'main' }] });
-  await sections.updateSection('def1', {
+  await templates.addTemplate({ id: 'def1', title: '默认值', fields: [{ key: 'name', label: '名称', type: 'text', group: 'main' }] });
+  await templates.updateTemplate('def1', {
     'add-field': {
       key: 't', label: '表', type: 'table', group: 'main',
       columns: [
@@ -516,12 +524,12 @@ test('默认值：按列类型强转后落盘，新增行时用它当初值', as
     },
   });
   // 类型不对的默认值要拦下来（"false" 存成字符串就会变成「看着像布尔其实不是」）
-  await assert.rejects(() => sections.updateSection('def1', {
+  await assert.rejects(() => templates.updateTemplate('def1', {
     'add-field': { key: 't2', label: '表2', type: 'table', group: 'main', columns: [{ key: 'h', type: 'number', default: '两小时' }] },
   }), /默认值不对/);
 
-  await entries.addEntry({ section: 'def1', title: 'x', data: { t: [{ task: 'a' }] } });
-  const got = await entries.getEntry('x', { section: 'def1' });
+  await entries.addEntry({ template: 'def1', title: 'x', data: { t: [{ task: 'a' }] } });
+  const got = await entries.getEntry('x', { template: 'def1' });
   const byKey = Object.fromEntries(got.values.t.columns.map((c) => [c.key, c]));
   assert.equal(byKey.state.default, '未开始');
   assert.equal(byKey.done.default, false, 'false 也要能当默认值（别被真值判断吃掉）');
@@ -531,7 +539,7 @@ test('默认值：按列类型强转后落盘，新增行时用它当初值', as
 
 test('entry keys：表格里的密码列也进台账（行被展开，值默认打码）', async () => {
   const d = await entries.keysLedger({});
-  const hit = d.items.filter((x) => x.sectionId === 'acc' && x.key === 'list.pass');
+  const hit = d.items.filter((x) => x.templateId === 'acc' && x.key === 'list.pass');
   assert.equal(hit.length, 2, '两行都要展开进台账');
   assert.ok(hit.every((x) => x.sensitive), '密码列必须标成敏感');
   assert.ok(hit.every((x) => x.value.includes('*')), '默认打码，--reveal 才出原文');

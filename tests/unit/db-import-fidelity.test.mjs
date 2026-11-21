@@ -1,5 +1,5 @@
 // 真实形状 store.json → db 的「防丢」保真测试：
-// 升级/导入不该丢任何一类数据——栏目/分组/字段/条目/版式/设置/附件记录/密文 blob/引用边，
+// 升级/导入不该丢任何一类数据——条目模板/分组/字段/条目/版式/设置/附件记录/密文 blob/引用边，
 // 逐项与源 JSON 对照。附件上 db（attachments kind='file'）与 inline 边是重点。
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
@@ -36,10 +36,10 @@ const LAYOUT = {
 function fixture() {
   return {
     version: 3,
-    settings: { defaultSection: 'demo', navGroups: [{ title: '主组', sections: ['demo'] }], navHidden: ['kvsec'], navOrder: ['demo', 'kvsec'] },
-    sections: [
+    settings: { defaultTemplate: 'demo', navGroups: [{ title: '主组', templates: ['demo'] }], navHidden: ['kvsec'], navOrder: ['demo', 'kvsec'] },
+    templates: [
       {
-        id: 'demo', title: '样例', description: 'd', order: 10, template: null, kv: false,
+        id: 'demo', title: '样例', description: 'd', order: 10, template: null,
         titleField: 'name', titleLabel: '名称',
         groups: [{ id: 'g1', title: '基本' }, { id: 'g2', title: '附件区' }],
         fields: [
@@ -53,7 +53,7 @@ function fixture() {
         createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-02T00:00:00.000Z',
       },
       {
-        id: 'kvsec', title: '密钥', description: '', order: 20, template: 'secret', kv: true,
+        id: 'kvsec', title: '密钥', description: '', order: 20, template: 'secret',
         titleField: null, titleLabel: '名称',
         groups: [{ id: 'key', title: '密钥信息' }],
         fields: [{ key: 'value', label: '值', type: 'secret', group: 'key', sensitive: true }],
@@ -62,9 +62,9 @@ function fixture() {
       },
     ],
     entries: [
-      { id: 'e1', section: 'demo', title: '一条', tags: ['x'], createdAt: '2026-02-01T00:00:00.000Z', updatedAt: '2026-02-02T00:00:00.000Z',
+      { id: 'e1', template: 'demo', title: '一条', tags: ['x'], createdAt: '2026-02-01T00:00:00.000Z', updatedAt: '2026-02-02T00:00:00.000Z',
         values: { name: 'N', pass: CIPHER_1, note: '看图 ![说明](f_bbb)', docs: 'f_aaa', sheet: { rows: [{ item: 'a' }], totals: [] } } },
-      { id: 'e2', section: 'kvsec', title: 'OpenAI', tags: [], createdAt: '2026-02-01T00:00:00.000Z', updatedAt: '2026-02-01T00:00:00.000Z',
+      { id: 'e2', template: 'kvsec', title: 'OpenAI', tags: [], createdAt: '2026-02-01T00:00:00.000Z', updatedAt: '2026-02-01T00:00:00.000Z',
         values: { value: CIPHER_2 } },
     ],
     files: [
@@ -74,7 +74,7 @@ function fixture() {
   };
 }
 
-test('导入防丢：栏目/分组/字段/条目/版式/设置逐项在库里一个不少', async () => {
+test('导入防丢：条目模板/分组/字段/条目/版式/设置逐项在库里一个不少', async () => {
   const dir = await freshHome('nx-sk-fid-');
   const json = fixture();
   await fsp.writeFile(process.env.NX_SK_STORE, JSON.stringify(json), 'utf8');
@@ -85,23 +85,23 @@ test('导入防丢：栏目/分组/字段/条目/版式/设置逐项在库里一
   const all = (sql, ...a) => db.prepare(sql).all(...a);
 
   // ① 实体零丢失：json 里每个 id/key 都能在库里点到
-  for (const s of json.sections) assert.ok(one('SELECT 1 FROM sections WHERE id=?', s.id), `栏目 ${s.id} 丢失`);
+  for (const s of json.templates) assert.ok(one('SELECT 1 FROM templates WHERE id=?', s.id), `模板 ${s.id} 丢失`);
   for (const e of json.entries) assert.ok(one('SELECT 1 FROM entries WHERE id=?', e.id), `条目 ${e.id} 丢失`);
-  for (const s of json.sections) {
+  for (const s of json.templates) {
     // 0.42：分组落成 type='group' 的字段行（名字可能因 key 撞车而加后缀，所以按「有同名组」判）
     for (const g of s.groups) {
       assert.ok(
-        one("SELECT 1 FROM fields WHERE section_id=? AND type='group' AND (key=? OR key LIKE ?)", s.id, g.id, `${g.id}%`),
+        one("SELECT 1 FROM template_fields WHERE template_id=? AND type='group' AND (key=? OR key LIKE ?)", s.id, g.id, `${g.id}%`),
         `分组 ${s.id}/${g.id} 丢失`,
       );
     }
-    for (const f of s.fields) assert.ok(one('SELECT 1 FROM fields WHERE section_id=? AND key=?', s.id, f.key), `字段 ${s.id}/${f.key} 丢失`);
+    for (const f of s.fields) assert.ok(one('SELECT 1 FROM template_fields WHERE template_id=? AND key=?', s.id, f.key), `字段 ${s.id}/${f.key} 丢失`);
   }
 
   // ② 版式整份保真：入库的是 sanitizeLayout 收口后的形状（与 JSON 时代同一条规则），
   //    对照基准必须是 sanitize 后的版式——补默认高度、加 v 号，一个字段都不许漂。
   const wantLayout = sanitizeLayout(LAYOUT);
-  assert.deepEqual(JSON.parse(one("SELECT layout FROM sections WHERE id='demo'").layout), wantLayout, 'layout 必须原样（sanitize 后）');
+  assert.deepEqual(JSON.parse(one("SELECT layout FROM templates WHERE id='demo'").layout), wantLayout, 'layout 必须原样（sanitize 后）');
 
   // ③ 密文 blob 逐字节保真（导入层只搬运，不重新加密）
   //    v3：values 列退役——值逐键在 field_data（JOIN entry_fields 定位键）
@@ -132,11 +132,11 @@ test('导入防丢：栏目/分组/字段/条目/版式/设置逐项在库里一
 
   // ⑥ settings 全量入表
   const set = Object.fromEntries(all('SELECT key, value FROM settings').map((r) => [r.key, r.value]));
-  assert.equal(JSON.parse(set.defaultSection), 'demo');
+  assert.equal(JSON.parse(set.defaultTemplate), 'demo');
   assert.deepEqual(JSON.parse(set.navHidden), ['kvsec']);
 
   // ⑦ facade 读回与源 JSON 形状一致（normalize 允许补 source 袋，其余不许漂）
-  const demo = store.sections.find((s) => s.id === 'demo');
+  const demo = store.templates.find((s) => s.id === 'demo');
   assert.equal(demo.title, '样例');
   assert.equal(demo.titleField, 'name');
   assert.deepEqual(demo.layout, wantLayout);

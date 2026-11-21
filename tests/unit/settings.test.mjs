@@ -1,5 +1,5 @@
 // 设置模块测试：设置项校验（重点：头部导航分组 navGroups —— 写坏了头部就少一块，
-// 所以形状 / 栏目存在性 / 跨组重复 / 空组都要明确报错）+ 与 store.normalize 的默认值约定。
+// 所以形状 / 条目模板存在性 / 跨组重复 / 空组都要明确报错）+ 与 store.normalize 的默认值约定。
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { mkdtemp, stat } from 'node:fs/promises';
@@ -10,10 +10,10 @@ import { useTempHome } from '../helpers.mjs';
 await useTempHome();
 
 const settings = await import('../../src/modules/settings/service.ts');
-const sections = await import('../../src/modules/sections/service.ts');
+const templates = await import('../../src/modules/templates/service.ts');
 const { loadStore, normalize, defaultSettings } = await import('../../src/core/store.ts');
 
-// 播种不再自带那一堆场景栏目：这里把 navGroups / navHidden / navOrder 用例要引用的建出来。
+// 播种不再自带那一堆场景条目模板：这里把 navGroups / navHidden / navOrder 用例要引用的建出来。
 // 顺序刻意打乱——归一成真实 id 之后，组的语义不该依赖创建顺序。
 for (const [id, title, tpl] of [
   ['job', '求职', 'job'],
@@ -22,41 +22,41 @@ for (const [id, title, tpl] of [
   ['campus', '校内', 'campus'],
   ['secret', '密钥', 'secret'],
 ]) {
-  await sections.addSection({ id, title, template: tpl });
+  await templates.addTemplate({ id, title, preset: tpl });
 }
 
 test('默认设置含 navGroups: []，老 store（没有这个键）读一次自动补上', async () => {
-  assert.deepEqual(defaultSettings().navGroups, [], '缺省 = 全部栏目平铺');
+  assert.deepEqual(defaultSettings().navGroups, [], '缺省 = 全部条目模板平铺');
   assert.deepEqual(normalize({ settings: { exportFormat: 'md' } }).settings.navGroups, []);
   assert.deepEqual((await loadStore()).settings.navGroups, []);
 });
 
 test('navGroups：写数组落盘，组内重复与「id/标题混写」都归一成真实 id', async () => {  const r = await settings.updateSettings({
-    set: { navGroups: [{ title: '求职', sections: ['projects', '项目经历', '', 'internships'] }] },
+    set: { navGroups: [{ title: '求职', templates: ['projects', '项目经历', '', 'internships'] }] },
   });
   assert.equal(r.status, 'ok');
-  assert.deepEqual(r.set.navGroups, [{ title: '求职', sections: ['projects', 'internships'] }]);
-  assert.deepEqual((await loadStore()).settings.navGroups, [{ title: '求职', sections: ['projects', 'internships'] }]);
+  assert.deepEqual(r.set.navGroups, [{ title: '求职', templates: ['projects', 'internships'] }]);
+  assert.deepEqual((await loadStore()).settings.navGroups, [{ title: '求职', templates: ['projects', 'internships'] }]);
 });
 
 test('navGroups：CLI 传 JSON 字符串也认（--value 形态）', async () => {
   const r = await settings.updateSettings({
     key: 'navGroups',
-    value: '[{"title":"A","sections":["projects","internships"]},{"title":"B","sections":["campus"]}]',
+    value: '[{"title":"A","templates":["projects","internships"]},{"title":"B","templates":["campus"]}]',
   });
   assert.equal(r.set.navGroups.length, 2);
-  assert.deepEqual(r.set.navGroups[1], { title: 'B', sections: ['campus'] });
+  assert.deepEqual(r.set.navGroups[1], { title: 'B', templates: ['campus'] });
 });
 
-test('navGroups 校验：坏形状 / 不存在栏目 / 跨组重复 / 缺组名 / 空组 —— 都明确报错且不落盘', async () => {
+test('navGroups 校验：坏形状 / 不存在条目模板 / 跨组重复 / 缺组名 / 空组 —— 都明确报错且不落盘', async () => {
   const before = JSON.stringify((await loadStore()).settings.navGroups);
   const cases = [
     [{ set: { navGroups: { title: 'x' } } }, /数组/],
     [{ set: { navGroups: 'not-json' } }, /JSON/],
-    [{ set: { navGroups: [{ sections: ['projects'] }] } }, /缺少 title/],
-    [{ set: { navGroups: [{ title: 'A', sections: ['no_such_section'] }] } }, /不存在: no_such_section/],
-    [{ set: { navGroups: [{ title: 'A', sections: ['projects'] }, { title: 'B', sections: ['projects'] }] } }, /只能属于一个分组/],
-    [{ set: { navGroups: [{ title: '空组', sections: [] }] } }, /没有任何栏目/],
+    [{ set: { navGroups: [{ templates: ['projects'] }] } }, /缺少 title/],
+    [{ set: { navGroups: [{ title: 'A', templates: ['no_such_section'] }] } }, /不存在: no_such_section/],
+    [{ set: { navGroups: [{ title: 'A', templates: ['projects'] }, { title: 'B', templates: ['projects'] }] } }, /只能属于一个分组/],
+    [{ set: { navGroups: [{ title: '空组', templates: [] }] } }, /没有任何条目模板/],
   ];
   for (const [ctx, re] of cases) {
     await assert.rejects(
@@ -75,7 +75,7 @@ test('navGroups 清空 = 恢复平铺', async () => {
 });
 
 test('renderSettings 把数组设置渲染成 JSON（不是 [object Object]）', async () => {
-  await settings.updateSettings({ set: { navGroups: [{ title: '求职', sections: ['projects'] }] } });
+  await settings.updateSettings({ set: { navGroups: [{ title: '求职', templates: ['projects'] }] } });
   const d = await settings.getSettings();
   const text = settings.renderSettings(d);
   assert.ok(text.includes('navGroups'), '设置表里要有这一行');
@@ -83,23 +83,23 @@ test('renderSettings 把数组设置渲染成 JSON（不是 [object Object]）',
   assert.ok(!text.includes('[object Object]'));
 });
 
-test('navGroups 保留组内栏目顺序（头部展开列表按它渲染，别被自动排序）', async () => {
-  const r = await settings.updateSettings({ set: { navGroups: [{ title: 'O', sections: ['secret', 'job', 'campus'] }] } });
-  assert.deepEqual(r.set.navGroups[0].sections, ['secret', 'job', 'campus']);
+test('navGroups 保留组内条目模板顺序（头部展开列表按它渲染，别被自动排序）', async () => {
+  const r = await settings.updateSettings({ set: { navGroups: [{ title: 'O', templates: ['secret', 'job', 'campus'] }] } });
+  assert.deepEqual(r.set.navGroups[0].templates, ['secret', 'job', 'campus']);
   assert.deepEqual(
-    (await loadStore()).settings.navGroups[0].sections,
+    (await loadStore()).settings.navGroups[0].templates,
     ['secret', 'job', 'campus'],
-    '顺序必须原样落盘：不能被栏目 order / 字典序重排',
+    '顺序必须原样落盘：不能被条目模板 order / 字典序重排',
   );
   await settings.updateSettings({ set: { navGroups: [] } });
 });
 
-test('navHidden：隐藏清单校验 + 归一（栏目必须存在、去重保序、接受单个字符串）', async () => {
+test('navHidden：隐藏清单校验 + 归一（条目模板必须存在、去重保序、接受单个字符串）', async () => {
   const r = await settings.updateSettings({ set: { navHidden: 'campus' } });
   assert.deepEqual(r.set.navHidden, ['campus']);
   assert.deepEqual((await loadStore()).settings.navHidden, ['campus']);
 
-  // 数组 + 重复 + 不存在的栏目
+  // 数组 + 重复 + 不存在的条目模板
   const r2 = await settings.updateSettings({ key: 'navHidden', value: ['campus', 'campus', 'job'] });
   assert.deepEqual(r2.set.navHidden, ['campus', 'job']);
   await assert.rejects(
@@ -113,25 +113,25 @@ test('navHidden：隐藏清单校验 + 归一（栏目必须存在、去重保�
   assert.deepEqual((await loadStore()).settings.navHidden, []);
 });
 
-test('getSettings 带上栏目清单（面板的「栏目管理」按它渲染）', async () => {
+test('getSettings 带上条目模板清单（面板的「条目模板管理」按它渲染）', async () => {
   const d = await settings.getSettings();
-  assert.ok(Array.isArray(d.sections) && d.sections.length >= 5, '要列出全部栏目');
-  assert.ok(d.sections.every((s) => s.id && s.title && typeof s.entries === 'number'));
+  assert.ok(Array.isArray(d.templates) && d.templates.length >= 5, '要列出全部条目模板');
+  assert.ok(d.templates.every((s) => s.id && s.title && typeof s.entries === 'number'));
   const text = settings.renderSettings(d);
   assert.ok(text.includes('隐藏 0 个'), '人类可读模式要能看出隐藏状态');
 });
 
-test('navOrder：平铺顺序校验 + 归一（栏目必须存在、去重保序、标题也认）', async () => {
+test('navOrder：平铺顺序校验 + 归一（条目模板必须存在、去重保序、标题也认）', async () => {
   const r = await settings.updateSettings({ set: { navOrder: ['campus', '求职'] } });
   assert.deepEqual(r.set.navOrder, ['campus', 'job'], '写标题也认，统一归一成 id');
   assert.deepEqual((await loadStore()).settings.navOrder, ['campus', 'job']);
 
   await assert.rejects(
     settings.updateSettings({ set: { navOrder: ['ghost'] } }),
-    (e) => e.code === 'INVALID_INPUT' && /平铺顺序里的栏目不存在: ghost/.test(e.message),
+    (e) => e.code === 'INVALID_INPUT' && /平铺顺序里的条目模板不存在: ghost/.test(e.message),
   );
 
-  // 与 navHidden 同构：都是「栏目 id 清单」，互不影响
+  // 与 navHidden 同构：都是「条目模板 id 清单」，互不影响
   const r2 = await settings.updateSettings({ set: { navHidden: ['campus'], navOrder: ['job', 'campus'] } });
   assert.deepEqual(r2.set.navHidden, ['campus']);
   assert.deepEqual(r2.set.navOrder, ['job', 'campus']);
@@ -150,40 +150,40 @@ test('navOrder / navHidden：CLI 的 JSON 串写法也认（`["a","b"]` 与 `a,b
   await settings.updateSettings({ set: { navOrder: [] } });
 });
 
-// —— defaultSection ——
+// —— defaultTemplate ——
 // 它曾经是**死配置**：设置页能改、落盘也存，但没有任何读取方
 // （面板初始 tab 来自 localStorage 里写死的 'job'，CLI 也不读它）。
-// 现在两件事钉住：写入必须指向真实栏目（否则又是一个静默失效的配置），
+// 现在两件事钉住：写入必须指向真实条目模板（否则又是一个静默失效的配置），
 // 以及它不能被「结构化项」那道渲染跳过逻辑吃掉。
 
-test('defaultSection：只接受真实存在的栏目；空串 = 交给面板取第一个', async () => {
-  const r = await settings.updateSettings({ set: { defaultSection: 'projects' } });
-  assert.equal(r.set.defaultSection, 'projects');
+test('defaultTemplate：只接受真实存在的条目模板；空串 = 交给面板取第一个', async () => {
+  const r = await settings.updateSettings({ set: { defaultTemplate: 'projects' } });
+  assert.equal(r.set.defaultTemplate, 'projects');
 
   // 写标题也认，归一成真实 id
-  const byTitle = await settings.updateSettings({ set: { defaultSection: '密钥' } });
-  assert.equal(byTitle.set.defaultSection, 'secret');
+  const byTitle = await settings.updateSettings({ set: { defaultTemplate: '密钥' } });
+  assert.equal(byTitle.set.defaultTemplate, 'secret');
 
-  // 指向不存在的栏目：写入即报错，并列出可选项（不静默存一个永远不生效的值）
+  // 指向不存在的条目模板：写入即报错，并列出可选项（不静默存一个永远不生效的值）
   await assert.rejects(
-    () => settings.updateSettings({ set: { defaultSection: 'no_such_section' } }),
-    (e) => e.code === 'INVALID_INPUT' && /默认栏目不存在/.test(e.message) && /secret/.test(e.message),
+    () => settings.updateSettings({ set: { defaultTemplate: 'no_such_section' } }),
+    (e) => e.code === 'INVALID_INPUT' && /默认条目模板不存在/.test(e.message) && /secret/.test(e.message),
   );
 
-  const cleared = await settings.updateSettings({ set: { defaultSection: '' } });
-  assert.equal(cleared.set.defaultSection, '');
+  const cleared = await settings.updateSettings({ set: { defaultTemplate: '' } });
+  assert.equal(cleared.set.defaultTemplate, '');
 });
 
-test('renderSettings 仍然列出 defaultSection（带校验器但不是「结构化项」）', async () => {
+test('renderSettings 仍然列出 defaultTemplate（带校验器但不是「结构化项」）', async () => {
   const d = await settings.getSettings();
-  assert.match(settings.renderSettings(d), /defaultSection/);
+  assert.match(settings.renderSettings(d), /defaultTemplate/);
 });
 
 // —— autoSaveFields（任务 #26：编辑后自动保存偏好）——
 
 test('autoSaveFields：默认关闭，老 store（没有这个键）读一次自动补 false', async () => {
   assert.equal(defaultSettings().autoSaveFields, false, '缺省 = 手动保存（保持老行为）');
-  assert.equal(normalize({ settings: { defaultSection: 'x' } }).settings.autoSaveFields, false);
+  assert.equal(normalize({ settings: { defaultTemplate: 'x' } }).settings.autoSaveFields, false);
   assert.equal((await loadStore()).settings.autoSaveFields, false);
 });
 
@@ -200,9 +200,9 @@ test('autoSaveFields：布尔值 / CLI 字符串写法都认，且只改这一�
   assert.equal(yes.set.autoSaveFields, true);
 
   // 只动 autoSaveFields：其它设置项原样保留
-  const before = (await loadStore()).settings.defaultSection;
+  const before = (await loadStore()).settings.defaultTemplate;
   await settings.updateSettings({ set: { autoSaveFields: false } });
-  assert.equal((await loadStore()).settings.defaultSection, before, 'PATCH 不得顺带改别的设置项');
+  assert.equal((await loadStore()).settings.defaultTemplate, before, 'PATCH 不得顺带改别的设置项');
   assert.equal((await loadStore()).settings.autoSaveFields, false);
 });
 

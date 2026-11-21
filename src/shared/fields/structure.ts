@@ -1,11 +1,11 @@
-// 字段层级（「组」）的**唯一实现**：组是字段，不是栏目的第二份结构。
+// 字段层级（「组」）的**唯一实现**：组是字段，不是条目模板的第二份结构。
 //
 // 0.42 起模型变了：
-//   · 栏目只有 `fields[]` 这一种结构，没有 `groups[]`；
+//   · 条目模板只有 `fields[]` 这一种结构，没有 `groups[]`；
 //   · 每个字段也不带 `group`；「组」是 type='group' 的一条字段，用 `keys` 引用
-//     同栏目里的其他字段 key（可以是标量字段，也可以嵌套另一个组字段）；
+//     同条目模板里的其他字段 key（可以是标量字段，也可以嵌套另一个组字段）；
 //   · 每个非 group 字段**恰好**归属一个组——这条不变量由 normalizeStructure() 收口，
-//     读路径（core/store-shape 的 normalizeSection）与写入路径共用同一份实现。
+//     读路径（core/store-shape 的 normalizeTemplate）与写入路径共用同一份实现。
 //
 // 本文件必须保持**零依赖**：后端（core/fields/*）与面板（components/blockBoard 等）共用，
 // 一旦 import 了 fs / node 内置模块，浏览器就打包不出来。这里只有纯函数。
@@ -36,7 +36,7 @@ export function isGroupDef(def: unknown): def is GroupLike & { type: 'group'; ke
 }
 
 /**
- * 组 key 的可用名字：字段与组共用一个 key 空间（同一张表主键是 (栏目, key)），
+ * 组 key 的可用名字：字段与组共用一个 key 空间（同一张表主键是 (条目模板, key)），
  * 旧数据里「组 id == 成员字段 key」（如 `education` 组里有 `education` 字段）必须改名。
  *
  * 规则：能直接用就用；撞了就加 `Group`（再撞加序号）。`source` → `sourceGroup`
@@ -79,11 +79,6 @@ export function structureOf(defs: ReadonlyArray<{ key: string; type?: string; ke
   return { groups, parentOf, roots };
 }
 
-/** 字段所属组的 key（不在任何组里 = undefined）。 */
-export function groupOfField(defs: ReadonlyArray<{ key: string; type?: string; keys?: unknown }>, key: string): string | undefined {
-  return structureOf(defs).parentOf.get(String(key));
-}
-
 /**
  * 修复字段字典的结构不变量，返回**新数组**（不改入参）：
  *
@@ -93,7 +88,7 @@ export function groupOfField(defs: ReadonlyArray<{ key: string; type?: string; k
  *  4. 没有任何组接管的普通字段 → 归到根组 `root`（没有根组就合成一个，放在最前）；
  *  5. 组字段的 `keys` 按修复结果写回（保证存储里只有这一份结构）。
  *
- * `ensureRoot: false` 用于 KV 栏目——它是一张表（一行一个键值对），不需要面板分组。
+ * `ensureRoot: false` 用于空白模板（`__blank__`）——它只是一个占位，不需要面板分组。
  */
 export function normalizeStructure<T extends { key: string; type?: string; keys?: unknown; label?: string }>(
   defs: T[] | null | undefined,

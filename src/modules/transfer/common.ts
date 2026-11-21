@@ -1,7 +1,7 @@
 import { extname } from 'node:path';
 import { createZip, readZip } from '../../core/zip.ts';
 import { isEncryptedPackage, openPackage, sealPackage } from '../../core/securezip.ts';
-import { isDetachedField, type Store, type StoreEntry, type StoreSection } from '../../core/store.ts';
+import { isDetachedField, type Store, type StoreEntry, type StoreTemplate } from '../../core/store.ts';
 import type { EntryFieldView } from '../../core/store.ts';
 import { isSensitiveField } from '../../core/fields.ts';
 import { decryptValue, isCipherBlob } from '../../core/crypto.ts';
@@ -10,7 +10,7 @@ import { CATEGORY_IDS } from '../../core/attachments.ts';
 import { behaviorOf } from '../../core/fields/registry.ts';
 import { badInput, blocked } from '../../core/errors.ts';
 
-export const FORMAT = 'nx-sk.section';
+export const FORMAT = 'nx-sk.template';
 export const FORMAT_VERSION = 1;
 export const CONFLICT_POLICIES = ['skip', 'copy', 'overwrite'];
 
@@ -38,12 +38,12 @@ export function safeCategory(cat: unknown): string {
   return CATEGORY_IDS.includes(cat as string) ? String(cat) : 'other';
 }
 
-/** 目标 ref 是「栏目 id」还是「栏目标题」：id 可以直接新建，标题不行（会建出非法 id）。 */
-export const isSectionId = (s: unknown) => /^[a-z0-9][a-z0-9_-]*$/i.test(String(s || ''));
+/** 目标 ref 是「条目模板 id」还是「条目模板标题」：id 可以直接新建，标题不行（会建出非法 id）。 */
+export const isTemplateId = (s: unknown) => /^[a-z0-9][a-z0-9_-]*$/i.test(String(s || ''));
 
-/** 零配置导入：包里的 id 已存在时换一个，绝不静默并进别人的栏目。 */
-export function uniqueSectionId(store: Store, base: string): string {
-  const taken = new Set(store.sections.map((s) => s.id));
+/** 零配置导入：包里的 id 已存在时换一个，绝不静默并进别人的条目模板。 */
+export function uniqueTemplateId(store: Store, base: string): string {
+  const taken = new Set(store.templates.map((s) => s.id));
   if (!taken.has(base)) return base;
   for (let i = 2; i < 1000; i += 1) {
     const id = `${base}-${i}`;
@@ -52,10 +52,10 @@ export function uniqueSectionId(store: Store, base: string): string {
   return `${base}-${Date.now()}`;
 }
 
-/** 条目的字段定义清单：自身结构行优先、栏目字典兜底（v3 写时复制，包里要带扩展行的值）。
+/** 条目的字段定义清单：自身结构行优先、条目模板字典兜底（v3 写时复制，包里要带扩展行的值）。
  *  任务 #20：脱离行（meta.detached）不算——值已不进 values，定义也不进导出包。 */
-export function entryDefs(section: StoreSection, ownRows: EntryFieldView[] | null | undefined): FieldDefLike[] {
-  return ownRows ? ownRows.filter((r) => !isDetachedField(r)).map((r) => r.spec as unknown as FieldDefLike) : (section.fields || []) as unknown as FieldDefLike[];
+export function entryDefs(template: StoreTemplate, ownRows: EntryFieldView[] | null | undefined): FieldDefLike[] {
+  return ownRows ? ownRows.filter((r) => !isDetachedField(r)).map((r) => r.spec as unknown as FieldDefLike) : (template.fields || []) as unknown as FieldDefLike[];
 }
 
 /** 字段定义的宽松读取形状（transfer 只碰这几个键）。 */
@@ -70,10 +70,10 @@ export interface FieldDefLike {
 }
 
 export async function plainValues(defs: FieldDefLike[], values: unknown): Promise<Record<string, unknown>> {
-  const asSection = { fields: defs };
+  const asTemplate = { fields: defs };
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(values || {})) {
-    if (!isSensitiveField(asSection, k)) { out[k] = v; continue; }
+    if (!isSensitiveField(asTemplate, k)) { out[k] = v; continue; }
     if (isCipherBlob(v)) {
       const { key } = await resolveVaultKey();
       out[k] = decryptValue(key, v);
@@ -127,7 +127,7 @@ export async function plainValues(defs: FieldDefLike[], values: unknown): Promis
   return out;
 }
 
-/** 一个栏目引用了哪些附件：由各类型的 `refs` 决定（导出打包口径：算上资料袋正文图片）。 */
+/** 一个条目模板引用了哪些附件：由各类型的 `refs` 决定（导出打包口径：算上资料袋正文图片）。 */
 export function referencedFileIds(entries: StoreEntry[], defsOf: (e: StoreEntry) => FieldDefLike[]): Set<string> {
   const ids = new Set<string>();
   for (const e of entries) {
@@ -154,11 +154,11 @@ export function wrapEncrypted(innerZip: Buffer, passphrase: unknown, innerReadme
   const readme = [
     'nx-sk 加密导出包',
     '',
-    '这个 ZIP 里只有一个 payload.enc —— 真正的数据（栏目、条目、附件）被 AES-256-GCM 加密过，',
+    '这个 ZIP 里只有一个 payload.enc —— 真正的数据（条目模板、条目、附件）被 AES-256-GCM 加密过，',
     '只有 nx-sk 能解开。用系统自带的压缩文件夹打开也只能看到这个文件，属正常。',
     '',
     '导入：面板「导出导入」页把这个文件拖进去，输入导出时设的口令；或',
-    '  nx-sk transfer import <栏目> --file <本文件> --passphrase <口令> --dry-run',
+    '  nx-sk transfer import <条目模板> --file <本文件> --passphrase <口令> --dry-run',
     '',
     '口令不在文件里，忘了就打不开。',
     '',
@@ -221,7 +221,7 @@ export function parseBundle(buffer: Buffer | ZipFile[], fileName?: string, passp
   if (hit) return hit;
   const map = new Map(files.map((f) => [f.name, f.data]));
   const raw = map.get('manifest.json');
-  if (!raw) throw badInput('ZIP 里没有 manifest.json —— 不是 nx-sk 栏目导出包');
+  if (!raw) throw badInput('ZIP 里没有 manifest.json —— 不是 nx-sk 条目模板导出包');
   let manifest: any;
   // TODO(P4): manifest 是外部 JSON，键集由 FORMAT + formatVersion 约定（下方做结构校验）
   try {
@@ -229,12 +229,12 @@ export function parseBundle(buffer: Buffer | ZipFile[], fileName?: string, passp
   } catch {
     throw badInput('manifest.json 不是合法 JSON');
   }
-  if (manifest?.format !== FORMAT) throw badInput(`不是栏目导出包（format=${manifest?.format || '未声明'}）`);
+  if (manifest?.format !== FORMAT) throw badInput(`不是条目模板导出包（format=${manifest?.format || '未声明'}）`);
   if (Number(manifest.formatVersion) > FORMAT_VERSION) {
     throw badInput(`导出包版本过新（${manifest.formatVersion}），请先升级 nx-sk`);
   }
-  if (!manifest.section || !Array.isArray(manifest.entries) || !Array.isArray(manifest.files)) {
-    throw badInput('manifest.json 结构不完整（缺 section / entries / files）');
+  if (!manifest.template || !Array.isArray(manifest.entries) || !Array.isArray(manifest.files)) {
+    throw badInput('manifest.json 结构不完整（缺 template / entries / files）');
   }
   const enc = needsPassphrase(buffer as Buffer);
   const parsed = { manifest, map, fileName: fileName || 'upload.zip', encrypted: enc };

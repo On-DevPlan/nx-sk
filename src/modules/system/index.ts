@@ -10,7 +10,7 @@ export default {
       id: 'system.bootstrap',
       cli: ['bootstrap'],
       http: ['GET', '/api/bootstrap'],
-      summary: '一次性拿齐上下文：版本 / 存储路径 / 栏目 / 设置 / 命令表',
+      summary: '一次性拿齐上下文：版本 / 存储路径 / 条目模板 / 设置 / 命令表',
       flags: {},
       run: () => service.bootstrapInfo(),
       render: (d: Parameters<typeof service.renderBootstrap>[0]) => service.renderBootstrap(d),

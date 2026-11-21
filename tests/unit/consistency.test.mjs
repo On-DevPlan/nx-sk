@@ -103,7 +103,8 @@ test('CRUD 路由的形状对得上语义', () => {
 
 test('key 系列是 entry 的语法糖，不构成第二套业务逻辑', () => {
   const keys = ACTIONS.filter((a) => a.id.startsWith('key.'));
-  assert.deepEqual(keys.map((a) => a.id).sort(), ['key.get', 'key.list', 'key.remove', 'key.set']);
+  assert.deepEqual(keys.map((a) => a.id).sort(),
+    ['key.consolidate', 'key.get', 'key.list', 'key.remove', 'key.set']);
 
   for (const a of keys) {
     assert.ok(cliPathsOf(a).length, `${a.id} 缺 CLI 命令`);
@@ -116,10 +117,11 @@ test('key 系列是 entry 的语法糖，不构成第二套业务逻辑', () => 
   const http = (id) => ACTIONS.find((a) => a.id === id).http;
   const hasParam = (p) => p.split('/').filter(Boolean).some((s) => s.startsWith(':'));
   assert.equal(hasParam(http('key.list')[1]), false, 'key list 是集合路由');
+  assert.equal(hasParam(http('key.consolidate')[1]), false, 'key consolidate 是集合级迁移路由');
   for (const id of ['key.get', 'key.set', 'key.remove']) {
     assert.ok(hasParam(http(id)[1]), `${id} 路由必须能定位到单个键`);
   }
-  // PUT 而不是 POST：KV 的 SET 是幂等覆盖，方法用错会让 agent 无法从端点推断语义
+  // PUT 而不是 POST：key 的 SET 是幂等覆盖，方法用错会让 agent 无法从端点推断语义
   assert.equal(http('key.set')[0], 'PUT');
 });
 
@@ -224,10 +226,10 @@ function covered(lits, routePath) {
 test('视图里调用的每个 /api/... 都有对应路由（规则本身先反证过）', async () => {
   // 反面对照：把路径写错必须被判为未覆盖，否则这条断言等于不存在
   const wrong = literalsOf("api('/api/sectoins/1/dump')").map((x) => x.lits);
-  assert.ok(!ROUTES.some((r) => covered(wrong[0], r.path) && r.path === '/api/sections/:ref/dump'), '拼错路径必须被判为未覆盖');
+  assert.ok(!ROUTES.some((r) => covered(wrong[0], r.path) && r.path === '/api/templates/:ref/dump'), '拼错路径必须被判为未覆盖');
 
   const files = [];
-  // 递归扫整个前端目录：视图的 API 调用可能拆在同级组件里（如 sections/dictEditor.tsx），
+  // 递归扫整个前端目录：视图的 API 调用可能拆在同级组件里（如 templates/dictEditor.tsx），
   // 只认 view.tsx 等于「把调用挪个文件名就能绕过这条断言」。
   const walk = async (dir) => {
     const entries = await readdir(dir, { withFileTypes: true });

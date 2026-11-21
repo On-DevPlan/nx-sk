@@ -42,7 +42,7 @@ CREATE TABLE IF NOT EXISTS ui_state (
   updated_at TEXT NOT NULL
 );
 
--- ── sections：栏目（字段字典 + 版式的头部）────────────────────────────
+-- ── sections：条目模板（字段字典 + 版式的头部）────────────────────────────
 -- "order" 要加引号：ORDER 是 SQL 关键字。
 -- layout 是块布局 JSON（显示关系），读路径一律过 sanitizeLayout，落库前已收口。
 CREATE TABLE IF NOT EXISTS sections (
@@ -59,7 +59,7 @@ CREATE TABLE IF NOT EXISTS sections (
   updated_at  TEXT
 );
 
--- ── groups：栏目分组声明（头部导航的一个分组）──────────────────────────
+-- ── groups：条目模板分组声明（头部导航的一个分组）──────────────────────────
 -- declared：1 = 用户/模板声明的分组；0 = syncSectionGroups 自愈出的「字段引用了
 -- 但没声明」的分组（servers 白屏事故的收口产物）。导入时按原始 JSON 的 groups
 -- 数组判，之后原地保留（见 db/repo.ts 的 writeStore）。
@@ -72,7 +72,7 @@ CREATE TABLE IF NOT EXISTS groups (
   PRIMARY KEY (section_id, id)
 );
 
--- ── fields：字段字典（栏目内全局顺序 = 原数组顺序显式化成 sort）────────
+-- ── fields：字段字典（条目模板内全局顺序 = 原数组顺序显式化成 sort）────────
 -- type 是**封闭枚举**，与 shared/fields/types.ts 的 FIELD_TYPES 同一份清单
 -- （由 db 单测钉住，两边漂移当场红）。
 -- spec 是保真源：整个 FieldDef 的 JSON（含类型特有键 options/columns/fields/
@@ -88,7 +88,7 @@ CREATE TABLE IF NOT EXISTS fields (
   -- 分组引用（NULL = 未分组）。**不建外键**，理由是实测出来的：
   -- SQLite 不支持 `ON DELETE SET NULL (列清单)` 只置空复合外键的某列（3.53 报语法错），
   -- CASCADE 会「删分组连字段一起删」（语义错），RESTRICT 会挡住 sections 整表级联重写。
-  -- 「分组声明 ⊇ 字段引用」本来就是栏目不变量，由读边界 syncSectionGroups 唯一收口
+  -- 「分组声明 ⊇ 字段引用」本来就是条目模板不变量，由读边界 syncSectionGroups 唯一收口
   -- （store.json 时代同一条纪律），孤儿引用读一次即自愈成 declared=0 分组。
   group_id   TEXT,
   fill       TEXT NOT NULL DEFAULT 'normal' CHECK (fill IN ('normal', 'optional', 'avoid')),
@@ -144,7 +144,7 @@ CREATE TABLE IF NOT EXISTS attachments (
   target_key  TEXT NOT NULL DEFAULT '',
   dedupe_key  TEXT NOT NULL DEFAULT '',
   meta        TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(meta)),
-  -- 软删：删条目/栏目时指向它的内部指针**不物理删**（UPDATE deleted_at），
+  -- 软删：删条目/条目模板时指向它的内部指针**不物理删**（UPDATE deleted_at），
   -- 与 corrupt/import 留证同一条纪律——有据可查比干净的外表重要。
   deleted_at  TEXT,
   created_at  TEXT NOT NULL,

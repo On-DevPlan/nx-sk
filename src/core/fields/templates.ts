@@ -1,8 +1,8 @@
-// 字段模板数据：`section add --template` 与面板「新建栏目」共用同一份字段/分组声明。
+// 字段模板数据：`template add --preset` 与面板「新建条目模板」共用同一份字段/分组声明。
 
 import type { FieldDef, FieldType } from '../../shared/fields/types.ts';
 import { freeGroupKey } from '../../shared/fields/structure.ts';
-import type { SectionGroup } from '../store.ts';
+import type { TemplateGroup } from '../store.ts';
 import { ensureSourceBuiltin } from './source-bag.ts';
 
 const f = (key: string, label: string, type: FieldType, group: string, extra: Record<string, unknown> = {}): FieldDef =>
@@ -52,7 +52,7 @@ const JOB_FIELDS = [
   f('isBaoyan', '是否保研', 'bool', 'education', { hint: '是否推荐免试攻读研究生' }),
   f('hasOverseasStudy', '是否有留学经历', 'bool', 'education'),
   f('certificates', '技能证书', 'textarea', 'education', { hint: '每行一条证书或获奖' }),
-  // 实习/项目/校内职务不再放这里——它们各自是独立栏目（projects / internships / campus），
+  // 实习/项目/校内职务不再放这里——它们各自是独立条目模板（projects / internships / campus），
   // 每个项目/一段经历一个条目，角色、时间、技术栈都是独立字段，不再挤 textarea。
   f('skills', '专业技能', 'textarea', 'education', { hint: '每行一条：方向——具体技术点' }),
 
@@ -102,25 +102,31 @@ const JOB_FIELDS = [
   f('jobNote', '求职备注', 'textarea', 'job', { hint: '补充说明' }),
 
   // —— 附件资料（统一附件库；值 = 附件 id 的**列表**，一个字段可挂多个，直接在字段里上传或从附件库选） ——
-  f('resumeFile', '简历附件', 'file', 'files', { kind: 'doc', hint: '简历 PDF/Word 原件；可传多个（不同版本/岗位），在本字段直接上传或从附件库选' }),
-  f('avatar', '头像图片', 'file', 'files', { kind: 'image', hint: '证件照/头像图片原件；可传多张' }),
-  f('transcript', '成绩单', 'file', 'files', { kind: 'doc', hint: '在校成绩单原件；可传多个学期' }),
-  f('certificateScan', '证书扫描件', 'file', 'files', { kind: 'doc', fill: 'optional', hint: '获奖/资格证书扫描件；可传多份（不必填）' }),
+  f('resumeFile', '简历附件', 'file', 'files', { hint: '简历 PDF/Word 原件；可传多个（不同版本/岗位），在本字段直接上传或从附件库选' }),
+  f('avatar', '头像图片', 'file', 'files', { hint: '证件照/头像图片原件；可传多张' }),
+  f('transcript', '成绩单', 'file', 'files', { hint: '在校成绩单原件；可传多个学期' }),
+  f('certificateScan', '证书扫描件', 'file', 'files', { fill: 'optional', hint: '获奖/资格证书扫描件；可传多份（不必填）' }),
 
   // —— 其他 ——
   f('religion', '宗教信仰', 'text', 'extra', { hint: '没有就写「无」' }),
   f('unionVolunteer', '是否自愿加入公司工会', 'bool', 'extra'),
 ];
 
-// 密钥栏目刻意只有**一个**字段：名称（条目名）+ 值。
-// 之前做过 8 个字段（服务商/接口地址/模型/用途/有效期/额度/备注），实测是负担——
-// 存一个 key 不该先填一张表。要记「这个 key 干什么用」，把它写进名称里就够。
+// 密钥不再是一种「KV 条目模板」，而是一个**普通字段**：一个结构清单装全部键值对，
+// 名称列明文、值列密文（与顶层 secret 同一条 AES-256-GCM 边界）。
+// 这样密钥和项目里的其它内容完全同构：字段 + 条目，模板只负责初始化。
 const SECRET_FIELDS = [
-  f('value', '密钥值', 'secret', 'key', { hint: 'API Key 本身。落盘是密文，读出来默认是原文（--mask 才打码）' }),
+  f('keys', '密钥列表', 'entrylist', 'key', {
+    hint: '一个字段装全部密钥：名称 → 值。值列密文落盘，读出来是原文；要记用途就写在名称里',
+    fields: [
+      { key: 'name', label: '名称' },
+      { key: 'value', label: '值', sensitive: true },
+    ],
+  }),
 ];
 
 // —— 经历类模板：一个项目 / 一段实习 / 一条职务 = 一个条目 ——
-// 为什么是独立栏目而不是 job 里的 textarea：经历天然是多字段、多条目的结构化数据，
+// 为什么是独立条目模板而不是 job 里的 textarea：经历天然是多字段、多条目的结构化数据，
 // 「每行一条」挤在一个格子里既没法填也没法按角色/时间取数。
 const PROJECT_FIELDS = [
   f('name', '项目名称', 'text', 'main'),
@@ -158,7 +164,7 @@ const CAMPUS_FIELDS = [
 // 密钥分两层，各有各的位置：
 //   - **模板层**（`content`）：正文会被复制进别人的项目（进 git），所以只写 `${VAR}` 占位。
 //   - **场景层**（`creds` 凭据清单）：这个场景**自己的**账号/密码/令牌，密文落盘。
-//     agent 要出配置文件时从这里取真值直接渲染 —— 不必再绕回「密钥」栏目。
+//     agent 要出配置文件时从这里取真值直接渲染 —— 不必再绕回「密钥」条目模板。
 const DEPLOY_FIELDS = [
   f('name', '资源名', 'text', 'main', { hint: '一眼能看出是什么，如「node-web 多阶段 Dockerfile」' }),
   f('kind', '资源类型', 'select', 'main', {
@@ -200,7 +206,7 @@ const DEPLOY_FIELDS = [
 ];
 
 // —— 容器平台模板：一个平台（KubeSphere / Rancher / 自建 k8s…）一个条目 ——
-// 链接、账号、密码、镜像统一落一个条目，配合 `entry keys` 台账做跨栏目统一列表。
+// 链接、账号、密码、镜像统一落一个条目，配合 `entry keys` 台账做跨条目模板统一列表。
 // 密码用 secret 类型（密文落盘）；链接/账号是关键定位信息，进 key 台账。
 const PLATFORM_FIELDS = [
   f('platformName', '平台名称', 'text', 'basic', { hint: '如 川农容器平台(KubeSphere)' }),
@@ -219,11 +225,11 @@ const PLATFORM_FIELDS = [
 
 // —— 毕业论文（信息工程学院 2022 版规范 · 设计开发类）——
 //
-// 这个栏目不是「写论文」，是**把格式规范变成可查的字段**：每条硬指标都在这里有一条，
+// 这个条目模板不是「写论文」，是**把格式规范变成可查的字段**：每条硬指标都在这里有一条，
 // 写的时候开着面板对照，交稿前跑一遍「交稿自检」。
 // 之所以按字段而不是按条目拆：规范是一份整体，拆成条目反而要在几十条里翻。
 //
-// 字段值 = 规范原文的硬指标（cm / pt / 字），不是「待办」。改规范时改模板再 section sync。
+// 字段值 = 规范原文的硬指标（cm / pt / 字），不是「待办」。改规范时改模板再 template sync。
 const THESIS_GROUPS = [
   { id: 'meta', title: '论文档案' },
   { id: 'format', title: '页面与字体（硬指标）' },
@@ -324,12 +330,12 @@ const PLATFORM_GROUPS = [
   { id: 'extra', title: '其他' },
 ];
 
-// —— 字段样例（demo）：播种用的**唯一**栏目 ——
+// —— 字段样例（demo）：播种用的**唯一**条目模板 ——
 //
-// 为什么单独做一个：新用户第一个问题不是「帮我建一个求职栏目」，而是
+// 为什么单独做一个：新用户第一个问题不是「帮我建一个求职条目模板」，而是
 // 「这个工具到底能存什么、能算到哪」。把答案直接摆出来——每种字段类型一格、
-// 连示例数据一起给——比让他们先建栏目再自己填一遍快得多。
-// 其它模板（job / secret / projects…）仍是模板，`section add --template` 随取随用，
+// 连示例数据一起给——比让他们先建条目模板再自己填一遍快得多。
+// 其它模板（job / secret / projects…）仍是模板，`template add --preset` 随取随用，
 // 只是**不再播种**：第一屏是说明书，不是别人的表格。
 const DEMO_TABLE_COLUMNS = [
   { key: 'item', label: '事项', type: 'text' },
@@ -361,7 +367,7 @@ const DEMO_FIELDS = [
     ],
   }),
   f('sheet', '样例表格', 'table', 'combo', {
-    hint: '表格：列定义就在**这条数据里**（不在栏目字典），面板「列设置」可以直接加列。'
+    hint: '表格：列定义就在**这条数据里**（不在条目模板字典），面板「列设置」可以直接加列。'
       + '「费用」是计算列（公式 hours * rate，不落盘、读时现算）；表尾自动合计——数字求和、勾选计是',
     columns: DEMO_TABLE_COLUMNS,
     totals: [
@@ -373,12 +379,16 @@ const DEMO_FIELDS = [
   // —— 富内容 ——
   f('note', '图文笔记', 'md', 'rich', { hint: 'markdown 正文：标题 / 列表 / 代码块都能渲染；直接 Ctrl+V 贴截图（自动进附件库）；待办勾选就是改正文本身' }),
   f('keys', '快捷键', 'shortcut', 'rich', { hint: '快捷键：按组整理（组 → 条目 → 按键）。折叠条只报组数/条数，点「详细」打开键位面板；录入时直接按组合键，键位图会点亮' }),
-  f('docs', '附件', 'file', 'rich', { kind: 'doc', hint: '附件字段：值是附件 id 的列表（不是路径）。在这里直接上传，或从附件库选' }),
+  f('grill', '对齐确认', 'grill', 'rich', {
+    hint: 'Grill & Ack：AI 把要确认的问题写成 JSON（单选/多选/填空/确认 + 每条备注），点小按钮打开三态子页面填写；'
+      + '必答全答完后才能点「确认并回写」，ack 状态与答案一起留在字段里。',
+  }),
+  f('docs', '附件', 'file', 'rich', { hint: '附件字段：值是附件 id 的列表（不是路径）。在这里直接上传，或从附件库选' }),
   f('apikey', '密钥', 'secret', 'rich', { hint: '密文字段：值以 AES-256-GCM 落盘，读出来默认原文，--mask 才打码' }),
   // —— 引用型（值 = 内部资源定位符）——
   f('refs', '资源引用', 'debug', 'combo', {
     fill: 'optional',
-    hint: '引用型字段：值 = 内部资源定位符（nx-sk://栏目|条目|字段|附件）。面板里每个格子悬浮即可预览被引用内容；'
+    hint: '引用型字段：值 = 内部资源定位符（nx-sk://条目模板|条目|字段|附件）。面板里每个格子悬浮即可预览被引用内容；'
       + '检索用 nx-sk resource search --q <关键字>，看内容用 nx-sk resource resolve <定位符>',
   }),
 ];
@@ -389,7 +399,7 @@ const DEMO_GROUPS = [
   { id: 'rich', title: '富内容' },
 ];
 
-/** 字段模板（数据）：`section add --template` 与面板「新建栏目」共用同一份声明。
+/** 字段模板（数据）：`template add --preset` 与面板「新建条目模板」共用同一份声明。
  *
  * `groups` 是**模板的作者态**（写模板时按「小标题」成段列字段最省事），
  * 落进 store 之前由 `templateFieldDefs()` 折成 type='group' 的字段——
@@ -399,10 +409,9 @@ export interface FieldTemplateDef {
   label: string;
   description: string;
   titleLabel: string;
-  groups: SectionGroup[];
+  groups: TemplateGroup[];
   fields: FieldDef[];
   titleField: string | null;
-  kv?: boolean;
 }
 
 /**
@@ -420,9 +429,6 @@ export function templateFieldDefs(t: FieldTemplateDef): FieldDef[] {
     const { group: _drop, ...rest } = f as unknown as Record<string, unknown> & { group?: string };
     return rest as unknown as FieldDef;
   });
-  // KV 栏目就是一张表（一行一个键值对），**不该有分组**：作者态里的 groups
-  // 只是模板书写时的组织方式，落到存储时丢掉，免得 KV 表里多出一条无意义的组字段。
-  if (t.kv) return plain;
   // 组 key 与成员字段共用 key 空间：撞名（如 `education` 组 + `education` 字段）就改名，
   // 否则归一化会按 key 去重把成员字段丢掉。规则与迁移共用一份（freeGroupKey）。
   const taken = new Set(plain.map((f) => String(f.key)));
@@ -471,13 +477,11 @@ const TEMPLATES: Record<string, FieldTemplateDef> = {
   secret: {
     id: 'secret',
     label: '密钥 / 凭据',
-    description: '极简 KV：名称 → 值。值以密文落盘，读出来是原文。',
-    // kv: true = 这个栏目**就是一张 KV 表**：条目名 = 键名，唯一那个字段 = 值。
-    // 面板据此渲染表格（而不是「条目列表 + 表单 + 完整性」那套）；
-    // key set/get/list/remove 默认作用在它上面。字段字典对它没有意义，只有一个 value。
-    kv: true,
+    description: '普通条目模板：一个「密钥列表」字段装全部名称 → 值。值列密文落盘，读出来是原文；条目可以继续加别的字段。',
+    // 不再是 kv:true 的「表」：密钥只是普通的 entrylist 字段值。
+    // key set/get/list/remove 默认作用在这个字段上，也能用 --template 指定别的模板。
     titleField: null,
-    titleLabel: '密钥名',
+    titleLabel: '条目名',
     groups: [{ id: 'key', title: '密钥信息' }],
     fields: SECRET_FIELDS,
   },
@@ -554,7 +558,7 @@ export function getTemplate(id: unknown): FieldTemplateDef | null {
   return TEMPLATES[String(id || '')] || null;
 }
 
-/** 模板摘要，给 `section templates` 与面板的「新建栏目」用。 */
+/** 模板摘要，给 `template presets` 与面板的「新建条目模板」用。 */
 export function templateSummaries() {
   return Object.values(TEMPLATES).map((t) => ({
     id: t.id,
@@ -565,7 +569,7 @@ export function templateSummaries() {
   }));
 }
 
-/** 由模板实例化一个栏目。深拷贝 —— 栏目自己的字段集从此独立演化。 */
+/** 由模板实例化一个条目模板。深拷贝 —— 条目模板自己的字段集从此独立演化。 */
 /** instantiateTemplate 的覆盖项。 */
 interface TemplateOverrides {
   id?: string;
@@ -583,16 +587,17 @@ export function instantiateTemplate(templateId: unknown, overrides: TemplateOver
   if (!t) return null;
   // 模板作者态 → 字段字典（组字段 + 普通字段），再补「原始资料」袋。
   const baseFields = templateFieldDefs(t);
-  const fields = ensureSourceBuiltin(baseFields, { kv: t.kv });
+  const fields = ensureSourceBuiltin(baseFields);
   return {
     id: overrides.id,
     title: overrides.title || t.label,
     description: overrides.description || t.description,
     order: Number.isFinite(overrides.order) ? (overrides.order as number) : 50,
     template: t.id,
-    kv: t.kv === true,
     titleField: overrides.titleField || t.titleField,
     titleLabel: overrides.titleLabel || t.titleLabel,
+    // 模板默认 tag 由 addTemplate 按 id/标题补；预置实例化本身只给空数组，避免把代码常量带进库。
+    tags: [],
     fields,
     createdAt: overrides.createdAt || null,
     updatedAt: overrides.updatedAt || null,

@@ -1,4 +1,4 @@
-// 正文块布局（section.layout）：**版式是显示关系，单独存**，字段增删后要能自愈。
+// 正文块布局（template.layout）：**版式是显示关系，单独存**，字段增删后要能自愈。
 //
 // 这里钉的是语义，不是像素：
 //   - 默认版式：宽字段整行、窄字段半列，窄屏一律单列（响应式不靠媒体查询手写）
@@ -13,7 +13,7 @@ import { useTempHome } from '../helpers.mjs';
 await useTempHome();
 
 const L = await import('../../src/shared/blockLayout.ts');
-const sections = await import('../../src/modules/sections/service.ts');
+const templates = await import('../../src/modules/templates/service.ts');
 const { loadStore } = await import('../../src/core/store.ts');
 
 const F = (key, type = 'text', group = 'main') => ({ key, label: key.toUpperCase(), type, group });
@@ -173,7 +173,7 @@ test('sameLayout：顺序/写法不同但等价 → 相同；挪一格 → 不�
 });
 
 test('服务端：--layout 整体写入并回读；脏值报 INVALID_INPUT 而不是落盘', async () => {
-  await sections.addSection({
+  await templates.addTemplate({
     id: 'blocks',
     title: '块布局验证',
     fields: [F('a'), F('b'), F('md1', 'md')],
@@ -184,50 +184,51 @@ test('服务端：--layout 整体写入并回读；脏值报 INVALID_INPUT 而�
     panels: ['main'],
     groups: { main: { layouts: { lg: [{ i: 'a', x: 0, y: 0, w: 4, h: 2 }, { i: 'b', x: 4, y: 0, w: 4, h: 2 }, { i: 'md1', x: 0, y: 2, w: 12, h: 9 }] } } },
   };
-  await sections.updateSection('blocks', { layout });
-  const got = await sections.getSection('blocks');
+  await templates.updateTemplate('blocks', { layout });
+  const got = await templates.getTemplate('blocks');
   const lg = got.layout.groups.main.layouts.lg;
   assert.deepEqual(lg.map((x) => [x.i, x.x, x.w]), [['a', 0, 4], ['b', 4, 4], ['md1', 0, 12]]);
 
-  await assert.rejects(() => sections.updateSection('blocks', { layout: 'not-json-object' }), /--layout/);
+  await assert.rejects(() => templates.updateTemplate('blocks', { layout: 'not-json-object' }), /--layout/);
   // 报错不落盘：版式还是上一步那份
-  const again = await sections.getSection('blocks');
+  const again = await templates.getTemplate('blocks');
   assert.ok(L.sameLayout(got.layout, again.layout));
 });
 
 test('服务端：删字段 / 加字段后版式自动对齐（旧版式不留孤儿块）', async () => {
-  await sections.updateSection('blocks', { 'remove-field': ['b'] });
-  let got = await sections.getSection('blocks');
+  await templates.updateTemplate('blocks', { 'remove-field': ['b'] });
+  let got = await templates.getTemplate('blocks');
   assert.deepEqual(got.layout.groups.main.layouts.lg.map((x) => x.i), ['a', 'md1']);
 
-  await sections.updateSection('blocks', { 'add-field': { key: 'c', label: 'C', type: 'text', group: 'main' } });
-  got = await sections.getSection('blocks');
+  await templates.updateTemplate('blocks', { 'add-field': { key: 'c', label: 'C', type: 'text', group: 'main' } });
+  got = await templates.getTemplate('blocks');
   const lg = got.layout.groups.main.layouts.lg;
   assert.deepEqual(lg.map((x) => x.i), ['a', 'md1', 'c']);
   assert.ok(lg[2].y >= lg[1].y + lg[1].h, '新字段落在已有块下面');
 });
 
 test('服务端：--clear-layout 回到默认编排（不是把配置删成 null）', async () => {
-  await sections.updateSection('blocks', { 'clear-layout': true });
-  const got = await sections.getSection('blocks');
+  await templates.updateTemplate('blocks', { 'clear-layout': true });
+  const got = await templates.getTemplate('blocks');
   const lg = got.layout.groups.main.layouts.lg;
   assert.deepEqual(lg.map((x) => x.i), ['a', 'md1', 'c']);
   assert.equal(lg[0].x, 0);
   assert.equal(lg[0].y, 0);
   const store = await loadStore();
-  const sec = store.sections.find((s) => s.id === 'blocks');
+  const sec = store.templates.find((s) => s.id === 'blocks');
   assert.ok(sec.layout && sec.layout.mode === 'grid', '默认版式要落盘，读出来立刻能渲染');
 });
 
 test('store：脏版式在归一化时被夹干净，不会让面板白屏', async () => {
   const store = await loadStore();
-  const sec = store.sections.find((s) => s.id === 'blocks');
+  const sec = store.templates.find((s) => s.id === 'blocks');
   const { normalize } = await import('../../src/core/store.ts');
-  const out = normalize({ ...store, sections: [{ ...sec, layout: { groups: { main: { layouts: { lg: 'x' } } } } }] });
+  const out = normalize({ ...store, templates: [{ ...sec, layout: { groups: { main: { layouts: { lg: 'x' } } } } }] });
   // 「lg 是个字符串」这种脏值既不能留着（面板会崩），也不该让整份版式丢掉——
   // 结果是一个结构合法、但这个断点没有块的版式，面板会按默认编排铺一遍。
-  assert.equal(out.sections[0].layout.mode, 'grid');
-  assert.deepEqual(out.sections[0].layout.groups.main.layouts, {});
+  const fixed = out.templates.find((s) => s.id === 'blocks');
+  assert.equal(fixed.layout.mode, 'grid');
+  assert.deepEqual(fixed.layout.groups.main.layouts, {});
 });
 
 

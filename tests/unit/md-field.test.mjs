@@ -12,7 +12,7 @@ await useTempHome();
 
 const { mdImageIds, parseMdImages, rewriteMdImages } = await import('../../src/core/mdimages.ts');
 const { FIELD_TYPES, FIELD_TYPE_LABELS, getTemplate } = await import('../../src/core/fields.ts');
-const sections = await import('../../src/modules/sections/service.ts');
+const templates = await import('../../src/modules/templates/service.ts');
 const entries = await import('../../src/modules/entries/service.ts');
 const files = await import('../../src/modules/files/service.ts');
 
@@ -65,7 +65,7 @@ test('写入含图正文 → entry get 能解析出附件路径，而不是吐�
   });
   assert.ok(up.id, JSON.stringify(up));
 
-  await sections.addSection({
+  await templates.addTemplate({
     id: 'sopmd',
     title: '图文试验',
     fields: [
@@ -74,9 +74,9 @@ test('写入含图正文 → entry get 能解析出附件路径，而不是吐�
     ],
   });
   const text = `先打开设置 ![第一步](${up.id}) 然后保存`;
-  await entries.addEntry({ section: 'sopmd', title: '有图的一条', set: { name: 'x', sop: text } });
+  await entries.addEntry({ template: 'sopmd', title: '有图的一条', set: { name: 'x', sop: text } });
 
-  const got = await entries.getEntry('有图的一条', { section: 'sopmd' });
+  const got = await entries.getEntry('有图的一条', { template: 'sopmd' });
   // 原值必须原样保存（面板要能继续编辑这段 markdown）
   assert.equal(got.values.sop, text);
   // 附件表里要有它：这是 CLI 能把 id 还原成文件的前提

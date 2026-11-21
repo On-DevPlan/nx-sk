@@ -37,7 +37,7 @@ export default function EntryListColumn({
 }) {
   return (
     <>
-      <div className="col" style={{ flex: `0 0 ${listW}px` }}>
+      <div className="col entry-list-col" style={{ flex: `0 0 ${listW}px` }}>
         <div className="card">
           <div className="colhead">
             <span className="pickall">条目列表</span>

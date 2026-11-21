@@ -1,14 +1,14 @@
 // v5 → v6 的数据搬运（DDL 见 v6.sql；runner 在同一事务里先执行 DDL 再调这里）。
 //
-// 目标形状（0.42）：**底层只有 field**。分组不再是栏目上的 `groups[]`，
-// 而是 fields 里 type='group' 的一行，spec 的 `keys` 引用同栏目其他字段的 key。
+// 目标形状（0.42）：**底层只有 field**。分组不再是条目模板上的 `groups[]`，
+// 而是 fields 里 type='group' 的一行，spec 的 `keys` 引用同条目模板其他字段的 key。
 //
 // 顺序是硬约束（DROP 的 CASCADE 会带走子表）：
 //   1. 先捕获 groups / fields / entry_fields / field_data / entry_attach 全行；
-//   2. 把每个栏目的 groups 行折成 group 字段行（keys = 原本 group_id 指向它的成员），
+//   2. 把每个条目模板的 groups 行折成 group 字段行（keys = 原本 group_id 指向它的成员），
 //      成员 spec 去掉 `group`；`group_id` 为空（历史孤儿）的字段归到 `other` 组（没有就合成）；
 //   3. fields 重建：**组行在前、叶子行按原 sort** → 面板顺序与成员顺序都不变；
-//   4. entry_fields 重建：存量行原样（spec 去掉 group），每个条目再补上本栏目的组行
+//   4. entry_fields 重建：存量行原样（spec 去掉 group），每个条目再补上本条目模板的组行
 //      （组也是结构的一部分：条目按自身结构行渲染，缺了组行面板就分不出块）；
 //   5. 子表原样放回（field_data / entry_attach 的 id / 值 / 时间戳一字不改）；
 //   6. DROP groups（分组声明的旧家）→ 删 group 相关索引 → meta.migrate_v6 计数。
@@ -112,7 +112,7 @@ export function applyV6(db: Conn): void {
       }
       members.get(gid)!.push(String(f.key));
     }
-    // 任何字段都没归属的栏目：不硬造组（KV 栏目本来就没有分组的语义）
+    // 任何字段都没归属的条目模板：不硬造组（KV 条目模板本来就没有分组的语义）
     const groups = declared.map((g) => ({ key: groupKeyOf.get(g.id) as string, label: g.title, keys: members.get(g.id) || [] }));
     if (orphans.length) {
       const existing = groups.find((g) => g.key === 'root');
