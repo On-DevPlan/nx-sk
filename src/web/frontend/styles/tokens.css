@@ -1,0 +1,50 @@
+/* ═ 层 1 · 设计 token（变量定义）
+ *
+ * 三条核心不变量：
+ *   1. 单色 + 无 emoji；唯一允许的彩色是语义红 #b3261e
+ *   2. 状态用标签，不用颜色块
+ *   3. 立体感**只给**可被按/可被填的元素（按钮 / 选中态 / 输入框）；容器一律不投影
+ *
+ * Notion 口径（#16 全局视觉改造）：彻底无边框、不用色块区分容器——
+ *   块与块之间只用 1px 弱线定位，鼠标悬浮才以 --hover 加深底色表达「这一块可交互」。
+ *   #ffffff 主底（--paper）· #f9f8f7 次级底（--soft：侧栏、静态容器）·
+ *   #eeeceb 悬浮加深（--hover：所有 :hover/.active/.selected）· #7d7a75 弱字色（--mid）。
+ * 密度：核心显示行 28px · 按钮 32px · 字号 12px（两级密度，差 4px）
+ * 分隔：全站只用 1px 浅底线，不用 margin / 投影把容器撑成岛屿
+ */
+:root {
+  --ink: #14161a;
+  --paper: #ffffff;
+  --soft: #f9f8f7;
+  --soft-2: #eeeceb;
+  --mid: #7d7a75;
+  --danger: #b3261e;
+  /* 强调色：主按钮 / 勾选 / 拖拽指示 / 选中态统一用它。全站禁止黑色色块（#54），
+     墨色 --ink 只用于文字，不再做任何背景。与快捷键库的 #2563eb 同一口径。 */
+  --accent: #2563eb;
+  --accent-strong: #1d4ed8;
+  --accent-soft: #eaf1fe;
+  /* 分隔线：比 --soft-2 更淡的一层。全站「无边框」靠它——不是不要线，是不要把容器框起来 */
+  --line: rgba(55, 53, 47, .09);
+  --line-strong: rgba(55, 53, 47, .16);
+  --border: 1px solid var(--line);
+
+  --row-h: 28px;
+  --btn-h: 32px;
+  --fs-core: 12px;
+
+  --radius-btn: 8px;
+  --radius-box: 10px;
+  /* 悬浮加深的色块：所有 hover/.active/.selected 底色统一用它（Notion #eeeceb） */
+  --hover: #eeeceb;
+
+  --shadow-relief: -1px -1px 2px rgba(255, 255, 255, .85), 2px 2px 6px rgba(20, 22, 26, .07);
+  --shadow-relief-press: inset 1px 1px 2px rgba(20, 22, 26, .10), inset -1px -1px 2px rgba(255, 255, 255, .7);
+  --shadow-relief-inset: inset 1px 1px 2px rgba(20, 22, 26, .06), inset -1px -1px 2px rgba(255, 255, 255, .9);
+  --shadow-float: 0 6px 24px rgba(20, 22, 26, .12), 0 1px 2px rgba(20, 22, 26, .06);
+
+  /* 悬停/选中前景「加深」的别名：.btn.icon-btn.active 等 3 处引用它但从未定义
+     （悬空变量会回退继承色）。全站 hover 前景的既定口径是 --ink
+     （.head-copy / .sb-add / .tree-grip 同款），收编为别名 */
+  --strong: var(--ink);
+}

@@ -1,71 +1,7 @@
-﻿/* nx-sk 面板样式
- *
- * 三条核心不变量：
- *   1. 单色 + 无 emoji；唯一允许的彩色是语义红 #b3261e
- *   2. 状态用标签，不用颜色块
- *   3. 立体感**只给**可被按/可被填的元素（按钮 / 选中态 / 输入框）；容器一律不投影
- *
- * Notion 口径（#16 全局视觉改造）：彻底无边框、不用色块区分容器——
- *   块与块之间只用 1px 弱线定位，鼠标悬浮才以 --hover 加深底色表达「这一块可交互」。
- *   #ffffff 主底（--paper）· #f9f8f7 次级底（--soft：侧栏、静态容器）·
- *   #eeeceb 悬浮加深（--hover：所有 :hover/.active/.selected）· #7d7a75 弱字色（--mid）。
- * 密度：核心显示行 28px · 按钮 32px · 字号 12px（两级密度，差 4px）
- * 分隔：全站只用 1px 浅底线，不用 margin / 投影把容器撑成岛屿
- */
-:root {
-  --ink: #14161a;
-  --paper: #ffffff;
-  --soft: #f9f8f7;
-  --soft-2: #eeeceb;
-  --mid: #7d7a75;
-  --danger: #b3261e;
-  /* 强调色：主按钮 / 勾选 / 拖拽指示 / 选中态统一用它。全站禁止黑色色块（#54），
-     墨色 --ink 只用于文字，不再做任何背景。与快捷键库的 #2563eb 同一口径。 */
-  --accent: #2563eb;
-  --accent-strong: #1d4ed8;
-  --accent-soft: #eaf1fe;
-  /* 分隔线：比 --soft-2 更淡的一层。全站「无边框」靠它——不是不要线，是不要把容器框起来 */
-  --line: rgba(55, 53, 47, .09);
-  --line-strong: rgba(55, 53, 47, .16);
-  --border: 1px solid var(--line);
-
-  --row-h: 28px;
-  --btn-h: 32px;
-  --fs-core: 12px;
-
-  --radius-btn: 8px;
-  --radius-box: 10px;
-  /* 悬浮加深的色块：所有 hover/.active/.selected 底色统一用它（Notion #eeeceb） */
-  --hover: #eeeceb;
-
-  --shadow-relief: -1px -1px 2px rgba(255, 255, 255, .85), 2px 2px 6px rgba(20, 22, 26, .07);
-  --shadow-relief-press: inset 1px 1px 2px rgba(20, 22, 26, .10), inset -1px -1px 2px rgba(255, 255, 255, .7);
-  --shadow-relief-inset: inset 1px 1px 2px rgba(20, 22, 26, .06), inset -1px -1px 2px rgba(255, 255, 255, .9);
-  --shadow-float: 0 6px 24px rgba(20, 22, 26, .12), 0 1px 2px rgba(20, 22, 26, .06);
-}
-
-* { box-sizing: border-box; }
-
-html, body, #root { height: 100%; }
-
-body {
-  margin: 0;
-  background: var(--paper);
-  color: var(--ink);
-  font-family: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
-  font-size: var(--fs-core);
-  line-height: 1.5;
-  -webkit-font-smoothing: antialiased;
-}
-
-.mono, code, .path, .cli-cmd { font-family: ui-monospace, Consolas, "Courier New", monospace; }
-.muted { color: var(--mid); }
-.bad { color: var(--danger); }
-.nowrap { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pad { padding: 10px 14px; }
-.rowgap { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.grow { flex: 1; min-width: 0; }
-.right { margin-left: auto; }
+/* ═ 层 3 · 组件与页面样式。下层：styles/tokens.css（变量）、styles/global.css（reset/元素/通用原语），
+ * 由 Vite 按 @import 顺序内联（tokens → global → 本层），main.tsx 仍只引这一个入口。 */
+@import './styles/tokens.css';
+@import './styles/global.css';
 
 /* ── 骨架（Notion 化）：左边是可收起的导航树，右边是「面包屑 + 内容」 ── */
 .app { display: flex; flex-direction: row; height: 100%; min-height: 0; }
@@ -209,150 +145,9 @@ body {
 .crumbs .crumb-link { color: var(--mid); cursor: pointer; }
 .crumbs .crumb-link:hover { color: var(--ink); }
 .crumbs .crumb-entry { color: var(--mid); }
-.icon-btn { width: 26px; padding: 0; justify-content: center; }
+
 
 main.body { flex: 1; min-height: 0; overflow: auto; }
-
-/* ── tab：扁平药丸，选中只加深底色（无边框、无投影） ── */
-.tab {
-  font: inherit;
-  font-size: var(--fs-core);
-  height: var(--btn-h);
-  padding: 0 12px;
-  border: 0;
-  border-radius: var(--radius-btn);
-  background: transparent;
-  color: var(--mid);
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  transition: background .12s, color .12s;
-}
-.tab:hover { background: var(--hover); color: var(--ink); }
-/* 计数是「元数据」不是名字的一部分：更小 + 等宽数字，让它退到标签之后 */
-.tab .count { color: var(--mid); font-size: 10px; font-variant-numeric: tabular-nums; }
-.tab.active { background: var(--hover); color: var(--ink); font-weight: 600; }
-
-/* ── 按钮：平色块 + hover 加深，按下沉 1px（不再用浮雕投影） ── */
-.btn {
-  font: inherit;
-  font-size: var(--fs-core);
-  cursor: pointer;
-  height: var(--btn-h);
-  padding: 0 12px;
-  border: 0;
-  border-radius: var(--radius-btn);
-  background: var(--accent);
-  color: var(--paper);
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  transition: background .12s, transform .08s, opacity .12s;
-}
-.btn:hover:not(:disabled) { background: var(--accent-strong); }
-.btn:active:not(:disabled) { transform: translateY(1px); }
-.btn:disabled { background: var(--soft); color: var(--mid); cursor: not-allowed; }
-.btn.ghost { background: transparent; color: var(--ink); }
-.btn.ghost:hover:not(:disabled) { background: var(--hover); }
-.btn.danger { background: var(--danger); color: #fff; }
-.btn.small { height: 22px; padding: 0 8px; font-size: 11px; border-radius: 6px; }
-
-/* ── 输入：白底 + 1px 弱线（无边框设计：静止靠线不靠色块），hover 线加深，focus 再深一档 ── */
-input, select, textarea {
-  font: inherit;
-  font-size: var(--fs-core);
-  color: var(--ink);
-  background: var(--paper);
-  border: var(--border);
-  border-radius: 8px;
-  padding: 0 8px;
-  transition: background .12s, border-color .12s;
-}
-input, select { height: var(--row-h); }
-textarea { padding: 5px 8px; resize: vertical; min-height: 56px; line-height: 1.5; }
-input:hover, select:hover, textarea:hover { border-color: var(--line-strong); }
-input:focus, select:focus, textarea:focus {
-  outline: none;
-  background: var(--paper);
-  border-color: var(--line-strong);
-  box-shadow: none;
-}
-label.inline { display: inline-flex; align-items: center; gap: 6px; }
-
-/* ── 卡片：不投影、不 margin、不用大 padding；靠 1px 底线分隔 ── */
-.card { border-bottom: var(--border); }
-.card:last-child { border-bottom: 0; }
-.card > .colhead {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: var(--row-h);
-  padding: 0 14px;
-  border-bottom: var(--border);
-  font-size: 13px;
-  font-weight: 600;
-}
-.card > .colbody { padding: 0; }
-
-/* ── 行：28px 锁死高度，竖直 padding = 0 ── */
-.row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: var(--row-h);
-  padding: 0 14px;
-  border-bottom: var(--border);
-  font-size: var(--fs-core);
-  transition: background .12s;
-}
-.row:hover { background: var(--hover); }
-.row:last-child { border-bottom: 0; }
-.row .name { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.row .desc { color: var(--mid); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.row .acts { margin-left: auto; display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
-.row.selectable { cursor: pointer; }
-.row.selected { background: var(--hover); box-shadow: inset 2px 0 0 var(--accent); }
-
-/* ── 标签：比行更紧凑 ── */
-.tag {
-  display: inline-flex;
-  align-items: center;
-  height: 22px;
-  padding: 0 7px;
-  border-radius: 999px;
-  background: var(--soft);
-  color: var(--mid);
-  font-size: 11px;
-  white-space: nowrap;
-}
-.tag.strong { background: var(--accent-soft); color: var(--accent-strong); }
-.tag.bad { background: #fbeae9; color: var(--danger); }
-
-/* ── 点击即复制 ── */
-.copyable { cursor: copy; border-radius: 4px; padding: 0 3px; }
-.copyable:hover { background: var(--hover); }
-
-/* ── 表单字段矩阵 ── */
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 0 14px; }
-.field { border-bottom: var(--border); padding: 5px 0; min-width: 0; }
-.field > .flabel { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--mid); }
-.field > .flabel .fkey { font-family: ui-monospace, Consolas, monospace; font-size: 10px; color: var(--soft-2); }
-.field > .fctrl { margin-top: 3px; }
-.field input, .field select, .field textarea { width: 100%; }
-.field.wide { grid-column: 1 / -1; }
-.group-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: var(--row-h);
-  padding: 0 14px;
-  border-bottom: var(--border);
-  background: var(--soft);
-  font-size: 11px;
-  color: var(--mid);
-  letter-spacing: .5px;
-}
 
 /* ── 正文块布局（面板块）：分组 = 面板，字段 = 块 ──
    版式由 react-grid-layout 算（拖 ⠿ 搬块、拖左右边缘改宽、窄屏自动折列），
@@ -369,7 +164,6 @@ label.inline { display: inline-flex; align-items: center; gap: 6px; }
   font-size: 11px;
   color: var(--mid);
 }
-.board-tip { min-width: 0; }
 /* 工具默认退到背景里：正文优先，鼠标进来才「想起」有这些开关 */
 .board-bar .right { opacity: .35; transition: opacity .12s; }
 .board:hover .board-bar .right { opacity: 1; }
@@ -614,71 +408,6 @@ label.inline { display: inline-flex; align-items: center; gap: 6px; }
 }
 .toast.bad { background: var(--danger); color: var(--paper); border-color: transparent; }
 
-/* ── 弹窗：页内实现，不用 alert / confirm / prompt ── */
-.mask {
-  position: fixed;
-  inset: 0;
-  background: rgba(20, 22, 26, .28);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 50;
-  padding: 20px;
-}
-.dialog {
-  background: var(--paper);
-  border-radius: 8px;
-  min-width: 320px;
-  max-width: min(880px, 92vw);
-  max-height: 86vh;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  box-shadow: 0 10px 40px rgba(20, 22, 26, .18);
-}
-.dialog-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: var(--row-h);
-  padding: 0 14px;
-  border-bottom: var(--border);
-  font-size: 13px;
-  font-weight: 600;
-  flex-shrink: 0;
-}
-.dialog-body { padding: 10px 14px; overflow: auto; min-height: 0; }
-.dialog-foot {
-  display: flex;
-  gap: 8px;
-  justify-content: flex-end;
-  padding: 8px 14px;
-  border-top: var(--border);
-  flex-shrink: 0;
-}
-pre.block {
-  margin: 0;
-  padding: 10px 14px;
-  background: var(--soft);
-  border-radius: 8px;
-  font-family: ui-monospace, Consolas, monospace;
-  font-size: 11px;
-  line-height: 1.55;
-  white-space: pre-wrap;
-  word-break: break-word;
-  max-height: 60vh;
-  overflow: auto;
-}
-.hint { color: var(--mid); font-size: 11px; }
-.stack { display: flex; flex-direction: column; gap: 10px; }
-
-/* ── 布局：flex + wrap，不写死宽度；min-width:0 是关键，否则长内容撑破容器 ── */
-.toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.cols { display: flex; gap: 14px; align-items: flex-start; padding: 0 14px 14px; }
-.col { flex: 1; min-width: 0; }
-.desc { color: var(--mid); }
-.cols > .col > .card { border: var(--border); border-radius: 4px; }
-
 /* ── 附件工作台 ─────────────────────────────────────── */
 .files-page { min-height: 100%; position: relative; }
 .files-page.drag-over { outline: 2px dashed var(--accent); outline-offset: -8px; background: var(--hover); }
@@ -791,18 +520,6 @@ a.file-name:hover { text-decoration: underline; }
   border-radius: 4px; border: var(--border); background: #fff;
 }
 .file-pick-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-/* 条目表单顶栏固定：长条目模板滚到一半也看得见「保存」 */
-.card > .colhead.sticky-head {
-  position: sticky;
-  top: 0;
-  z-index: 5;
-  height: auto;
-  min-height: var(--row-h);
-  padding: 4px 14px;
-  background: var(--paper);
-  box-shadow: 0 1px 0 var(--line);
-}
 
 /* ── 图文字段（md）：正文 + 图片 ──
  * 输入区与预览区都是「一块可填的浅底」，不加边框与投影；
@@ -1173,24 +890,6 @@ a.file-name:hover { text-decoration: underline; }
 .conflict-row .ok { color: var(--ink); }
 
 /* 拖入 ZIP：整页遮罩 + 一句提示；pointer-events:none 让 drop 落到下面容器 */
-.drop-mask {
-  position: fixed;
-  inset: 0;
-  z-index: 55;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(20, 22, 26, .38);
-  pointer-events: none;
-}
-.drop-mask > div {
-  padding: 18px 28px;
-  border-radius: 12px;
-  background: var(--paper);
-  border: var(--border);
-  font-size: 14px;
-}
-
 /* 拖入区与预览里的条目模板行：面板左右两栏都用得到，单独放一块 */
 .drop-box {
   display: flex;

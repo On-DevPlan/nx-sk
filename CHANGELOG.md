@@ -2,7 +2,7 @@
 
 本文件格式参考 [Keep a Changelog](https://keepachangelog.com/)，中文正文。
 
-## [Unreleased]（任务 #2 · 前端优化）
+## [Unreleased]（任务 #2 / #3 · 前端优化）
 
 ### Changed
 
@@ -15,6 +15,12 @@
 - **文案减负（以操作优先）**：块板常驻操作提示行删除（说明收进「⋯」悬浮）、清单/附件/侧栏空态与说明缩短、
   md / source / secret / grill 的长占位符压缩为短操作语；完整帮助仍以 `title` 悬浮提供，零功能变化。
 
+- **样式分层（第 2 轮验收反馈）**：单文件 styles.css（2099 行）拆为三层，
+  `styles/tokens.css`（变量定义，51 行）→ `styles/global.css`（reset + 元素默认 + 全站通用原语 .btn/.tag/.tab/.card/.row/表单矩阵/弹窗，247 行）→
+  `styles.css`（组件与页面样式入口，@import 两个下层，Vite 按序内联，main.tsx 不变）。
+  顺手修三处：`var(--strong)` 三处悬空引用收编为 token（原回退继承色，口径对齐全站 hover 前景 --ink）、
+  `.drop-mask` 整块重复定义删一份、`.board-tip` 死代码删除。
+  选择器集合对账：除刻意删除的三处外与旧版一一对应，构建产物三层齐备。
 ## [0.44.0] - 2026-11-21（任务 #46 / #51 / #52 / #54）
 
 **密钥归一为普通字段：安全 list&lt;kv&gt; 进入 field + entry 模型。**
