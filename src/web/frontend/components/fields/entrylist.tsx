@@ -25,7 +25,7 @@ export function EntryListControl({ def, value, onChange }: ControlProps) {
   const rowDrag = useListDrag((from: number, insertAt: number) => onChange(reorderAt(rows, from, insertAt)));
 
   if (!subs.length) {
-    return <span className="hint">这个清单字段没有声明列（子字段），渲染不出输入格。用 section update 把字段的 fields 子字段补上。</span>;
+    return <span className="hint">这个清单字段没有声明列（子字段），渲染不出输入格。用 template update 把字段的 fields 子字段补上。</span>;
   }
 
   return (

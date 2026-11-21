@@ -201,7 +201,7 @@ export function renderSkillContext(d: Awaited<ReturnType<typeof getSkill>>) {
   const prefix = [
     `# === nx-sk skill context ===`,
     `# 以下内容来自 nx-sk skill \`${d.skillName}\` 的 ${d.ref}。`,
-    '# nx-sk 是本机个人资源管理器（栏目化存个人信息与大模型密钥，CLI 与 Web 同源）。',
+    '# nx-sk 是本机个人资源管理器（条目化存个人信息与大模型密钥，CLI 与 Web 同源）。',
     '# 如果你（agent）不能直接读取 ~/.claude/skills 目录，请把下面 sentinel 之间、',
     '# 到下一处 "-- install 状态 --" 之前的内容**完整复制**到你自己的上下文或可访问的文件里，',
     '# 然后按文档里的命令操作用户的本机数据。',

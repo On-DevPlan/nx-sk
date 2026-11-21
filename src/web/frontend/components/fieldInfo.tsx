@@ -6,7 +6,7 @@
 // 口径（与 add-field / remove-field 同一条写时复制纪律）：
 //   - **查看**只读：定义（label / key / 类型 / 分组 / 来源 / 密文 / 填写策略 / 描述）、
 //     当前值、定位符（可复制给 agent）。
-//   - **编辑**只写**这一条条目的结构行**（display label + desc），不动栏目字典与其他条目；
+//   - **编辑**只写**这一条条目的结构行**（display label + desc），不动条目模板字典与其他条目；
 //     值（field_data）也不碰——改个显示名不该把草稿里的值一起提交。
 import { useState } from 'react';
 import { api } from '../api/client.ts';
@@ -14,8 +14,8 @@ import { useStore } from '../store.tsx';
 import { copyText, Modal } from './ui.tsx';
 import type { FieldDef } from '../../../shared/fields/types.ts';
 
-/** 字段来源的人读标签：模板字段来自栏目字典，扩展字段只属于这一条。 */
-const ORIGIN_LABEL = { template: '栏目模板字段', extension: '条目扩展字段' } as const;
+/** 字段来源的人读标签：模板字段来自条目模板字典，扩展字段只属于这一条。 */
+const ORIGIN_LABEL = { template: '条目模板字段', extension: '条目扩展字段' } as const;
 
 /** 值的展示形态：对象/数组走 JSON，其余原样；空值给一句人话。 */
 function valueText(v: unknown): string {
@@ -31,13 +31,13 @@ export interface FieldInfoModalProps {
   entryId: string;
   def: FieldDef;
   value: unknown;
-  sectionTitle?: string;
+  templateTitle?: string;
   entryTitle?: string;
   onClose: () => void;
 }
 
 /** 「查看字段」：定义 + 当前值 + 定位符，纯只读。 */
-export function FieldInfoModal({ entryId, def, value, sectionTitle, entryTitle, onClose }: FieldInfoModalProps) {
+export function FieldInfoModal({ entryId, def, value, templateTitle, entryTitle, onClose }: FieldInfoModalProps) {
   const { toast } = useStore();
   const locator = `nx-sk://field/${entryId}/${def.key}`;
   const origin = def.template === false ? ORIGIN_LABEL.extension : ORIGIN_LABEL.template;
@@ -65,7 +65,7 @@ export function FieldInfoModal({ entryId, def, value, sectionTitle, entryTitle, 
     >
       <div className="stack">
         <div className="hint nowrap">
-          {sectionTitle || ''}{entryTitle ? ` › ${entryTitle}` : ''} · {entryId}
+          {templateTitle || ''}{entryTitle ? ` › ${entryTitle}` : ''} · {entryId}
         </div>
         <div className="fldinfo">
           {rows.map(([k, v]) => (
@@ -87,8 +87,8 @@ export function FieldInfoModal({ entryId, def, value, sectionTitle, entryTitle, 
           <pre className="block fldinfo-value">{valueText(value)}</pre>
         </div>
         <div className="hint">
-          「编辑字段属性」只改<b>这一条条目</b>的显示名与描述（写时复制），栏目模板与其他条目不受影响；
-          要改整栏目的字段字典，请到栏目设置里改。
+          「编辑字段属性」只改<b>这一条条目</b>的显示名与描述（写时复制），条目模板定义与其他条目不受影响；
+          要改整份条目模板字典，请到条目模板设置里改。
         </div>
       </div>
     </Modal>
@@ -143,8 +143,9 @@ export function FieldEditModal({ entryId, def, onClose, onSaved }: FieldEditModa
     >
       <div className="stack">
         <div className="hint">
-          只作用于<b>这一条条目</b>（写时复制）：栏目「{def.template === false ? '扩展字段' : '模板'}」与其他条目保持原样，
-          值不受影响。
+          {def.template === false
+            ? <>只作用于<b>这一条条目</b>（写时复制）：扩展字段只属于本条，其他条目保持原样，值不受影响。</>
+            : <>只作用于<b>这一条条目</b>（写时复制）：只改本条显示名，条目模板定义与其他条目保持原样，值不受影响。</>}
         </div>
         <div className="grid">
           <div className="field">

@@ -1,7 +1,7 @@
 // 路径与安全校验的**唯一定义处**。别在别处再拼一次 home 路径。
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { isAbsolute, join, normalize, relative, resolve, sep } from 'node:path';
+import { isAbsolute, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { badInput } from './errors.ts';
 
@@ -95,16 +95,6 @@ export function vaultSaltFile(): string {
   return join(appHome(), '.vaultsalt');
 }
 
-/** 把用户给的相对路径挂到 base 下，并保证结果仍在 base 内（拒绝 `..` 越界）。 */
-export function resolveInside(base: string, rel: string): string {
-  const baseAbs = resolve(base);
-  const target = resolve(baseAbs, rel);
-  if (target !== baseAbs && !target.startsWith(baseAbs + sep)) {
-    throw badInput(`路径越界: ${rel}`);
-  }
-  return target;
-}
-
 export function isInside(parent: string, child: string): boolean {
   const p = resolve(parent);
   const c = resolve(child);
@@ -122,7 +112,7 @@ export function displayPath(p: string): string {
 // —— 名称/ID 校验 ——
 // 名称与路径**分开校验**：用「目录名」的规则去卡文件路径会误伤 `.gitignore` 这类正常文件。
 
-/** section id：小写字母开头，只允许 [a-z0-9_-]，最长 64。 */
+/** template id：小写字母开头，只允许 [a-z0-9_-]，最长 64。 */
 export function assertSafeId(id: unknown, what = 'id'): string {
   const s = String(id ?? '').trim();
   if (!/^[a-z][a-z0-9_-]{0,63}$/.test(s)) {
@@ -162,13 +152,6 @@ export function assertFieldKey(key: unknown): string {
 /** 归一化跨平台相对路径，用于目录树比对。 */
 export function toPosix(p: string): string {
   return String(p).split(sep).join('/');
-}
-
-/** 相对 base 的 posix 路径，越界返回 null。 */
-export function relPosix(base: string, target: string): string | null {
-  const r = relative(resolve(base), resolve(target));
-  if (!r || r.startsWith('..') || isAbsolute(r)) return null;
-  return toPosix(r);
 }
 
 export { normalize as normalizePath };

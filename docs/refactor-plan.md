@@ -63,17 +63,17 @@
 
 **做什么**：新增 `tests/unit/contract.test.ts`，只钉**面板真正依赖**的键（依据 `consistency.test.mjs` 目前的盲区）：
 
-1. `section.dump`：`section.id` / `fields[].key` / `fields[].type` / `entries[].values` / `entries[].completeness.ratio` / `entries[].missing` / `entries[].excluded`；
+1. `template.dump`：`template.id` / `fields[].key` / `fields[].type` / `entries[].values` / `entries[].completeness.ratio` / `entries[].missing` / `entries[].excluded`；
 2. `entry.list`：`count` / `total` / `entries[].id`；
 3. `entry.get`：`values` / `fieldTypes` / `tables` / `files`；
 4. `file.list`：`files` / `page.total` / `page.hasMore` / `unlinked` / `rootRaw`；
 5. `bootstrap`：`fieldTypes` 与 `src/shared` 的字段常量深相等（P2 之后生效，先写成对 `core/fields.js` 的导入，P2 改导入路径）；
 6. **全类型往返**：遍历 `FIELD_TYPES`，各造一个最小值，跑 `prepareValue → serializeEntry → dumpSection`，断言不抛且值不丢；
-7. **键集断言**：`serializeEntry(...).values` 的键集合恒等于 `section.fields` 的 key 集合。
+7. **键集断言**：`serializeEntry(...).values` 的键集合恒等于 `template.fields` 的 key 集合。
 
 **验收**：新测试全绿，且能证明它们有效——临时把 `serializeEntry` 里某个键改名，测试必须红。
 
-**已落地**：`tests/unit/contract.test.ts`（6 条）。一个踩到的坑记在这里：首次运行的播种（demo 栏目 + 示例条目）**只活在内存里**，`store.json` 不存在时每次 `loadStore()` 都会重新播种、条目 id 随之变化；所以测试开头必须先 `saveStore(await loadStore())` 落盘一次，否则「先 list 再 get」永远找不到同一条。
+**已落地**：`tests/unit/contract.test.ts`（6 条）。一个踩到的坑记在这里：首次运行的播种（demo 条目模板 + 示例条目）**只活在内存里**，`store.json` 不存在时每次 `loadStore()` 都会重新播种、条目 id 随之变化；所以测试开头必须先 `saveStore(await loadStore())` 落盘一次，否则「先 list 再 get」永远找不到同一条。
 
 **为什么**：`consistency.test.mjs` 只查「路由存在」，不查「响应形状」。这是 P2 之后所有重构的安全网。
 
@@ -108,7 +108,7 @@
 - `FIELD_TYPES` 加一项、不写行为体 → `tsc -b` 报错（**这就是本阶段的验收证据，需在汇报里贴出来**）。
 - `FIELD_TYPES` 加一项、不写控件 → `tsc -b` 报错。
 - P1 的契约测试全绿；`pnpm test` 全绿。
-- `nx-sk section dump` 输出与 P0 基线逐字节一致（敏感值除外，用打码后的输出对比）。
+- `nx-sk template dump` 输出与 P0 基线逐字节一致（敏感值除外，用打码后的输出对比）。
 
 **风险与对策**
 
@@ -225,7 +225,7 @@
 
 1. `src/shared/**` 已完成（P2）。
 2. `src/core/**`：`errors / ids / paths / store / vault / render / attachments / fields`。
-3. `src/modules/**`：sections → entries → files → transfer → skill → settings → system。
+3. `src/modules/**`：templates → entries → files → transfer → skill → settings → system。
 4. `src/runtime/**`：`spec / registry / api / server / cli`。
 5. `bin/nx-sk.mjs` → 保持 `.mjs` 入口，但**只 import 构建产物**（最终形态见下方执行记录；最初设想的
    「版本预检 + `import('../src/runtime/cli.ts')`」已被 `node_modules` 禁跑 `.ts` 推翻）。
@@ -242,7 +242,7 @@
 
 **验收**
 
-- `node bin/nx-sk.mjs --help`、`nx-sk section list`、`nx-sk entry get ...` 与 P0 基线输出一致。
+- `node bin/nx-sk.mjs --help`、`nx-sk template list`、`nx-sk entry get ...` 与 P0 基线输出一致。
 - `node --test` 直接发现 `*.test.ts` 并通过。
 - `pnpm lint && pnpm typecheck && pnpm test` 全绿。
 
@@ -282,14 +282,14 @@
 5. 清理探针文件与临时脚本。✅
 6. `TODO(P5)`：收紧 `src/core/render.ts` 的读取侧形状。✅ `SectionLike` 除 `layout` 外全部必填；
    `EntryLike` 的 `tags / createdAt / updatedAt / values` 与 `SerializedEntry` 的 `createdAt / updatedAt`
-   一并收必填；`sections/service.ts` 的两处 `as unknown as` 已删除（类型直接兼容），未新增任何强转。
+   一并收必填；`templates/service.ts` 的两处 `as unknown as` 已删除（类型直接兼容），未新增任何强转。
 
 ### P5 执行记录（2026-11-09）
 
 - 契约兜底：`tests/unit/contract.test.ts` 断言 `dumpSection` 每条条目都有非空 `id`、对象 `values`、
   数值 `completeness.ratio`；类型若再放宽或出口漏写，测试先红。
 - 单测 366 / build 364 modules / smoke 137 / lint 0 / typecheck 0，与 P4 基线一致。
-- 真机走查：栏目列表、条目增删改、14 种字段控件、表格（列设置/键盘/统计）、资料袋、附件、
+- 真机走查：条目模板列表、条目增删改、14 种字段控件、表格（列设置/键盘/统计）、资料袋、附件、
   导出导入、设置页导航、深链与非深链兜底，控制台 error 0（详见 `docs/behavior-parity.md` §5）。
 
 ---
@@ -306,7 +306,7 @@
 | 1–5 | 16 个：`api/{client,files,zip}`、`store`、`activeView`、`listSort`、`md{Smart,Inline,Source}`、`components/{navModel,mdView,blockBoard,fieldEditor,listDrag,lightbox,ui}` | 顺序：`api/client` → `store` → `components`（ui → fields → 其余） |
 | 6 | `components/transferPanel`、`modules/{files,export}/view` | 面板组件与域视图 |
 | 7 | `modules/settings/{view,navManager}`、`modules/entries/kvTable` | 设置域 |
-| 8 | `modules/entries/view`、`modules/sections/view` | 两个最大视图 |
+| 8 | `modules/entries/view`、`modules/templates/view` | 两个最大视图 |
 | 9 | `App`、`main`、`registry` | 入口与视图注册表；同批撤 `allowJs/checkJs`、同步 eslint 与一致性测试 |
 
 **关键决定**
@@ -339,10 +339,10 @@
 
 **已知既有缺陷（未修，保持 1:1）**
 
-- ~~`modules/sections/view.tsx` 的 `GroupRow.onMove` 实际只以 `'up'` 调用~~ —— **已过期（#44）**：
+- ~~`modules/templates/view.tsx` 的 `GroupRow.onMove` 实际只以 `'up'` 调用~~ —— **已过期（#44）**：
   分组改为「字段字典里 `type='group'` 的字段」之后，`GroupRow` / `onMove` / `moveGroup` 均已不存在，
   组内顺序改由 `dictEditor.tsx` 的 `groupPanelsOf()` 按 `fieldList` 切段、拖拽时回写 `patch({ fields: flat })`。
-  回归由 `tests/web-sop.mjs` 的「栏目属性编辑器里组内字段换序」一步守住。
+  回归由 `tests/web-sop.mjs` 的「条目模板属性编辑器里组内字段换序」一步守住。
 
 ---
 

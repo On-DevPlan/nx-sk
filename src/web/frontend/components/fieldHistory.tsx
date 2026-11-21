@@ -24,7 +24,7 @@ interface HistoryItem {
 interface FieldHistoryData {
   id: string;
   title: string;
-  sectionTitle: string;
+  templateTitle: string;
   field: { key: string; label: string; type: string };
   current: unknown;
   count: number;
@@ -34,7 +34,7 @@ interface FieldHistoryData {
 interface EntryHistoryData {
   id: string;
   title: string;
-  sectionTitle: string;
+  templateTitle: string;
   count: number;
   items: HistoryItem[];
 }
@@ -121,7 +121,7 @@ export function FieldHistoryModal({
     >
       <div className="stack">
         <div className="hint nowrap">
-          {data?.sectionTitle || ''}{data?.title ? ` › ${data.title}` : ''} · {entryId}
+          {data?.templateTitle || ''}{data?.title ? ` › ${data.title}` : ''} · {entryId}
         </div>
         <div className="hint">
           共 <b>{data?.count ?? 0}</b> 个版本（越靠上是越新的）。当前值：
@@ -193,7 +193,7 @@ export function EntryHistoryModal({
     >
       <div className="stack">
         <div className="hint">
-          {data?.sectionTitle || ''} · 共 <b>{data?.count ?? 0}</b> 条字段变化（按时间倒序）。
+          {data?.templateTitle || ''} · 共 <b>{data?.count ?? 0}</b> 条字段变化（按时间倒序）。
           单字段恢复在块的「⋯ → 变化历史」里。
         </div>
         {error ? <div className="hint bad">{error}</div> : null}

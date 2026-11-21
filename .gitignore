@@ -56,3 +56,7 @@ workbuddy-ai/
 
 # Tool artifacts / scratch tools (本地工具产物，不入库)
 .tool/
+
+# 验证脚本与截图（含真实库数据的页面截图，PII）；临时测试 home 目录
+/temp/
+/.tmp-*/

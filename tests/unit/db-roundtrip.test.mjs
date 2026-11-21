@@ -3,7 +3,7 @@
 // 这条测试钉的是整个重构的地基：facade 换心后，后端各模块与面板看到的数据
 // 必须与 store.json 时代逐键一致（含「键存在性」这种细节——原 JSON 里没有 fill 键，
 // 读回来也不能凭空多出 fill: 'normal'）。fixture 刻意覆盖：
-//   · 多类型字段 + 类型特有键（options/columns/totals/fields/maxRows/kind/maxItems）
+//   · 多类型字段 + 类型特有键（options/columns/totals/fields/maxRows/maxItems）
 //   · 未知扩展键（FieldDef 的 [k: string] 宽松面）
 //   · 条目 values 的三种附件引用载体（file 数组 / md 内嵌图 / source 袋）
 //   · FileRecord 的扩展键与 null 时间戳
@@ -25,12 +25,12 @@ const { loadStore, saveStore, normalize } = await import('../../src/core/store.t
 const FIXTURE = {
   version: 3,
   settings: {
-    defaultSection: 'demo', navGroups: [{ title: 'G', sections: ['demo'] }],
+    defaultTemplate: 'demo', navGroups: [{ title: 'G', templates: ['demo'] }],
     navHidden: ['x'], navOrder: ['demo'], unknownSetting: { deep: [1, 2, null] },
   },
-  sections: [
+  templates: [
     {
-      id: 'demo', title: '字段样例', description: '每种类型一格', order: 10, template: 'demo', kv: false,
+      id: 'demo', title: '字段样例', description: '每种类型一格', order: 10, template: 'demo',
       titleField: 'name', titleLabel: '名称',
       groups: [{ id: 'main', title: '基本' }, { id: 'source', title: '原始资料' }],
       fields: [
@@ -45,10 +45,10 @@ const FIXTURE = {
           ],
           totals: [{ label: '合计', expr: 'sum(n)', unit: 'h' }], summary: true, maxRows: 50,
         },
-        { key: 'accounts', label: '清单', type: 'entrylist', group: 'main', fields: [{ key: 'u', label: '用户', sensitive: true }], maxRows: 10 },
+        { key: 'accounts', label: '清单', type: 'entrylist', group: 'main', fields: [{ key: 'u', label: '用户', sensitive: true }] },
         { key: 'bag', label: '资料袋', type: 'source', group: 'source', fill: 'avoid' },
         { key: 'pic', label: '图文', type: 'md', group: 'main' },
-        { key: 'att', label: '附件', type: 'file', group: 'main', kind: 'image' },
+        { key: 'att', label: '附件', type: 'file', group: 'main' },
         { key: 'sec', label: '密文', type: 'secret', group: 'main', sensitive: true },
         { key: 'sc', label: '快捷键', type: 'shortcut', group: 'main' },
         { key: 'weird', label: '怪键', type: 'text', group: 'main', unknownKey: { deep: [1, 2, { x: null }] }, fill: 'normal' },
@@ -57,7 +57,7 @@ const FIXTURE = {
       createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-02T00:00:00.000Z',
     },
     {
-      id: 'kv1', title: 'KV 表', description: '', order: 20, template: 'secret', kv: true,
+      id: 'kv1', title: '旧密钥表', description: '', order: 20, template: 'secret',
       titleField: null, titleLabel: '名称',
       groups: [{ id: 'key', title: '密钥信息' }],
       fields: [{ key: 'value', label: '密钥值', type: 'secret', group: 'key' }],
@@ -66,7 +66,7 @@ const FIXTURE = {
   ],
   entries: [
     {
-      id: 'e1', section: 'demo', title: '样例', tags: ['a', 'b'],
+      id: 'e1', template: 'demo', title: '样例', tags: ['a', 'b'],
       values: {
         name: 'N', state: 'A', tagsX: ['t1'], sheet: [], accounts: [],
         att: ['f_one', 'f_two'], pic: '![img](f_one)',
@@ -75,7 +75,7 @@ const FIXTURE = {
       },
       createdAt: '2026-01-03T00:00:00.000Z', updatedAt: null,
     },
-    { id: 'e2', section: 'kv1', title: 'K', tags: [], values: { value: 'v' }, createdAt: null, updatedAt: null },
+    { id: 'e2', template: 'kv1', title: 'K', tags: [], values: { value: 'v' }, createdAt: null, updatedAt: null },
   ],
   files: [
     {

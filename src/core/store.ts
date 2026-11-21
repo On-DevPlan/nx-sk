@@ -9,18 +9,17 @@
 //   - store.json 只在首启被导入一次（db/import-json.ts），之后改名留证，运行时不碰。
 //
 // 导出 API 与 Store 对象形状保持不变（这是全后端的磁盘纪律边界，见各模块文件头注释）。
-import { dbFile, storeFile } from './paths.ts';
+import { dbFile } from './paths.ts';
 import { openAndBootstrap } from './db/bootstrap.ts';
-import { readStore, writeStore, upsertEntryFieldRows, propagateSectionTemplate, setEntryFieldDetached, deleteEntryFieldRow, updateEntryFieldDef } from './db/repo.ts';
-import { pruneAllHistory, readEntryHistory, readFieldHistory, restoreFieldVersion, readRetention } from './db/history.ts';
-import { fileHasContent } from './db/migrator.ts';
+import { readStore, writeStore, upsertEntryFieldRows, propagateTemplateFields, setEntryFieldDetached, deleteEntryFieldRow, updateEntryFieldDef } from './db/repo.ts';
+import { pruneAllHistory, readEntryHistory, readFieldHistory, restoreFieldVersion } from './db/history.ts';
 import { setDefaultDb, tx } from './db/tx.ts';
 import { normalize, type Store, type EntryFieldView } from './store-shape.ts';
 import type { Conn } from './db/driver.ts';
 import type { FieldDef } from '../shared/fields/types.ts';
 
-// P6：栏目/条目/设置的形状下沉到 shared，面板与后端共用同一份声明。
-export type { StoreEntry, StoreSection, StoreSettings, SectionGroup } from './store-shape.ts';
+// P6：条目模板/条目/设置的形状下沉到 shared，面板与后端共用同一份声明。
+export type { StoreEntry, StoreTemplate, StoreSettings, TemplateGroup } from './store-shape.ts';
 export type { Store, EntryFieldView } from './store-shape.ts';
 export { STORE_VERSION, defaultSettings, normalize, isDetachedField } from './store-shape.ts';
 
@@ -182,17 +181,12 @@ export async function removeEntryFieldRow(entryId: string, rowId: string): Promi
 }
 
 /**
- * sync 第二阶段：把栏目字典传播到存量条目的结构行（只增不改）。
+ * sync 第二阶段：把条目模板字典传播到存量条目的结构行（只增不改）。
  * 返回 {entries, fieldsAdded, defaultsFilled}（entries = 真的补了东西的条目数）。
  */
-export async function syncEntryStructures(sectionId: string): Promise<{ entries: number; fieldsAdded: number; defaultsFilled: number }> {
+export async function syncEntryStructures(templateId: string): Promise<{ entries: number; fieldsAdded: number; defaultsFilled: number }> {
   const conn = ensureDb();
-  return tx((db) => propagateSectionTemplate(db, sectionId), { db: conn });
-}
-
-/** 存储存在吗：DB 有内容，或旧 store.json 还在等着被导入。 */
-export async function storeExists(): Promise<boolean> {
-  return fileHasContent(dbFile()) || fileHasContent(storeFile());
+  return tx((db) => propagateTemplateFields(db, templateId), { db: conn });
 }
 
 // —— 任务 #27：字段值历史（面板 / CLI 共用同一条读路径）——
@@ -216,10 +210,5 @@ export async function restoreEntryFieldValue(entryId: string, key: string, rev: 
 export async function pruneHistoryNow(): Promise<number> {
   const conn = ensureDb();
   return tx((db) => pruneAllHistory(db), { db: conn });
-}
-
-/** 当前保留策略（设置页展示 / CLI 诊断用）。 */
-export async function currentHistoryRetention() {
-  return readRetention(ensureDb());
 }
 

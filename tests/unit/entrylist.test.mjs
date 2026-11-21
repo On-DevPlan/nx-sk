@@ -4,9 +4,9 @@ import { useTempHome } from '../helpers.mjs';
 
 await useTempHome();
 
-const sections = await import('../../src/modules/sections/service.ts');
+const templates = await import('../../src/modules/templates/service.ts');
 const entries = await import('../../src/modules/entries/service.ts');
-const { validateFieldDef } = sections;
+const { validateFieldDef } = templates;
 const { loadStore } = await import('../../src/core/store.ts');
 const { readZip } = await import('../../src/core/zip.ts');
 const { isCipherBlob, maskValue } = await import('../../src/core/crypto.ts');
@@ -21,9 +21,9 @@ const COLS = [
   { key: 'pass', label: '密码', sensitive: true },
 ];
 
-async function setupSection(id = 'svcs') {
-  await sections.addSection({ id, title: '服务', fields: [{ key: 'name', label: '名称', type: 'text', group: 'main' }] });
-  await sections.updateSection(id, {
+async function setupTemplate(id = 'svcs') {
+  await templates.addTemplate({ id, title: '服务', fields: [{ key: 'name', label: '名称', type: 'text', group: 'main' }] });
+  await templates.updateTemplate(id, {
     'add-field': { key: 'accounts', label: '账号清单', type: 'entrylist', group: 'main', fields: COLS },
   });
 }
@@ -49,9 +49,9 @@ test('validateFieldDef：entrylist 必须声明列，列 key 非法/重复要报
 });
 
 test('写入读回：行结构不变、全空行剔除，敏感列密文落盘、默认读原文', async () => {
-  await setupSection();
+  await setupTemplate();
   await entries.addEntry({
-    section: 'svcs',
+    template: 'svcs',
     title: '容器平台',
     data: {
       accounts: [
@@ -61,7 +61,7 @@ test('写入读回：行结构不变、全空行剔除，敏感列密文落盘�
       ],
     },
   });
-  const got = await entries.getEntry('容器平台', { section: 'svcs' });
+  const got = await entries.getEntry('容器平台', { template: 'svcs' });
   assert.deepEqual(got.values.accounts, [
     { name: '主控台', url: 'https://console.example.com', user: 'ops', pass: 'p@ss-明文1' },
   ], '空行剔除；默认读出原文');
@@ -74,12 +74,12 @@ test('写入读回：行结构不变、全空行剔除，敏感列密文落盘�
 });
 
 test('--mask 打码敏感列；打码占位回传保留原密文；对不上的占位要报错', async () => {
-  const masked = await entries.getEntry('容器平台', { section: 'svcs', mask: true });
+  const masked = await entries.getEntry('容器平台', { template: 'svcs', mask: true });
   assert.equal(masked.values.accounts[0].pass, maskValue('p@ss-明文1'));
 
   // 面板把打码值原样回传 = 不修改：密文必须原样保留，而不是把掩码存成新密码
   await entries.updateEntry('容器平台', {
-    section: 'svcs',
+    template: 'svcs',
     set: { accounts: [{ name: '主控台-改名', url: 'https://console.example.com', user: 'ops2', pass: masked.values.accounts[0].pass }] },
   });
   const store = await loadStore();
@@ -89,48 +89,48 @@ test('--mask 打码敏感列；打码占位回传保留原密文；对不上的�
 
   // 占位与现有密文对不上：多半是「想改密码却只拷了打码值」，当场报错
   await assert.rejects(
-    entries.updateEntry('容器平台', { section: 'svcs', set: { accounts: [{ user: 'x', pass: 'ab******yz' }] } }),
+    entries.updateEntry('容器平台', { template: 'svcs', set: { accounts: [{ user: 'x', pass: 'ab******yz' }] } }),
     /打码占位/,
   );
 });
 
 test('--set 走 JSON 串写法；空串 = 清空', async () => {
   await entries.updateEntry('容器平台', {
-    section: 'svcs',
+    template: 'svcs',
     set: { accounts: JSON.stringify([{ name: '备份入口', user: 'bak' }]) },
   });
-  let got = await entries.getEntry('容器平台', { section: 'svcs' });
+  let got = await entries.getEntry('容器平台', { template: 'svcs' });
   assert.deepEqual(got.values.accounts, [{ name: '备份入口', user: 'bak' }]);
 
-  await entries.updateEntry('容器平台', { section: 'svcs', set: { accounts: '' } });
-  got = await entries.getEntry('容器平台', { section: 'svcs' });
+  await entries.updateEntry('容器平台', { template: 'svcs', set: { accounts: '' } });
+  got = await entries.getEntry('容器平台', { template: 'svcs' });
   assert.equal(got.values.accounts, null);
 
   await assert.rejects(
-    entries.updateEntry('容器平台', { section: 'svcs', set: { accounts: '不是JSON' } }),
+    entries.updateEntry('容器平台', { template: 'svcs', set: { accounts: '不是JSON' } }),
     /entrylist/,
   );
 });
 
 test('没登记过的键直接写行数组：自动登记成 entrylist 并从行推断列', async () => {
   await entries.addEntry({
-    section: 'svcs',
+    template: 'svcs',
     title: '对象存储',
     data: { links: [{ url: 'https://oss.example.com', note: '控制台' }] },
   });
-  const dict = await entries.fieldDictionary({ section: 'svcs' });
-  const f = dict.sections[0].fields.find((x) => x.key === 'links');
+  const dict = await entries.fieldDictionary({ template: 'svcs' });
+  const f = dict.templates[0].fields.find((x) => x.key === 'links');
   assert.equal(f.type, 'entrylist');
   assert.deepEqual(f.fields.map((s) => s.key), ['url', 'note'], '列从行键推断，agent 之后知道行里允许哪些键');
 
   await assert.rejects(
-    entries.updateEntry('对象存储', { section: 'svcs', data: { links: [{ url: 'x', 拼错: 'y' }] } }),
+    entries.updateEntry('对象存储', { template: 'svcs', data: { links: [{ url: 'x', 拼错: 'y' }] } }),
     /没有子字段/,
   );
 });
 
 test('dump 的字段字典带列定义；空清单 = 未填，有行 = 已填', async () => {
-  const dump = await sections.dump('svcs');
+  const dump = await templates.dump('svcs');
   const f = dump.fields.find((x) => x.key === 'accounts');
   assert.deepEqual(f.fields.map((s) => s.key), ['name', 'url', 'user', 'pass']);
   // 上面的用例把容器平台的 accounts 清空了：清单空 = 未填（null）
@@ -142,14 +142,14 @@ test('dump 的字段字典带列定义；空清单 = 未填，有行 = 已填', 
 
 test('CLI 渲染：清单一行一条，用列标签；--mask 时敏感列跟着打码', async () => {
   await entries.updateEntry('容器平台', {
-    section: 'svcs',
+    template: 'svcs',
     data: { accounts: [{ name: '主控台', url: 'https://console.example.com', user: 'ops', pass: 'p@ss-重填2' }] },
   });
-  const got = await entries.getEntry('容器平台', { section: 'svcs' });
+  const got = await entries.getEntry('容器平台', { template: 'svcs' });
   const out = entries.renderEntryGet(got);
   assert.match(out, /名称=主控台 · 链接=https:\/\/console\.example\.com · 账号=ops · 密码=p@ss-重填2/, out);
 
-  const masked = await entries.getEntry('容器平台', { section: 'svcs', mask: true });
+  const masked = await entries.getEntry('容器平台', { template: 'svcs', mask: true });
   const maskedOut = entries.renderEntryGet(masked);
   assert.ok(maskedOut.includes(maskValue('p@ss-重填2')), maskedOut);
   assert.ok(!maskedOut.includes('p@ss-重填2'), '打码模式下原文不能泄漏');

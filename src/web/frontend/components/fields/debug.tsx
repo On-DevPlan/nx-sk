@@ -41,7 +41,7 @@ interface SearchHit {
   entryId?: string;
 }
 
-const KIND_LABEL: Record<string, string> = { section: '栏目', entry: '条目', field: '字段', file: '附件' };
+const KIND_LABEL: Record<string, string> = { template: '条目模板', entry: '条目', field: '字段', file: '附件' };
 
 /**
  * 悬浮预览里**直接渲染整块**的类型（任务 #25 验收反馈：悬浮要「加载对应的块的整体 field 进行显示」）。
@@ -64,7 +64,7 @@ function valueText(v: unknown): string {
 /**
  * 内联数据板（#21 + #24 验收反馈「内联值要具体内容，不要字段标签」）：
  * 格子主文本 = **被引用位置的实时内容**，不是它的名字/类型。
- *   field → 字段值（空值给「（空）」）；entry → 条目名；file → 文件名；section → 栏目标题。
+ *   field → 字段值（空值给「（空）」）；entry → 条目名；file → 文件名；template → 条目模板标题。
  * 次文本 = 只有「内容之外还需要一句量词」时才给（条目完整度 / 附件字节 / 条目数）。
  */
 function chipMain(r: ResolveInfo): string {
@@ -85,7 +85,7 @@ function chipSub(r: ResolveInfo): string {
     return c && typeof c.ratio === 'number' ? `完整度 ${c.ratio}%` : '';
   }
   if (r.kind === 'file') return `${String(r.bytes ?? 0)} 字节`;
-  if (r.kind === 'section') return `${String(r.entryCount ?? 0)} 条条目`;
+  if (r.kind === 'template') return `${String(r.entryCount ?? 0)} 条条目`;
   return '';
 }
 
@@ -102,11 +102,11 @@ function readRefs(value: any): string[] {
 /** 悬浮预览的正文行（不展开成长文——引用预览要的是「一眼知道那是什么」）。 */
 function previewLines(r: ResolveInfo): ReactNode[] {
   const lines: ReactNode[] = [];
-  if (r.kind === 'section') {
+  if (r.kind === 'template') {
     lines.push(<span key="1">{String(r.entryCount ?? 0)} 条条目</span>);
     if (r.description) lines.push(<span key="2" className="muted">{String(r.description)}</span>);
   } else if (r.kind === 'entry') {
-    lines.push(<span key="1">栏目 {String(r.sectionTitle || r.sectionId || '')}</span>);
+    lines.push(<span key="1">条目模板 {String(r.templateTitle || r.templateId || '')}</span>);
     const c = r.completeness as { ratio?: number } | null;
     if (c && typeof c.ratio === 'number') lines.push(<span key="2" className="muted">完整度 {c.ratio}%</span>);
   } else if (r.kind === 'field') {
@@ -244,7 +244,7 @@ export function DebugControl({ value, onChange }: ControlProps) {
     const timer = setTimeout(async () => {
       try {
         // #21：scope=debug——后端只出**数据位置**（条目/条目-字段/附件），
-        // 字段命中直接是条目上的位置（模板行/扩展行都算），栏目与模板字段不出现。
+        // 字段命中直接是条目上的位置（模板行/扩展行都算），条目模板与模板字段不出现。
         const d = await api<{ items: SearchHit[] }>(
           `/api/resources/search?q=${encodeURIComponent(term)}&scope=debug`,
         );

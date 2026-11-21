@@ -12,7 +12,7 @@ export default function FieldModals({
   entryHistoryOpen,
   draft,
   current,
-  sectionTitle,
+  templateTitle,
   onCloseView,
   onCloseEdit,
   onCloseHistory,
@@ -27,7 +27,7 @@ export default function FieldModals({
   entryHistoryOpen: boolean;
   draft: Draft | null;
   current: SerializedEntry | null;
-  sectionTitle: string;
+  templateTitle: string;
   onCloseView: () => void;
   onCloseEdit: () => void;
   onCloseHistory: () => void;
@@ -41,7 +41,7 @@ export default function FieldModals({
           entryId={draft.id}
           def={fieldView.def}
           value={draft.values?.[fieldView.def.key]}
-          sectionTitle={sectionTitle}
+          templateTitle={templateTitle}
           entryTitle={current?.title || draft.title}
           onClose={onCloseView}
         />

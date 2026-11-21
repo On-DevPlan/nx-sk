@@ -22,6 +22,8 @@ export const sealEntryList: SealHook = async ({ def, raw, current }: SealContext
     for (const s of subs) {
       const text = row[s.key];
       if (text === undefined) continue;
+      // 已经落盘的密文原样保留：key set/remove 会把旧行原样带回，不能二次加密。
+      if (isCipherBlob(text)) { row[s.key] = text; continue; }
       if (looksMasked(text)) {
         const cur = curRows[i]?.[s.key];
         if (isCipherBlob(cur)) {

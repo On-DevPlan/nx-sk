@@ -5,11 +5,11 @@ import { useTempHome } from '../helpers.mjs';
 await useTempHome();
 
 const { FILL_LABELS, FILL_POLICIES, fillPolicy, isExcludedField } = await import('../../src/core/fields.ts');
-const { completeness, dumpSection, serializeEntry } = await import('../../src/core/render.ts');
-const { validateFieldDef } = await import('../../src/modules/sections/service.ts');
+const { completeness, dumpTemplate, serializeEntry } = await import('../../src/core/render.ts');
+const { validateFieldDef } = await import('../../src/modules/templates/service.ts');
 
 /** 三个照常填 + 一个 optional + 一个 avoid。 */
-const mkSection = () => ({
+const mkTemplate = () => ({
   id: 'job',
   title: '求职',
   description: '',
@@ -28,7 +28,7 @@ const mkSection = () => ({
 });
 
 const mkEntry = (values) => ({
-  id: 'e_1', section: 'job', title: '张三', tags: [], createdAt: null, updatedAt: null, values,
+  id: 'e_1', template: 'job', title: '张三', tags: [], createdAt: null, updatedAt: null, values,
 });
 
 test('fillPolicy：缺省与非法值都归到 normal（旧数据不用迁移）', () => {
@@ -44,7 +44,7 @@ test('fillPolicy：缺省与非法值都归到 normal（旧数据不用迁移）
 });
 
 test('完整度：分母只数照常填的字段', () => {
-  const s = mkSection();
+  const s = mkTemplate();
   const c = completeness(s, mkEntry({ name: '张三', phone: '13800000000' }));
   assert.equal(c.total, 3, 'total 只算 3 个 normal 字段');
   assert.equal(c.filled, 2);
@@ -52,7 +52,7 @@ test('完整度：分母只数照常填的字段', () => {
 });
 
 test('完整度：不填项不进 missing，单独进 excluded', () => {
-  const c = completeness(mkSection(), mkEntry({ name: '张三' }));
+  const c = completeness(mkTemplate(), mkEntry({ name: '张三' }));
   assert.deepEqual(c.missing.map((x) => x.key), ['phone', 'email']);
   assert.deepEqual(c.excluded.map((x) => x.key), ['lastCompany', 'hobbies']);
   assert.equal(c.excluded.find((x) => x.key === 'lastCompany').fillLabel, FILL_LABELS.avoid);
@@ -60,7 +60,7 @@ test('完整度：不填项不进 missing，单独进 excluded', () => {
 });
 
 test('完整度：不填项即使填了也不计入分子（否则会超过 100%）', () => {
-  const c = completeness(mkSection(), mkEntry({
+  const c = completeness(mkTemplate(), mkEntry({
     name: '张三', phone: '13800000000', email: 'a@b.c',
     lastCompany: '成都晓多', hobbies: '象棋',
   }));
@@ -71,7 +71,7 @@ test('完整度：不填项即使填了也不计入分子（否则会超过 100%
 });
 
 test('完整度：来回切策略，分子分母都跟着走', () => {
-  const s = mkSection();
+  const s = mkTemplate();
   const e = mkEntry({ name: '张三', phone: '13800000000' });
   assert.equal(completeness(s, e).ratio, 67);
   s.fields[1].fill = 'optional'; // phone 改成不必填
@@ -88,8 +88,8 @@ test('完整度：一个字段都没有时 ratio 是 0，不是 NaN', () => {
   assert.deepEqual([c.filled, c.total, c.ratio], [0, 0, 0]);
 });
 
-test('没有 fill 的旧栏目行为完全不变（向后兼容）', () => {
-  const s = mkSection();
+test('没有 fill 的旧条目模板行为完全不变（向后兼容）', () => {
+  const s = mkTemplate();
   s.fields = s.fields.slice(0, 3);
   const c = completeness(s, mkEntry({ name: '张三' }));
   assert.equal(c.total, 3);
@@ -98,7 +98,7 @@ test('没有 fill 的旧栏目行为完全不变（向后兼容）', () => {
 });
 
 test('serializeEntry：excluded 与 missing 并列，不混在一起', () => {
-  const out = serializeEntry(mkSection(), mkEntry({ name: '张三' }));
+  const out = serializeEntry(mkTemplate(), mkEntry({ name: '张三' }));
   assert.deepEqual(out.missing.map((x) => x.key), ['phone', 'email']);
   assert.deepEqual(out.excluded.map((x) => x.key), ['lastCompany', 'hobbies']);
   assert.equal(out.completeness.excluded, 2);
@@ -106,8 +106,8 @@ test('serializeEntry：excluded 与 missing 并列，不混在一起', () => {
   assert.equal(out.completeness.total, 3);
 });
 
-test('dumpSection：字段字典带上 fill 与 fillLabel，面板才知道哪个格子不用填', () => {
-  const d = dumpSection(mkSection(), [mkEntry({ name: 'x' })]);
+test('dumpTemplate：字段字典带上 fill 与 fillLabel，面板才知道哪个格子不用填', () => {
+  const d = dumpTemplate(mkTemplate(), [mkEntry({ name: 'x' })]);
   const byKey = Object.fromEntries(d.fields.map((f) => [f.key, f]));
   assert.equal(byKey.lastCompany.fill, 'avoid');
   assert.equal(byKey.lastCompany.fillLabel, '不填');
@@ -137,7 +137,7 @@ test('validateFieldDef：非法策略报错，不静默忽略', () => {
 const { renderEntryGet, renderEntryList } = await import('../../src/modules/entries/service.ts');
 
 test('渲染：「不填」只列真的空着的可选字段', () => {
-  const s = mkSection();
+  const s = mkTemplate();
   const blank = serializeEntry(s, mkEntry({ name: '张三' }));
   const filled = serializeEntry(s, mkEntry({ name: '张三', lastCompany: '某公司', hobbies: '象棋' }));
 

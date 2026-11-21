@@ -2,9 +2,129 @@
 
 本文件格式参考 [Keep a Changelog](https://keepachangelog.com/)，中文正文。
 
+## [0.44.0] - 2026-11-21（任务 #46 / #51 / #52 / #54）
+
+**密钥归一为普通字段：安全 list&lt;kv&gt; 进入 field + entry 模型。**
+
+- **数据模型**：`secret` 不再是 `kv:true` 的特殊模板，而是普通条目模板 + 一个 `keys` 结构清单字段；
+  行是 `{ name, value }`，`name` 明文、`value` 用与顶层敏感字段相同的 AES-256-GCM 边界密文落盘。
+- **Schema v8**：删除 `templates.kv` 列——运行时不再读写该标记，schema 也只剩「模板 + 字段 + 条目」；
+  旧数据（模板/字段/条目）原样保留，升级前照常留快照。
+- **CLI**：`key set/get/list/remove` 默认读写 `keys` 字段；第一次 `key set` 建一个标题「密钥」的承载条目，
+  后续键都进同一清单。`key remove` 只删一行，删空后字段置 `null`，不删承载条目。`--entry` 可指定承载条目。
+- **旧数据**：已有 `kv:true` 模板与「一条一键、单值 `value` 字段」的旧条目保留原形状，`key *` 以 legacy
+  模式继续读写，不自动迁移、不删值；要收敛时显式运行下面的 `key consolidate`。
+- **旧库归一（任务 #50）**：新增 `key consolidate`（`POST /api/keys/consolidate`）——把旧单值密钥条目合并进
+  一个 `keys` 清单条目，公共空白容器本身转成承载条目，最终树上只剩一个节点；旧值先解密、再按新密文边界
+  重新加密，PEM 等尾随换行逐字保留；`--dry-run` 只算不改，重复运行幂等。本轮工作区已按此迁移（迁移前快照保留）。
+- **Web**：移除 `KvTable` 表格特例与模板行的 `KV` 标签，密钥页就是普通条目页 + 结构清单字段。
+- **模板/API**：模板摘要、bootstrap、`template dump` 不再下发 `kv` 标记；`template update --kv` 删除。
+- **修复**：结构清单回写时保留已有密文对象，避免 `key set` 把旧行密文 `String()` 成 `[object Object]`。
+- **清理**：删掉 20 个全仓无调用的导出（迁移步骤表、事务深度、退出码、原子 JSON、路径工具、
+  source 摘要、store/vault/tree/nav 的旧封装等），覆盖率基线从 90.12% 行升到 90.31%。
+- **字段配置**：模板编辑器的「属性」补上 `select.options`、`maxItems` / `maxRows`、`defaultValue`、
+  表格「显示表尾统计」；字段提示统一在块头展示，不再只散落在 file/md/table 控件里。
+- **字段定义**：删除无行为支撑的 `file.kind` 与和 `maxItems` 重复的 `EntryListFieldDef.maxRows`；
+  table 的 `maxRows` 支持用 `null` 清空。
+- **定位修复**：面板「复制条目定位」不再生成 `entry get/update --template`——条目 id 是唯一存储单元，
+  `--template` 只在按标题定位同名字段时作可选消歧；定位行仍是 `nxsk://entry/<id>`。
+- **条目快速存为模板（任务 #48）**：条目页顶栏新增「存为模板」；弹窗预填 `tpl_<条目id>`、条目名称与说明，
+  保存的是条目当前字段结构（只抄结构、不抄值）。有未保存改动时先拦截，避免模板抄到旧结构；
+  Web SOP 增加浏览器回归步骤，断言新模板无条目、但带上条目内新增字段。
+- **创建条目闭环（任务 #49）**：Web 新建条目统一走一个创建弹窗——根目录、树节点「＋」、条目模板页都可在
+  创建时选择模板或显式空白条目；子条目默认空白，不再继承父条目的模板。父子目录关系与模板选择彻底分开
+  （`onAddEntry` 只收 parent，不再把父模板当默认模板）；弹窗展示所选模板的字段数与说明，并说明
+  「模板只初始化、建完独立演化」，创建 toast 标出本次初始化模板。Web SOP 补浏览器回归。
+
+### 0.44 · 任务 #51：标签、快速搜索与 skill 条目优先
+
+- **Schema v9 · 模板默认 tag**：`templates.tags` 列；非空白模板默认 `[模板 id, 模板标题]`。
+  `entry add --template` 把模板 tags 合并进条目 `tags`，显式 `--tags` 只追加；存量条目随迁移补齐并保留原 tag。
+  `template update --tags` 整体替换模板默认值；`entry update --tags` 整体替换条目标签。
+- **按标签检索**：`entry list --tag` / `--tag-mode all`；一个条目多 tag，默认任一命中。
+- **快速搜索 API**：`entry search`（`GET /api/entries/search`）扫标题、模板标题/描述、tag、字段 key/label
+  与非敏感字段值；只返回 `id/title/template/templateTags/tags/parent/updatedAt/fields` 等定位信息，
+  不返回完整 values、不解密敏感字段。支持 `q/tag/tag-mode/template/parent/limit`，默认 50、上限 200。
+- **skill 重构（条目优先）**：A01 改为「先认这一条，再决定写哪儿」的实操 SOP，不再以模板/命令清单开头；
+  特殊字段一字段一 ref：A10 表格 / A11 结构清单 / A12 图文 / A13 grill / A14 快捷键 / A15 标签与搜索，
+  file / source / secret 继续由 A05 / A03 / A04 承担；B04 补项目组织架构与布局。SKILL.md 路由表同步。
+- **Web**：条目页顶栏低频动作收进「更多」菜单（复制定位 / 变化历史 / 存为模板 / 删除），只留保存/放弃；
+  条目名下方显示 tag chips，模板工具条显示模板默认 tag；模板页把展开/收起/刷新/导入收进「更多」，
+  打码显示改为单图标按钮；窄屏（≤700px）模板树改为两行式（名称一行、操作一行，先收起说明与计数），
+  条目页改为「列表在上、正文在下」上下堆叠（列表限高可滚），不再让两列把正文挤成一条缝。
+  新增的菜单与图标走 SVG 图标，不再摆文字按钮墙。
+- **收尾复核修复**：条目 tags 写入统一 trim / 去空 / 去重；`saveEntryAsTemplate` 的新模板 tags 补上新标题；
+  导入 overwrite 回填源条目 tags；窄屏隐藏左右栏拖宽把手，消除 390px 下 14px 横向溢出；
+  A02 的 `titleField` 改为「先 add、再 update」；B02 清掉已删除的 `file.kind` 残留。
+- **Web 标签编辑**：条目名下方 tag chips 旁加标签图标，模板工具条也加默认标签编辑入口；
+  弹窗支持逗号/空格分隔、实时预览、trim/去空/去重；条目标签直接 PATCH，不重拉 dump，
+  不会冲掉未保存的字段草稿；模板默认标签只影响以后新建的条目。
+
+### 0.44 · 任务 #52：条目树导出、层级保留与设置全量备份
+
+- **导入导出改为条目树**：移除按模板分栏 / 悬浮展开；左侧直接渲染 `bootstrap.tree`，
+  支持多选、全选、清空，勾上级自动递归覆盖全部嵌套子条目，子级显示「已随上级选中」。
+- **快速导出**：每个树行右侧一个下载图标，直接导出该条目及整棵子树，文件名带条目标题。
+  图标默认 35% 透明常驻（hover / 聚焦全显），桌面上一眼能找到入口，触摸屏保持常亮。
+- **层级随包走**：单包 manifest 条目新增 `parent/sort`；只选子树时父不在包里则落为根。
+  整库 `bundle.json` 新增 `tree` 记录跨模板父子边（文件夹常在 `__blank__`、子条目在各自模板），
+  导入时先按拓扑顺序落条目，等全部模板包完成后统一挂父，跨模板目录层级也能恢复。
+- **设置页 · 全量备份**：新增「全量备份」页，复用同一个导入导出面板的 `fullOnly` 形态，
+  范围固定为全部条目；「导出导入」页负责按条目树局部搬。
+- **模板去聚类**：设置页删除旧的「条目模板管理 / 导航分组」入口——左侧导航本来就是条目树，
+  模板只负责创建条目时的字段初始化，不再有按模板分组/隐藏的 UI；前端 `navManager / navModel`
+  与设置页对应样式一并删除（后端旧 `navGroups / navHidden / navOrder` 仍兼容读取）。
+- **选择语义收口**：全选只选根节点，取消一个根就整棵子树退出；父子同时勾选时按实际根计数，
+  不会出现「显示 2 项、只出去 1 棵」。全量模式直接派生全根选择，按钮不再先闪一下灰。
+- **窄屏**：从没手动开合过侧栏时，≤760px 默认收起 264px 侧栏，正文独占；手动选择仍会记住。
+- **模板批量删除收进 More**：默认页不再常驻「全选 + 执行选中」的红色批量条，也不摆每行勾选框；
+  从顶部 More「批量删除…」显式进入后才出现全选 / 删除选中 / 退出，删完自动退出批量模式。
+  条目行尾的「×」也改成 hover / 键盘聚焦才显形（触摸屏常驻）。
+- **低频操作继续收 More**：条目模板行只留一个 kebab（改名 / 编辑字段与结构 / 信息 / 删除）；模板 id 与默认 tag
+  相同时不再重复挂 Tag；条目工具条也只补模板的额外 tag（等于 id / 标题的默认 tag 不再与标题并排重复，
+  条目标签仍在标题下集中显示一次）。附件卡片只留「下载 + More」，工具栏只留「上传 + More」；条目正文版式栏把
+  「重置版式 / 表单视图」收进一个 kebab，版面只余一个图标。对应 Web 回归选择器同步改走菜单项。
+- **Web 回归**：`tests/web-sop.mjs` 增加导出树步骤（勾文件夹覆盖子条目、快速导出下载 ZIP、
+  断言 bundle 的条目数与跨模板 `tree` 父子边）；unit 增加单模板嵌套与跨模板 bundle 层级往返。
+
+### 0.44 · 任务 #54：全站去黑色色块
+
+- **强调色统一为柔和蓝**：新增 `--accent: #2563eb / --accent-strong / --accent-soft`，墨色 `--ink`
+  只用于文字，不再做任何背景。主按钮、勾选框 accent、grill 选中项与确认按钮、拖拽指示线、
+  选中行侧条、虚线拖放框、焦点圈全部改蓝；强调标签改浅蓝底。
+- **toast 改白底浅影卡片**（错误仍红底）；**图片放大查看器**从近黑全屏底改浅色磨砂底。
+- **antd 主题同步**：`colorPrimary / colorInfo` 改蓝，Tooltip 显式白底浅影，不再是默认黑底提示。
+- **logo 与 favicon 重着色**：侧栏品牌图标原为深棕近黑色块（PNG），按像素插值映射重着色为
+  蓝底白字（字形与抗锯齿逐像素保留），favicon 16/32/48 与 .ico 一并重生成。
+- **验证**：自动化扫描导出 / 模板 / 条目 / 附件 / 设置五页（含勾选态），黑色色块计数全部为 0；
+  lint / typecheck / build / smoke 144 / unit 477 全绿。
+
 ## [未发布] 0.42（任务 #36）
 
-**「组」从栏目级结构变成一种字段类型：底层只有 field。**
+**0.43 数据模型重构：条目模板成为唯一模板概念，条目成为唯一内容节点，左侧导航改成目录树（任务 #45）。**
+
+- **术语统一**：原容器概念全部并入「条目模板」；领域类型 / Store / Boot / API / CLI / 前端模块 / 文档只保留这一套命名。
+  旧命令组与 `--section` 参数不再暴露；历史迁移 SQL 与 attachments 内部指针 kind 保留兼容。
+- **Notion 式条目模板管理**：条目模板管理页补齐改名 / 编辑 / 信息 / 删除四类行操作，删除是真删模板
+  （条目回落到空白模板，条目不删）；左侧 `⠿` 把手拖动排序，落点线表示插到某行前/后，整份顺序走
+  `template reorder` 一次落盘；新建条目模板自动排到末尾。左侧目录树也支持拖动：拖到条目中央 = 收成子条目，
+  拖到行上/下缘 = 插到兄弟前/后，后端 `entry move --before/--after` 负责精确落位并重编号 sort。
+- **DB v7**：`templates/fields` → `templates/template_fields`；`entries.section_id` → `entries.template_id`；
+  新增 `folders(entry_id, parent_id, sort)`，每个条目恰好一行，根节点 `parent_id=NULL`。
+  不建外键：删模板不连带删条目，父子合法性由服务层校验。
+- **迁移**：每个旧条目模板生成一条空 folder 条目（`__blank__` 模板），原条目挂到该 folder 下；
+  旧 `template_field_id` 复合串 `<section_id>:<key>` 原样保留。内置空白模板 `__blank__`（显示名「无模板」），
+  folder 节点与无模板条目使用，永远不补 source 袋。
+- **语义**：条目模板只用于建条目时初始化；建完条目按自身结构行演化，条目模板再改不回刷。
+  `template remove` 删除条目模板、不删条目；删有子条目的条目才删整棵子树。
+- **新增 CLI**：`entry tree` / `entry context` / `entry move` / `entry move-many` /
+  `entry save-as-template`；`entry add` 支持 `--template` / `--parent`。
+- **Web**：左侧导航改成 Lion 式目录树（文件夹/文件图标、展开三角、子条目数、按标题搜索、
+  右键打开/复制链接/新建子条目/展开折叠、宽度拖拽与展开态持久化）；条目页按树父链生成面包屑。
+- **测试**：新增 v7 迁移、目录树/成环/子树删除、条目保存模板与删除条目模板不删条目用例；
+  旧测试按「空白模板也是模板」与 v7 表名更新。
+
+**「组」从条目模板级结构变成一种字段类型：底层只有 field。**
 
 ### Fixed
 
@@ -14,41 +134,46 @@
     拖拽回写也从 `PATCH { groups }`（旧结构）改为 `PATCH { fields: flat }`（唯一真相）。
   - 条目页块高度改成取「控件盒子高度」与「块体 `scrollHeight`」的**较大值**，
     并给 `.blk-body` 一条滚动兜底——网格行按 8px 取整差几像素时，内容是**能滚**而不是被裁掉一行（附图 2）。
-- **UI 里一个分组内部顺序拖不动（任务 #44 的原始反馈）**：实测两块拖拽（条目页块换序、栏目属性编辑器字段换序）
+- **UI 里一个分组内部顺序拖不动（任务 #44 的原始反馈）**：实测两块拖拽（条目页块换序、条目模板属性编辑器字段换序）
   在数据库与 DOM 两侧都可用；反馈来自**旧服务进程 + 旧前端资产**的错配（旧进程内存里还是 schema-v6 之前的结构）。
   已用当前构建重启服务，并把这两条交互钉进浏览器 SOP 回归。
 - **条目页的「保存 / 删除条目」不再埋在整页最底部（任务 #43）**：保存、放弃改动、变化历史、删除条目
   收进条目顶部常驻操作条——长条目滚到一半也能直接保存或删除，不用翻到底。
   底部只保留「还有 N 项没填 / 已标不填」这类提示；完整度徽标挪到条目名旁边，窄窗口也不挤掉按钮。
-- **空栏目能就地新建条目（任务 #43）**：条目列表头新增「＋ 新建」，空态文案改为「点上方「＋ 新建」创建第一条」，
-  不再只靠侧栏栏目名右侧的小加号；新建 / 删除条目后地址栏同步（新建带 `?entry=<id>`，删除回 `#/<栏目>`）。
+- **空条目模板能就地新建条目（任务 #43）**：条目列表头新增「＋ 新建」，空态文案改为「点上方「＋ 新建」创建第一条」，
+  不再只靠侧栏条目模板名右侧的小加号；新建 / 删除条目后地址栏同步（新建带 `?entry=<id>`，删除回 `#/<条目模板>`）。
 - **新建条目的输入框提示改为「给这条起个名字」**：此前会漏出字段 key（例如 `name`），看不懂要填什么。
 
 ### Added
 
+- **`grill` 对齐确认字段（Grill & Ack）**：AI 把需要用户拍板的问题写成 JSON
+  （单选 / 多选 / 填空 / 确认，每题带备注），条目里只露一个很小的状态按钮，点开走
+  `Peek` 三态子页面（侧边 / 居中 / 整页，默认整页）逐条回答；必答全答完才能
+  「确认并回写」，`ack` 与答案一起留在字段里，agent 用 `entry get` 读回执。
+  值形状、最小写法与 `ack` 判定见 README 与随包 skill `B02-字段类型与格式`。
 - **浏览器 SOP 测试 `tests/web-sop.mjs`（`pnpm run test:web`，任务 #44）**：真起服务（一次性 `NX_SK_HOME`）+ headless Chrome，
-  跑完一条新栏目的完整生命周期——
-  新建栏目（带模板）→ 新建条目 → 条目内加扩展字段 → 填值 → 点「保存」并回读服务端确认落库 →
-  组内拖块换序（核对版式落盘）→ 栏目属性编辑器里组内字段换序（核对 `fieldList.keys` 落盘）→
-  块内容不被裁 → 浏览器零报错 → 删条目 → 删栏目。本机没有 Chrome / `playwright-core` 时自动 skip。
+  跑完一条新条目模板的完整生命周期——
+  新建条目模板（带模板）→ 新建条目 → 条目内加扩展字段 → 填值 → 点「保存」并回读服务端确认落库 →
+  组内拖块换序（核对版式落盘）→ 条目模板属性编辑器里组内字段换序（核对 `fieldList.keys` 落盘）→
+  块内容不被裁 → 浏览器零报错 → 删条目 → 删条目模板。本机没有 Chrome / `playwright-core` 时自动 skip。
 
 ### Changed
 
-- **侧栏工具页移到底部（任务 #42）**：栏目 / 附件 / 导出导入 / 设置不再混在栏目树里，
+- **侧栏工具页移到底部（任务 #42）**：条目模板 / 附件 / 导出导入 / 设置不再混在条目模板树里，
   改成侧栏底部常驻的一列按钮（当前页高亮，右键菜单保留），树只放内容层级；
   搜索时按标题过滤，没命中就不占位。
-- **页面底部的「同构 CLI 命令」提示整块移除（任务 #41）**：条目、栏目、附件、导出导入、设置等页
+- **页面底部的「同构 CLI 命令」提示整块移除（任务 #41）**：条目、条目模板、附件、导出导入、设置等页
   不再在底部列出 `nx-sk entry …` 命令串，界面只留操作本身；`CliHints` 组件与其样式一并删掉。
 - **随包 skill 合并成一个（任务 #38）**：原先并列分发的四个用户向 skill（`sk-needdo` /
   `sk-source` / `sk-pdf` / `sk-thesis`）收进唯一入口 `nx-sk`，`assets/` 下只剩一个可分发目录。
-  组织方式照 nv-kv 的 asset skill：**A 序列 = 用户场景 SOP**（`A01-填一条信息` … `A09-搬走一个栏目`）、
+  组织方式照 nv-kv 的 asset skill：**A 序列 = 用户场景 SOP**（`A01-填一条信息` … `A09-搬走一个条目模板`）、
   **B 序列 = 格式与字段用法**（`B01-概念与放置` / `B02-字段类型与格式` / `B03-踩坑合集`）。
-  原有 `00-design` / `10-sections-entries` / `15-special-fields` / `20-secrets` + `30-credentials` /
+  原有 `00-design` / `10-templates-entries` / `15-special-fields` / `20-secrets` + `30-credentials` /
   `40-files` / `50-deploy` / `60-transfer` 全部按序列改名，密钥与凭据合成一篇（两部分）。
   **A 引用 B、不复制**：值形状与公式只在 B02 写一份。
 - **A 序列统一改成动作句（#39 反馈）**：`A01-填一条信息` / `A02-整理一堆乱资料` / `A03-把原件回写进条目` /
   `A04-存密钥和凭据` / `A05-收一份附件` / `A06-存一份部署配置` / `A07-把PDF转成图文SOP` /
-  `A08-排一篇论文格式` / `A09-搬走一个栏目`——文件名就是「做这件事」；B 序列仍是名词知识。
+  `A08-排一篇论文格式` / `A09-搬走一个条目模板`——文件名就是「做这件事」；B 序列仍是名词知识。
 - **脚本与模板跟着 skill 走**：`sk-pdf` 的三个脚本、`sk-thesis` 的模板生成脚本与 `.docx` 模板迁到
   `assets/nx-sk/scripts/` 与 `assets/nx-sk/templates/`；`pdf_deps.py` 由 `_deps.py` 改名。
   `skill install` 装一次就拿到「SOP + 脚本 + 模板」，不再需要装四个。
@@ -60,8 +185,8 @@
 - **原始资料侧栏（任务 #37）**：清单与正文之间加了可拖拽分栏线——拖左右改宽、松手记住宽度
   （`nx-sk-source-list-w`）、双击复原 264；拖动时全局光标变 `col-resize`。清单栏补 `min-width:0`，
   否则长文件名会把自动最小宽顶住，拖线走了栏却不跟着走。
-- **模型**：`section.groups[]` 与 `field.group` 一起退役。组是 `type: 'group'` 的字段，
-  用 `keys` 引用同栏目其他字段（组成员还能是另一个组字段 → 支持嵌套）。
+- **模型**：`template.groups[]` 与 `field.group` 一起退役。组是 `type: 'group'` 的字段，
+  用 `keys` 引用同条目模板其他字段（组成员还能是另一个组字段 → 支持嵌套）。
   面板/CLI 的「分组」措辞与操作名（`add-group` / `rename-group` / `move-group` /
   `remove-group`、`--group`）**全部保留**，只是底层落成一条字段。
 - **唯一实现** `src/shared/fields/structure.ts`（零依赖、前后端共用）：
@@ -72,12 +197,12 @@
   `templateFieldDefs()` 折成组字段 + 普通字段；KV 模板不生成组（它是一张表）。
   组 key 与成员字段 key 撞名时自动改名（`source` → `sourceGroup`，`education` → `educationGroup`），
   否则同 key 空间会丢掉成员字段。
-- **写入**：`section update` 的全部结构操作改走 `src/modules/sections/structure.ts`
+- **写入**：`template update` 的全部结构操作改走 `src/modules/templates/structure.ts`
   的纯函数算子；「只给 `groups`」= 按 key 对齐改名重排，「只给 `fields`」= 按成员归属重建组。
-- **读出口**：`section get` 的 `fieldList`、`section dump`、`entry get` 的 `entryFields`
+- **读出口**：`template get` 的 `fieldList`、`template dump`、`entry get` 的 `entryFields`
   都在原样字段上**补一个派生的 `group`**（归属组 key）与组字段自己的 `keys`；
   `groupList` 仍下发 `{id,title}`，agent 与面板的读法不变。
-- **版式**：`groupsForLayout()` 只从 `section.fields` 推导，面板块的分组语义不变。
+- **版式**：`groupsForLayout()` 只从 `template.fields` 推导，面板块的分组语义不变。
 
 ### DB（schema v5 → v6，一次迁移，无运行时兼容）
 
@@ -100,12 +225,12 @@
 ### 验证
 
 - lint 0 error · typecheck 通过 · unit **472/472** · build 成功 · smoke **142/142**
-- 真实库（13 栏目 / 57 条目）跑通 5→6：`groups` 表已删、各栏目组与字段一一对上，
-  `section get` 的分组渲染与迁移前一致
+- 真实库（13 条目模板 / 57 条目）跑通 5→6：`groups` 表已删、各条目模板组与字段一一对上，
+  `template get` 的分组渲染与迁移前一致
 
 ## [0.41.0] - 2026-11-14
 
-**任务 #33（#28 的验收反馈）：侧栏「＋」对齐到栏目行最右边。**
+**任务 #33（#28 的验收反馈）：侧栏「＋」对齐到条目模板行最右边。**
 
 ### Fixed
 
@@ -118,35 +243,35 @@
 - lint 0 error（6 条 600 行提醒）· typecheck 通过 · unit **472/472** · build 成功 · smoke **142/142**
 - 真机走查：几何量测（`＋` right=254 / `.sb` right=264）+ 截图目视；#28 的 15 项功能断言复跑全过
 
-**任务 #28：「新建条目」从栏目工具条挪到侧栏——每个栏目行右侧一个「＋」。**
+**任务 #28：「新建条目」从条目模板工具条挪到侧栏——每个条目模板行右侧一个「＋」。**
 
 ### Changed
 
-- 侧栏栏目行计数后面新增「＋」（悬停/键盘聚焦才显形，`title` 是「在「X」新建条目」）：
-  不用先打开栏目，点它直接在那个栏目下建条目——读一次该栏目 dump 拿名字标签/名字字段 →
+- 侧栏条目模板行计数后面新增「＋」（悬停/键盘聚焦才显形，`title` 是「在「X」新建条目」）：
+  不用先打开条目模板，点它直接在那个条目模板下建条目——读一次该条目模板 dump 拿名字标签/名字字段 →
   弹窗问名字 → `POST /api/entries`（名字同时写进名字字段）→ 侧栏缓存乐观补一条 →
-  跳到新条目；省掉一次打开栏目的往返。
-- 栏目工具条的「新建条目」改为兜底：只在**侧栏收起**（`sidebarCollapsed`，侧栏的「＋」够不着）
+  跳到新条目；省掉一次打开条目模板的往返。
+- 条目模板工具条的「新建条目」改为兜底：只在**侧栏收起**（`sidebarCollapsed`，侧栏的「＋」够不着）
   时出现，两种入口不会同时出现。`ViewProps` 因此新增可选 `sidebarCollapsed`。
 - 顺手修掉一个被这次入口暴露的老问题：`SectionView.load` 的闭包里读的是挂载时的 `ui.entry`
-  （deps 刻意不含它），当新建条目落在**已打开**的栏目里（sectionId 没变、组件不重挂）时，
+  （deps 刻意不含它），当新建条目落在**已打开**的条目模板里（sectionId 没变、组件不重挂）时，
   重拉 dump 会「兜底选中 entries[0]」，把刚建好的条目踢走。改成用 ref 取最新 `ui.entry`，
-  并在创建后广播一次 `REFRESH_EVENT` 让当前栏目重拉 dump。
+  并在创建后广播一次 `REFRESH_EVENT` 让当前条目模板重拉 dump。
 
 ### 验证
 
 - lint 0 error（6 条 600 行提醒）· typecheck 通过 · unit **472/472** · build 成功 · smoke **142/142**
 - 真机走查（Chrome headless + 独立 walk28 沙箱 home，15 项断言全过）：悬停显形、title 文案、
-  侧栏展开时工具条无重复「新建条目」、弹窗文案带栏目名、创建后跳转并选中新条目、
+  侧栏展开时工具条无重复「新建条目」、弹窗文案带条目模板名、创建后跳转并选中新条目、
   名称字段同值、侧栏树立刻可见、刷新后仍在库里、侧栏收起后兜底按钮出现/展开后消失、无 console 报错
 - 走查只动了自己新建的测试条目（结束时已删除），未触碰其它数据
 
-**任务 #30：栏目工具条的「刷新」与顶栏「刷新数据」合并成一个入口。**
+**任务 #30：条目模板工具条的「刷新」与顶栏「刷新数据」合并成一个入口。**
 
 ### Changed
 
 - 刷新只在顶栏留一个「刷新数据」：点它先重拉 `bootstrap`（侧栏计数 / 设置），再广播
-  `REFRESH_EVENT`（`store.tsx` 导出），栏目页收到后重拉自己的 `/dump`——原来工具条那个
+  `REFRESH_EVENT`（`store.tsx` 导出），条目模板页收到后重拉自己的 `/dump`——原来工具条那个
   「刷新」删掉，两个按钮做的事现在合成了一步。
 - 事件广播不绑定具体模块：工具页（设置 / 导入导出）没有订阅者，点刷新只做 bootstrap 重拉。
 
@@ -154,13 +279,13 @@
 
 - lint 0 error（6 条 600 行提醒）· typecheck 通过 · unit **472/472** · build 成功 · smoke **142/142**
 - 真机走查（Chrome headless）：全页只剩 1 个「刷新」类按钮；点它同时发出 `/api/bootstrap`
-  与 `/api/sections/accounts/dump` 两个请求，刷新后仍选中原条目且内容不变；设置页点刷新无报错。
+  与 `/api/templates/accounts/dump` 两个请求，刷新后仍选中原条目且内容不变；设置页点刷新无报错。
 
 **任务 #29：条目详情里重复的面包屑合并为一条。**
 
 ### Changed
 
-- 条目详情卡片头不再重复「栏目 › 条目」这条面包屑（窗口顶栏已经有了「分组 › 栏目 › 条目」）；
+- 条目详情卡片头不再重复「条目模板 › 条目」这条面包屑（窗口顶栏已经有了「分组 › 条目模板 › 条目」）；
   原先挂在这条面包屑上的「点击复制定位」改为顶栏常显的 `⧉` 按钮，复制文本与 toast 文案不变，
   `.crumb-sec/-sep/-ent/-copy` 四条只为它存在的样式一并删除。
 
@@ -168,7 +293,7 @@
 
 - lint 0 error（6 条 600 行提醒）· typecheck 通过 · unit **472/472** · build 成功 · smoke **142/142**
 - 真机走查（Chrome headless，1440×950）：全页只剩一条 antd 面包屑，卡片头无 `›`、保留 id 与
-  `⧉`；点 `⧉` 出现「已复制条目定位」toast，剪贴板内容为 `nx-sk 条目 · 栏目「平台账号」…`
+  `⧉`；点 `⧉` 出现「已复制条目定位」toast，剪贴板内容为 `nx-sk 条目 · 条目模板「平台账号」…`
 - 已知未做：`D:\a_js` 下仍无法新建文件（git 提交与 patch 落盘受阻），见回报
 
 **任务 #27：字段值历史版本 + 条目变化时间线 + 单字段恢复 + 保留策略设置。**
@@ -220,12 +345,12 @@
 
 ### Fixed
 
-- **条目内独自添加的字段（扩展字段）的改动不进脏值判定**——`dirty` 只遍历栏目字典 `data.fields`，扩展字段不在字典里，于是改了值顶栏不出现「保存」、值也存不下去。debug 引用因此看着「悬浮不更新」：引用从未被保存过。判据改为**本条目的结构行**（`entryFields`，含模板行与扩展行），字典仅在老数据缺结构行时兜底。这个 bug 同时影响所有扩展字段（不止 debug），属数据丢失级。
+- **条目内独自添加的字段（扩展字段）的改动不进脏值判定**——`dirty` 只遍历条目模板字典 `data.fields`，扩展字段不在字典里，于是改了值顶栏不出现「保存」、值也存不下去。debug 引用因此看着「悬浮不更新」：引用从未被保存过。判据改为**本条目的结构行**（`entryFields`，含模板行与扩展行），字典仅在老数据缺结构行时兜底。这个 bug 同时影响所有扩展字段（不止 debug），属数据丢失级。
 
 ### Changed
 
 - **悬浮预览改为底部寄存框**（#25 验收反馈原文：「悬浮 直接出现对应的块显示 提供基础的底部框 然后悬浮 就加载对应的块的整体 filed 进行显示」）：
-  - 悬浮引用格子 → 视口底部弹出寄存框（宽 720px、最高 46vh、可滚），**field 引用直接渲染那一块的真实控件**（标签 + 类型 + 控件本体，`fieldset disabled` + pointer-events 只读）；条目/附件/栏目仍走文本摘要。md / table / file / source / debug 退回文本——它们要么拉附件/起编辑器，要么递归渲染 debug 自身。
+  - 悬浮引用格子 → 视口底部弹出寄存框（宽 720px、最高 46vh、可滚），**field 引用直接渲染那一块的真实控件**（标签 + 类型 + 控件本体，`fieldset disabled` + pointer-events 只读）；条目/附件/条目模板仍走文本摘要。md / table / file / source / debug 退回文本——它们要么拉附件/起编辑器，要么递归渲染 debug 自身。
   - 每次进入格子都重查一次（同一格子重复悬浮也算），格子内联值与寄存框内容一起刷新——「鼠标一停就是此刻的值」。
   - 关闭规则：Esc / 页面滚动（框内滚动除外）/ 指针离开格子与框 260ms；框内可停留阅读，不再跟着鼠标飘。
 
@@ -238,12 +363,12 @@
 
 ### Added
 
-- `entry field-update <ref> --key <k> [--label <新显示名>] [--hint <描述>] [--dry-run]`（CLI + `PATCH /api/entries/:ref/fields/:key` 同源）：改**条目内一个字段的属性**（显示名 / 描述）。只写这一条条目的结构行（`entry_fields.label/hint` 与 `spec` 同步，`spec` 是 FieldDef 的保真源——不同步会出现「块头新名、引用浮层旧名」），栏目字典、其他条目、字段值都不动；内置「原始资料」不给改，已脱离的字段要求先恢复；同值报 `skipped/unchanged` 不写盘。
+- `entry field-update <ref> --key <k> [--label <新显示名>] [--hint <描述>] [--dry-run]`（CLI + `PATCH /api/entries/:ref/fields/:key` 同源）：改**条目内一个字段的属性**（显示名 / 描述）。只写这一条条目的结构行（`entry_fields.label/hint` 与 `spec` 同步，`spec` 是 FieldDef 的保真源——不同步会出现「块头新名、引用浮层旧名」），条目模板字典、其他条目、字段值都不动；内置「原始资料」不给改，已脱离的字段要求先恢复；同值报 `skipped/unchanged` 不写盘。
 - 面板块头新增 `⋯` 菜单（替换原来的单个 `×`）：**查看字段**（定义 + 当前值 + 可复制 locator）、**编辑字段属性…**（显示名 / 描述，写时复制）、**从本条目移除 / 删除扩展字段**（沿用 #20 语义与确认文案）。浮层用 portal + fixed 渲染——块的根节点是 `overflow: hidden`（高度由网格锁着），`<details>` 式下拉会被裁掉。
 
 ### Changed
 
-- **debug 引用格子改为内容优先**（#24 验收反馈原文：「内连值的具体内容呀 你内联 filed 的 tag 标签干嘛」）：主文本直接是被引用位置的实时内容——字段=**值**（空值显示「（空）」）、条目=条目名、附件=文件名、栏目=标题；不再内联「字段」类种类标签与字段名，量词（条目完整度 / 附件字节 / 条目数）降为次文本。悬浮浮层仍是详情形态（种类 + 名称 + 值 + locator）。
+- **debug 引用格子改为内容优先**（#24 验收反馈原文：「内连值的具体内容呀 你内联 filed 的 tag 标签干嘛」）：主文本直接是被引用位置的实时内容——字段=**值**（空值显示「（空）」）、条目=条目名、附件=文件名、条目模板=标题；不再内联「字段」类种类标签与字段名，量词（条目完整度 / 附件字节 / 条目数）降为次文本。悬浮浮层仍是详情形态（种类 + 名称 + 值 + locator）。
 - 字段提示文案同步：「格子内联实时值」→「格子内联显示内容」。
 
 ### 验证
@@ -255,8 +380,8 @@
 
 ### Added
 
-- `shared/locator.ts`：内部资源定位符唯一实现——`nx-sk://section/<id>`、`entry/<id>`、`field/<条目或栏目>/<key>`、`file/<id>`；parse 对脏输入返回 null 不抛；旧复合串 `<栏目>:<key>` 兼容读（磁盘格式零改动）。只读出口 `resolve`（CLI/HTTP）：给 locator 返回存在性与摘要，字段值密文默认打码。
-- `nx-sk resource search`（CLI + `GET /api/resources/search`）：跨栏目/条目/字段/附件全局检索，返回 locator+标题+定位信息。
+- `shared/locator.ts`：内部资源定位符唯一实现——`nx-sk://template/<id>`、`entry/<id>`、`field/<条目或条目模板>/<key>`、`file/<id>`；parse 对脏输入返回 null 不抛；旧复合串 `<条目模板>:<key>` 兼容读（磁盘格式零改动）。只读出口 `resolve`（CLI/HTTP）：给 locator 返回存在性与摘要，字段值密文默认打码。
+- `nx-sk resource search`（CLI + `GET /api/resources/search`）：跨条目模板/条目/字段/附件全局检索，返回 locator+标题+定位信息。
 - **`debug` 字段类型**（引用型）：值 `{v:1, refs:[locator…]}` 自描述文档，非法项丢弃计入 warnings 不炸；面板渲染成**小格子**——悬浮预览引用内容（密文打码）、点击复制 locator、× 删除、「＋ 引用资源」走检索面板选择；失效引用标灰「已失效」。
 - **schema v4**：重建 fields/entry_fields 去掉 type 的 CHECK 枚举——**加新字段类型不再需要改库**（合法性由 validateFieldDef/behaviorOf 运行时保证，FIELD_TYPES 仍是唯一清单）。
 - 侧栏搜索升级：结果按「当前条目字段 / 全局字段 / 条目」三类分组，点字段结果直达条目并滚动定位+短暂高亮对应块。
@@ -272,17 +397,17 @@
 
 - **#19 验收反馈**：条目页「字段=值 快填」旁路撤除——条目内加字段只留「＋ 添加字段」正门（弹窗表单）；CLI/agent 的 `--set 未知键` 自动登记通路不受影响，退役的只是这块 UI 与其样式。
 - **任务 #20：条目级字段移除与恢复**（补齐 #15 添加的逆向操作，v3 写时复制模型）：
-  - `entry remove-field <ref> --key <k> [--restore] [--dry-run]`（CLI + `DELETE /api/entries/:ref/fields/:key` 同源）：**扩展字段=硬删**（entry_fields 行删除，field_data 随 CASCADE 走，值没了就是没了）；**模板字段=脱离（detach）**——行保留、meta 记 `{"detached":1}`，该条目不再渲染/序列化/计完整度这个字段，**栏目字典与其他条目零影响**；`--restore` 去掉标记，值原样回来（脱离从不动 field_data）。内置「原始资料」（source）不给删，与字典侧同纪律。
-  - 读边界统一过滤脱离行：`readStore` 的 values、`serializeEntry`（新输出 `detachedFields: [{key,label}]`，entryFields 每项带 `template` 出身标记）、`completeness`、字段台账、资源 locator、section dump 的表格现值、transfer 导出。
+  - `entry remove-field <ref> --key <k> [--restore] [--dry-run]`（CLI + `DELETE /api/entries/:ref/fields/:key` 同源）：**扩展字段=硬删**（entry_fields 行删除，field_data 随 CASCADE 走，值没了就是没了）；**模板字段=脱离（detach）**——行保留、meta 记 `{"detached":1}`，该条目不再渲染/序列化/计完整度这个字段，**条目模板字典与其他条目零影响**；`--restore` 去掉标记，值原样回来（脱离从不动 field_data）。内置「原始资料」（source）不给删，与字典侧同纪律。
+  - 读边界统一过滤脱离行：`readStore` 的 values、`serializeEntry`（新输出 `detachedFields: [{key,label}]`，entryFields 每项带 `template` 出身标记）、`completeness`、字段台账、资源 locator、template dump 的表格现值、transfer 导出。
   - **writeStore 防复活**（本轮最容易踩的坑）：存量条目按捕获行原样恢复时，脱离行跳过「values 缺行补模板/占位行」逻辑、值由捕获行原样带回 field_data——删了不会在下次保存时复活，值不会在全量重写中丢失；detach/restore/硬删都推进 rev，陈旧 Store 对象提交撞 BLOCKED 而不是静默覆数据。
-  - 面板：块头 hover 出无边框 `×`（BlockBoard 新可选 prop `onRemoveField`，kvTable 等调用点零影响）——模板字段弹「从本条目移除…（不影响栏目模板与其他条目）」、扩展字段弹 danger「值会一并删除，不可恢复」；add-field-bar 下方新增「已脱离」弱字 chips 管理条，每个带「恢复」按钮。
+  - 面板：块头 hover 出无边框 `×`（BlockBoard 新可选 prop `onRemoveField`，kvTable 等调用点零影响）——模板字段弹「从本条目移除…（不影响预置模板与其他条目）」、扩展字段弹 danger「值会一并删除，不可恢复」；add-field-bar 下方新增「已脱离」弱字 chips 管理条，每个带「恢复」按钮。
   - 契约测试同步：dump 条目键白名单加入 `detachedFields`。
   - 验证：unit **438/438**（+7 remove-field 专项，含「detach 后连续两次 updateEntry 不复活」）/ smoke 137/137 零削弱；真机走查 17/17（Playwright + 本机 Chrome，隔离 home 7875）：hover 出 ×、移除→块消失+chip、恢复→块与值回来、扩展硬删→块与值都没、刷新持久化、dialog 取消不写、console 零错误。期间发现并修复 1 个真缺陷（writeStore 脱离判据误传 meta 对象，值在全量重写中丢失→restore 变 null）。
 - **任务 #21（#18 验收反馈）：debug 引用只绑数据位置 + 格子内联数据板**（用户裁决原文：「debug字段引用具体的字段数据 不要引用结构」「结果至少是条目/条目-字段」「条目-field位置 而不是fielddata 从而可以实现内联数据板的功能 实时响应绑定的位置的结果」）：
-  - **结构引用不收**：`nx-sk://section/…` 在 coerce 层丢弃进 warnings（语法无歧义）；模板字段引用 `nx-sk://field/<栏目id>/<key>` 要查库才认得出，新增写入封装 `seal/debug.ts` 丢弃（warnings 带原因）。坏链仍保留（#18「坏链留证」不变）。`isStoredEmpty` 同步：refs 空但有 warnings 的文档不再被当空清掉——「引用为什么没了」的台账必须留档。
+  - **结构引用不收**：`nx-sk://template/…` 在 coerce 层丢弃进 warnings（语法无歧义）；模板字段引用 `nx-sk://field/<条目模板id>/<key>` 要查库才认得出，新增写入封装 `seal/debug.ts` 丢弃（warnings 带原因）。坏链仍保留（#18「坏链留证」不变）。`isStoredEmpty` 同步：refs 空但有 warnings 的文档不再被当空清掉——「引用为什么没了」的台账必须留档。
   - **内联数据板**：格子直接显示绑定位置的实时值（字段值截断内联、条目完整度、附件字节），悬浮预览仍是详情形态；值改→保存→reload→批量重解，格子跟着变，无需刷新页面。
   - 新出口 `resource resolve-batch`（`POST /api/resources/resolve-batch`，action 显式标 `readOnly` 豁免 dry-run 检查）：一次请求取回全部引用摘要，坏链不抛（每项自带 ok/error），值一律打码口径（reveal 不开这个口子）。
-  - picker 改走 `resource search --scope debug`：只出条目/条目-字段（含模板行与扩展行，副题带条目名）/附件，栏目与模板字段命中不出现——别让用户选了再被写入点丢。默认口径（侧栏三类检索）零改动。
+  - picker 改走 `resource search --scope debug`：只出条目/条目-字段（含模板行与扩展行，副题带条目名）/附件，条目模板与模板字段命中不出现——别让用户选了再被写入点丢。默认口径（侧栏三类检索）零改动。
   - demo 播种的 debug 引用同步改为条目级（指向示例条目自身与其名称字段）。
   - 文案随语义更新：「非法引用已忽略」→「引用已忽略」；picker 占位与提示语改口径。
   - 验证：unit **441/441**（coerce 拒结构、sealDebug 拒模板字段+坏链保留、warnings 留档、scope=debug 口径、resolve-batch 形状）/ smoke 137/137 零削弱；真机走查 22/22（Playwright + 本机 Chrome，隔离 home 7876）：格子内联实时值、悬浮预览、picker 无结构命中、改名称保存后格子实时刷新、CLI 混写结构引用被逐层丢弃且 warnings 可见、坏链标灰、resolve-batch 直测、复制 locator 不回归、console/HTTP 零错误。
@@ -318,8 +443,8 @@
 
 ### Added
 
-- `entry add-field`（CLI + `POST /api/entries/:ref/fields` 同源）：给**单条条目**添加扩展字段——`--key/--label/--type/--group/--value`，只落条目自身结构行（template_field_id=NULL），**栏目字典零污染**；重复键报冲突并指路 `--set` 写值；未知类型/未知分组/ KV 栏目都在写盘前拒绝；`--dry-run` 预览。
-- 面板条目页新增「＋ 添加字段」弹窗：key / 标签 / 类型（中文名+内部 id）/ 分组（本栏目分组下拉）/ 初值；提交后块即时出现、刷新保持。
+- `entry add-field`（CLI + `POST /api/entries/:ref/fields` 同源）：给**单条条目**添加扩展字段——`--key/--label/--type/--group/--value`，只落条目自身结构行（template_field_id=NULL），**条目模板字典零污染**；重复键报冲突并指路 `--set` 写值；未知类型/未知分组/ KV 条目模板都在写盘前拒绝；`--dry-run` 预览。
+- 面板条目页新增「＋ 添加字段」弹窗：key / 标签 / 类型（中文名+内部 id）/ 分组（本条目模板分组下拉）/ 初值；提交后块即时出现、刷新保持。
 - `serializeEntry` 输出 `entryFields`（条目自身字段定义，行优先、字典兜底）——v3 块渲染契约补齐：面板 BlockBoard 从此跟随**条目自己的结构**渲染，条目内新加的扩展字段不再只有 CLI 可见。
 
 ### Changed
@@ -334,25 +459,25 @@
 
 ## 0.38.0 (2026-11-11)
 
-**schema v3：动态结构——条目字段写时复制（copy-on-write）。栏目字段字典降级成模板，每个条目带自己的结构行与值行。**
+**schema v3：动态结构——条目字段写时复制（copy-on-write）。条目模板字段字典降级成模板，每个条目带自己的结构行与值行。**
 
 ### Changed
 
 - **写时复制**：新增 `entry_fields`（条目自身字段行：key/label/type/spec/fill/position，`template_field_id` 非 NULL=出身模板、NULL=扩展字段）与 `field_data`（值逐键一行，JSON 文本，密文 blob 原样搬运）。`entries."values"` 列退役；`entry_attach` 的挂载点从 (entry_id, field_key) 收敛到 `entry_field_id`。行 id 全部确定性派生（`ef_<sha1[0:16]>` / `d_<sha1[0:16]>`，见 `db/identity.ts`），迁移搬运与运行时写入共用同一公式。
 - **模板只初始化**：新建条目按字典实例化全部模板行；字典后续增删改（add-field / set-field / remove-field）**不回刷存量条目**——存量条目按自身行读写（序列化、完整度、附件反查、密文视图、导出包都看行）。
 - **quickAdd 不污染字典**：`--set 新键=值` 推断出的字段只落条目自身的扩展行（bool / secretish→secret / file 等推断规则不变，落盘即密文）；`entry fields` 台账 = 字典 + 各条目扩展行（按 key 去重）。
-- **`section sync` 重定义为两阶段（都只增不改）**：阶段 1 代码模板→栏目字典（原语义）；阶段 2 栏目字典→存量条目结构行（补缺行，position 追加）。非模板栏目不再报错——「add-field 之后跑 sync 把新行补进条目」正是 v3 的主要用法。`fields` 表新增 `default_value` 列：sync 补的新行与新建条目没给值的键都按它落数据行（只给新行，不回刷）。
-- 序列化契约不变：空值仍输出 `null`、`values` 键集与条目行一致；栏目 ZIP 包格式不变（manifest.entries[].values 仍是逐键 map）。
+- **`template sync` 重定义为两阶段（都只增不改）**：阶段 1 代码模板→条目模板字典（原语义）；阶段 2 条目模板字典→存量条目结构行（补缺行，position 追加）。非模板条目模板不再报错——「add-field 之后跑 sync 把新行补进条目」正是 v3 的主要用法。`fields` 表新增 `default_value` 列：sync 补的新行与新建条目没给值的键都按它落数据行（只给新行，不回刷）。
+- 序列化契约不变：空值仍输出 `null`、`values` 键集与条目行一致；条目模板 ZIP 包格式不变（manifest.entries[].values 仍是逐键 map）。
 - 迁移：`migrations/v3.sql`（DDL + entries/entry_attach 重建）+ `migrations/v3-apply.ts`（拆行/边重映射/unmapped 计数写 `meta.migrate_v3`）；`CURRENT_SCHEMA_VERSION=3`；v1/v2.sql 一字未动。升级前自动快照 `migrate/<ts>-pre-v2-to-v3.db` 机制不变。
 - 测试同步：db-upgrade 的升级用例改为**裸 SQL 造真 v2 库**再升级（改版本号模拟旧库在 v3 下不再成立）；smoke 的存储布局探针（直读 values 列）改为 JOIN field_data——这是 schema 变化本身强制的适配；attachments 的「备用附件登记进字典」用例改为钉条目扩展行 + 字典不被污染。
 
 ## 0.37.0 (2026-11-11)
 
-**schema v2：挂载位置收敛到「具体栏目的具体条目的具体字段」——source 只是普通字段，附件不挂结构。**
+**schema v2：挂载位置收敛到「具体条目模板的具体条目的具体字段」——source 只是普通字段，附件不挂结构。**
 
 ### Changed
 
-- 用户裁决落地：栏目 / 条目 / 字段定义是结构定位信息，不是挂载对象——**删除 section_attach / field_attach 两张结构级边表**；`role='source'` 从 entry_attach 退役（原始资料袋里的值引用走 inline，显式挂载走 attach）。EDGE_ROLES 收敛为 `inline | attach`。
+- 用户裁决落地：条目模板 / 条目 / 字段定义是结构定位信息，不是挂载对象——**删除 section_attach / field_attach 两张结构级边表**；`role='source'` 从 entry_attach 退役（原始资料袋里的值引用走 inline，显式挂载走 attach）。EDGE_ROLES 收敛为 `inline | attach`。
 - 迁移走刚建好的版本机制：新增 `migrations/v2.sql`（重建 entry_attach：SQLite 改不了 CHECK → 建新表、整表搬运、历史 source 边落为 attach、改名补索引、DROP 两张结构表）+ `DIRECT_EDGES` 追加 1→2 + `CURRENT_SCHEMA_VERSION=2`；v1.sql 一字未动。
 - `repo.ts` 全量重写只捕获/放回 entry 级显式边；测试同步：迁移器断言 9 张表、`role='source'` 必须被 CHECK 拒绝、attach 角色可插入。
 
@@ -371,9 +496,9 @@
 - **存储换心**：主库 `~/nx-sk/nxsk.db`（`NX_SK_STORE_DB` 覆盖；WAL + busy_timeout）。`core/store.ts` facade 的导出 API 与 Store 对象形状**一字未动**，所有后端模块照常只通过它碰磁盘。`loadStore` = SELECT 组装（过 normalize 收口类型，不再做旧版本兼容）；`saveStore` / `mutateStore` = 单事务全量重写（代码结构留好按表增量写的缝）。
 - **迁移框架**（详细参考 nx-kv 的存储版本号设计）：`meta.schema_version` 为版本判据，`db/migrations/v1.sql` 起按版本号**单向组合**执行，每支一个事务、失败回滚并中止启动；后续升级只提供新脚本（在 `migrations/index.js` 登记直接边 + 改 `CURRENT_SCHEMA_VERSION`），**绝不改已发布的 vN.sql**。缺边/降级都明确报错，不静默跳过。
 - **乐观并发（rev）**：`meta.rev` 全局写计数。载入记 rev，提交时 rev 不匹配抛 BLOCKED（提示重试）——修掉 serve + CLI 双进程的 lost-update（旧版整份覆盖，后写的静默抹掉先写的）。
-- **首启导入**：db 不存在且 store.json 存在 → 读 json（**有 version 没 version 都接受**，过 normalize 升到当前形状）→ 建库跑迁移 → 全量写入 → store.json 改名留证 `store.json.imported-<ts>`（不删除，沿用 corrupt 留证纪律）；损坏文件挪 `.corrupt-` 后播种；导入失败整体回滚、JSON 一字节不动并写失败日志。孤儿条目（指向不存在的栏目）在预检就报明细，不给外键撞半套现场。
-- **表结构**：sections / groups（含 `declared`：0=syncSectionGroups 自愈出的未声明分组）/ fields（type CHECK 与 FIELD_TYPES 同一份清单，单测钉住）/ entries / settings（k/v，JSON value）/ ui_state（预留，面板选择现状仍在浏览器 localStorage，不硬塞）/ meta。JSON 列（fields.spec、attachments.meta）是**保真源**，标量列是查询与约束的镜像——往返深比较不漂键存在性。
-- **attachments 对齐 nx-kv v2**：kind ∈ (file/url/section/entry/field)；file 行 id = FileRecord.id **原样**（values 里嵌的引用一字不改）；url/section/entry/field 用确定性派生 id（`att_*_<sha1[0:16]>`），身份规则收敛到 `db/identity.ts` 唯一实现；dedupe_key 唯一部分索引（软删后可重新登记）；边表 entry_attach / section_attach / field_attach，**role 是边的语义不是资源属性**（inline=从 values 用现有 fileReferences 重算、attach/source=显式边跨重写保留）；删除钩子对指向已删条目/栏目/字段的内部指针行软删（UPDATE deleted_at，行不物理删），`findDriftedPointers` 可检漂移。
+- **首启导入**：db 不存在且 store.json 存在 → 读 json（**有 version 没 version 都接受**，过 normalize 升到当前形状）→ 建库跑迁移 → 全量写入 → store.json 改名留证 `store.json.imported-<ts>`（不删除，沿用 corrupt 留证纪律）；损坏文件挪 `.corrupt-` 后播种；导入失败整体回滚、JSON 一字节不动并写失败日志。孤儿条目（指向不存在的条目模板）在预检就报明细，不给外键撞半套现场。
+- **表结构**：templates / groups（含 `declared`：0=syncSectionGroups 自愈出的未声明分组）/ fields（type CHECK 与 FIELD_TYPES 同一份清单，单测钉住）/ entries / settings（k/v，JSON value）/ ui_state（预留，面板选择现状仍在浏览器 localStorage，不硬塞）/ meta。JSON 列（fields.spec、attachments.meta）是**保真源**，标量列是查询与约束的镜像——往返深比较不漂键存在性。
+- **attachments 对齐 nx-kv v2**：kind ∈ (file/url/template/entry/field)；file 行 id = FileRecord.id **原样**（values 里嵌的引用一字不改）；url/template/entry/field 用确定性派生 id（`att_*_<sha1[0:16]>`），身份规则收敛到 `db/identity.ts` 唯一实现；dedupe_key 唯一部分索引（软删后可重新登记）；边表 entry_attach / section_attach / field_attach，**role 是边的语义不是资源属性**（inline=从 values 用现有 fileReferences 重算、attach/source=显式边跨重写保留）；删除钩子对指向已删条目/条目模板/字段的内部指针行软删（UPDATE deleted_at，行不物理删），`findDriftedPointers` 可检漂移。
 - `engines.node` 升到 `>=22.13.0`（node:sqlite 免 `--experimental-sqlite` 的下限，与 nx-kv 同口径；`db/version.ts` 运行时先检查再 import，报错指得出真因）。`--store` 全局 flag 改指 DB 路径；`setting set` 返回值与面板存储页展示的 `path` 从 store.json 换成 nxsk.db。
 - build 链路新增 `scripts/copy-migrations.mjs`（tsc 不拷 .sql，迁移脚本随 dist 发布）。
 - **升级之前先备份**：凡「往既有库里写结构」的路径都先做库快照——版本升级（情况 C）复制 `migrate/<ts>-pre-vX-to-vY.db`，崩溃恢复补导入（情况 D）复制 `migrate/<ts>-pre-import-json.db`；复制前 `wal_checkpoint(TRUNCATE)` 保证快照含最近写入。首启导入的 JSON 原件由 `.imported-<ts>` 改名留证兜底（同一纪律）。
@@ -381,7 +506,7 @@
 ### Added
 
 - 新单测 27 项（`tests/unit/db-*.test.mjs`）：迁移 runner（空库→v1、幂等、坏脚本回滚、缺边/降级、async 事务体堵死）、导入器（带/不带 version、无 json、corrupt、失败回滚 + 留证改名）、rev 冲突（并发提交第二个报 BLOCKED 且不动库）、往返保真（json→db→loadStore 与 normalize(json) 深比较；inline 边 = fileReferences 重算结果）、attachments 身份/删除钩子/漂移/dedupe 索引。
-- **json 迁 db 防丢测试**（`db-import-fidelity.test.mjs`）：真实形状 fixture（分组/字段/版式/KV 栏目/密文 blob/file+md 双载体引用/settings）逐项断言——每个栏目/条目/分组/字段 id 在库一个不少、layout 与密文逐字节保真、附件 55→55 式对账、inline 边精确到 (entry, field_key, attachment)。**升级导致丢数据会被这组测试直接钉死**。
+- **json 迁 db 防丢测试**（`db-import-fidelity.test.mjs`）：真实形状 fixture（分组/字段/版式/KV 条目模板/密文 blob/file+md 双载体引用/settings）逐项断言——每个条目模板/条目/分组/字段 id 在库一个不少、layout 与密文逐字节保真、附件 55→55 式对账、inline 边精确到 (entry, field_key, attachment)。**升级导致丢数据会被这组测试直接钉死**。
 - **升级备份测试**（`db-upgrade.test.mjs`）：v0→v1 升级与崩溃恢复补导入两条路径都必须先留 `migrate/pre-*.db` 快照，且快照本身是可打开、含升级前数据的完整库。
 - `core/store-shape.ts`：Store 形状与 normalize 从 store.ts 拆出（形状层零依赖 facade，避免 store.ts ⇄ db/* 运行时循环 import）。
 
@@ -389,27 +514,27 @@
 
 - `pnpm lint` / `pnpm typecheck` / `pnpm build` / `pnpm test:unit`（398/398）/ `pnpm test:smoke`（137/137）全绿（Node 24.18.0，Windows）。
 - 冒烟里「CLI 与 HTTP 写进的是同一份数据」原样保留——serve 与 CLI 两个进程现在写的是同一个 nxsk.db，rev 校验在跨进程路径上被真实覆盖。
-- **真实数据迁移实录**（2026-11-11）：live `~/nx-sk/store.json`（13 栏目 / 57 条目 / 55 附件记录 / 42 个 AES-GCM 密文 / 1 KV 栏目）导入 `nxsk.db` 后逐项对账全等；55 条 FileRecord → attachments(kind='file')，51 条 inline 引用边与 CLI `file list`「被条目引用 51/55」精确吻合；抽样密文 blob 逐字节一致、kid 保留、`--mask` 解密链路完好。迁移前全量备份 138 文件 / 40,039,375 字节校验一致。
+- **真实数据迁移实录**（2026-11-11）：live `~/nx-sk/store.json`（13 条目模板 / 57 条目 / 55 附件记录 / 42 个 AES-GCM 密文 / 1 KV 条目模板）导入 `nxsk.db` 后逐项对账全等；55 条 FileRecord → attachments(kind='file')，51 条 inline 引用边与 CLI `file list`「被条目引用 51/55」精确吻合；抽样密文 blob 逐字节一致、kid 保留、`--mask` 解密链路完好。迁移前全量备份 138 文件 / 40,039,375 字节校验一致。
 
 ## 0.35.0 (2026-11-11)
 
-**栏目属性管理从弹窗升级为整页编辑器：块式分组面板 + 字段拖拽，复用条目正文那套拖拽/块基础设施。**
+**条目模板属性管理从弹窗升级为整页编辑器：块式分组面板 + 字段拖拽，复用条目正文那套拖拽/块基础设施。**
 
 ### Added
 
-- `modules/sections/dictEditor.tsx`：栏目属性整页编辑器（点栏目行「编辑」进入，替代旧弹窗）。基本属性改成 Notion 行式（名称+说明在左、控件在右）；分组 = 一块面板、字段 = 面板里的一个块。
+- `modules/templates/dictEditor.tsx`：条目模板属性整页编辑器（点条目模板行「编辑」进入，替代旧弹窗）。基本属性改成 Notion 行式（名称+说明在左、控件在右）；分组 = 一块面板、字段 = 面板里的一个块。
 - **拖拽逻辑**（与 blockBoard 同款 HTML5 DnD + 插入线）：拖分组标题行调整分组顺序；字段行只有 ⠿ 把手可拖，拖到某行上半/下半 = 插到它前/后，**拖进别的分组 = 挪过去**（落点分组由所在面板表达，字段行的「分组」下拉框退役）。排序走 `groups` / `fields` 的整份替换 PATCH——后端早已支持，没有新增 API。
 - 面板空白区可直接投放（追加到该组末尾）；空分组面板给出「把字段拖进来」提示；未声明分组的字段仍单独成块兜底（拖回正经分组即可归位）。
 
 ### Changed
 
-- 栏目视图里 `saveEdit / addField / moveField / GroupRow / FieldRow / ColumnRow` 等旧弹窗代码整体迁入编辑器；保存模型不变：一次改动一次 PATCH + 立刻回读，↑↓ 按钮退役。
+- 条目模板视图里 `saveEdit / addField / moveField / GroupRow / FieldRow / ColumnRow` 等旧弹窗代码整体迁入编辑器；保存模型不变：一次改动一次 PATCH + 立刻回读，↑↓ 按钮退役。
 - 一致性测试「视图里调用的每个 /api/... 都有对应路由」改为**递归扫描整个前端目录**：API 调用拆进同级组件（如 dictEditor.tsx）也要被扫到，堵住「挪个文件名就绕过断言」的洞。
 
 ### 验证
 
 - `pnpm lint` / `pnpm typecheck` / `pnpm build` / `pnpm test:unit`（371/371）/ `pnpm test:smoke`（137/137）全绿。
-- 真机走查（Playwright + 本机 Chrome，隔离 store，21 项断言全过、无控制台报错）：整页编辑器在场、旧弹窗退役、4 块分组面板 15 个字段块、字段跨组拖拽（拖出 7→6 / 拖入 3→4）且刷新后保持、面板拖拽换序、标签失焦即 PATCH、新增/删除空分组、新增字段与确认弹窗删除、「返回栏目」回树。
+- 真机走查（Playwright + 本机 Chrome，隔离 store，21 项断言全过、无控制台报错）：整页编辑器在场、旧弹窗退役、4 块分组面板 15 个字段块、字段跨组拖拽（拖出 7→6 / 拖入 3→4）且刷新后保持、面板拖拽换序、标签失焦即 PATCH、新增/删除空分组、新增字段与确认弹窗删除、「返回条目模板」回树。
 
 ## 0.34.0 (2026-11-11)
 
@@ -418,18 +543,18 @@
 ### Added
 
 - 侧栏右缘拖拽线：按住拖动实时改宽（200–420px 夹取），松手落 localStorage（`nx-sk-sidebar-w`，与收起态一样属纯视觉偏好、不进 store）；双击恢复默认 264px；刷新/重开保持。拖动期间沿用 `body.col-resizing` 屏蔽文字选中。
-- 树节点右键菜单（antd `Dropdown` trigger=contextMenu）：栏目——打开 / 新标签页 / 复制栏目链接 / 展开·折叠条目；条目——打开 / 新标签页 / 复制条目定位（CLI 文本，与条目视图 ⧉ 按钮同源）；工具页——打开 / 新标签页 / 复制页面链接；分组——展开·折叠。搜索态不提供展开切换（此时展开由搜索结果接管）。
-- 打开栏目时侧栏自动拉取并展开它的条目（Notion 的「子页面就在树里」），并把栏目记入 loadedKeys 跟随 reload 刷新。
+- 树节点右键菜单（antd `Dropdown` trigger=contextMenu）：条目模板——打开 / 新标签页 / 复制条目模板链接 / 展开·折叠条目；条目——打开 / 新标签页 / 复制条目定位（CLI 文本，与条目视图 ⧉ 按钮同源）；工具页——打开 / 新标签页 / 复制页面链接；分组——展开·折叠。搜索态不提供展开切换（此时展开由搜索结果接管）。
+- 打开条目模板时侧栏自动拉取并展开它的条目（Notion 的「子页面就在树里」），并把条目模板记入 loadedKeys 跟随 reload 刷新。
 - `entryRef.ts`：条目定位文本与剪贴板复制（API 优先、被拒退回 textarea+execCommand）从条目视图抽出为共享模块，侧栏菜单与 ⧉ 按钮两处消费，文本与两条 toast 文案逐字不变。
 
 ### Changed
 
-- 侧栏树里已有当前栏目的条目时，正文隐藏「条目列表」列与它的拖拽线，编辑器独占正文宽度；收起侧栏（或条目尚未加载）时列表照旧出现——它是收起态下唯一的条目导航，也保住「勾选导出」的入口。
+- 侧栏树里已有当前条目模板的条目时，正文隐藏「条目列表」列与它的拖拽线，编辑器独占正文宽度；收起侧栏（或条目尚未加载）时列表照旧出现——它是收起态下唯一的条目导航，也保住「勾选导出」的入口。
 
 ### 验证
 
 - `pnpm lint` / `pnpm typecheck` / `pnpm build` / `pnpm test:unit`（371/371）/ `pnpm test:smoke`（137/137）全绿。
-- 真机走查（Playwright + 本机 Chrome，隔离 store，23 项断言全过、无控制台报错）：拖拽加宽 264→381 并持久化、刷新保持、双击复位；栏目/条目/工具/分组四类右键菜单项齐、折叠↔展开往返、复制条目定位出 toast；正文列表隐藏与收起态回归；右键「打开」到达设置页。
+- 真机走查（Playwright + 本机 Chrome，隔离 store，23 项断言全过、无控制台报错）：拖拽加宽 264→381 并持久化、刷新保持、双击复位；条目模板/条目/工具/分组四类右键菜单项齐、折叠↔展开往返、复制条目定位出 toast；正文列表隐藏与收起态回归；右键「打开」到达设置页。
 
 ## 0.33.0 (2026-11-11)
 
@@ -437,22 +562,22 @@
 
 ### Added
 
-- 左侧导航树（antd `Tree`）：分组 › 栏目 › 条目三层——分组与栏目来自原导航配置，条目在栏目展开时懒加载（`GET /api/entries?section=`），大栏目由树虚拟滚动兜底；侧栏顶部搜索框按标题过滤栏目与已加载条目，命中分支自动展开；底部常驻存储路径（可点击复制）。
+- 左侧导航树（antd `Tree`）：分组 › 条目模板 › 条目三层——分组与条目模板来自原导航配置，条目在条目模板展开时懒加载（`GET /api/entries?template=`），大条目模板由树虚拟滚动兜底；侧栏顶部搜索框按标题过滤条目模板与已加载条目，命中分支自动展开；底部常驻存储路径（可点击复制）。
 - 侧栏整体可收起：开关在面包屑左侧（Notion 的面板开关位），状态落 localStorage，收起后内容区独占整行。
-- 面包屑栏（antd `Breadcrumb`）：「分组 › 栏目 › 条目」三级定位，点栏目名跳回栏目；「刷新数据」移到这行右侧。
-- 设置页重构为 Notion Preferences 结构：左侧区块导航（栏目管理 / 默认行为 / 存储与运行 / 密钥 / 面板与 CLI / 数据迁移 / 上次读取异常），右侧无边框行式表单（名称 + 说明在左、控件在右、1px 细线分隔）；保存 / 放弃 / 重新读取与脏值提示保留在内容区顶部。
+- 面包屑栏（antd `Breadcrumb`）：「分组 › 条目模板 › 条目」三级定位，点条目模板名跳回条目模板；「刷新数据」移到这行右侧。
+- 设置页重构为 Notion Preferences 结构：左侧区块导航（条目模板管理 / 默认行为 / 存储与运行 / 密钥 / 面板与 CLI / 数据迁移 / 上次读取异常），右侧无边框行式表单（名称 + 说明在左、控件在右、1px 细线分隔）；保存 / 放弃 / 重新读取与脏值提示保留在内容区顶部。
 - 新增开源依赖：`antd` ^5（Tree / Breadcrumb / Input）、`@ant-design/icons` ^5（单色线性图标，替代被删的 CSS 三角与纯文字 tab）。
 
 ### Changed
 
 - 删除 `header.top` 与 `nav.tabs`：品牌 + 版本迁到侧栏顶部，存储路径迁到侧栏底部与设置页，分组悬浮菜单（`tab-group` / `tab-menu`）整块退役——分组现在是树里的文件夹节点。
-- 条目视图跟随外部选择：侧栏点同栏目的另一条时，主区域直接切换选中（不重拉数据）。
+- 条目视图跟随外部选择：侧栏点同条目模板的另一条时，主区域直接切换选中（不重拉数据）。
 - 附件页内部分类 tab 仍用原 `.tab` 样式，不受影响。
 
 ### 验证
 
 - `pnpm lint` / `pnpm typecheck` / `pnpm build` / `pnpm test:smoke` / `pnpm test:unit` 全绿（见提交）。
-- 真机走查（Playwright + 本机 Chrome，隔离 store）：侧栏树三层展开与懒加载、搜索过滤、收起/展开、面包屑三级显示与跳转、设置页七个区块切换与保存、附件/导出/栏目管理各页可达、无控制台报错。
+- 真机走查（Playwright + 本机 Chrome，隔离 store）：侧栏树三层展开与懒加载、搜索过滤、收起/展开、面包屑三级显示与跳转、设置页七个区块切换与保存、附件/导出/条目模板管理各页可达、无控制台报错。
 
 ## 0.32.0 (2026-11-10)
 
@@ -537,7 +662,7 @@
 
 ## 0.30.0 (2026-11-10)
 
-**`peek` 头部换成 Notion「打开方式」菜单（像素对照、键盘可达），补 `#/<栏目>?entry=<id>` 深链与默认视图；补齐 `#5` 遗留的列表计数与全屏空白。**
+**`peek` 头部换成 Notion「打开方式」菜单（像素对照、键盘可达），补 `#/<条目模板>?entry=<id>` 深链与默认视图；补齐 `#5` 遗留的列表计数与全屏空白。**
 
 ### Added
 
@@ -546,8 +671,8 @@
   支持 ↑↓/Home/End、→ 进二级、← 退二级、Esc 只关菜单、点外部关闭，关闭后焦点回触发按钮。
 - **默认视图持久化**：「编辑默认视图」写入 `localStorage['nx-sk-peek-default:<source|shortcut>']`，
   重载后按该形态打开；隐私模式写盘失败不影响当前切换。
-- **条目深链**：`#/<栏目>?entry=<id>` 直接选中该条；选中条目时地址栏同步 `?entry=`（仅当地址已在
-  该栏目，兜底栏目仍不补 hash）。菜单的「新标签页」用这个地址打开。
+- **条目深链**：`#/<条目模板>?entry=<id>` 直接选中该条；选中条目时地址栏同步 `?entry=`（仅当地址已在
+  该条目模板，兜底条目模板仍不补 hash）。菜单的「新标签页」用这个地址打开。
 - **条目列表 shortcut 计数**：列表行显示 `N 组 · M 条`（title 带字段名），补上 0.29.0 只做在折叠条/面板里的遗漏。
 
 ### Changed
@@ -685,7 +810,7 @@
 
 - **块高由内容决定**：行高压到 8px 一档，用 `ResizeObserver` 量块里的内容（md 正文、附件列表、
   清单/表格、自动增高的 textarea），显示高度 = max(存储的最小高, 内容高度)。内容删掉就缩回最小高。
-  - 存的 `h` 因此变成**最小高**：版式 JSON 描述「这个栏目怎么排」，不是「这一条内容有多高」——
+  - 存的 `h` 因此变成**最小高**：版式 JSON 描述「这个条目模板怎么排」，不是「这一条内容有多高」——
     后者每条记录都不一样，不该落盘（视图期算出来的高度会在回写时剥掉）。
   - **只保留左右缩放手柄**：高度既然跟内容走，再叠一个手动高度只会互相打架（拖宽 → 内容重排 → 高度自己跟）。
 - **md 正文不再限高滚动**：`.md-preview` 去掉 `max-height: 340px / 560px`，阅读态连灰底也去掉，
@@ -700,9 +825,9 @@
 ### Notes
 
 - 版式 JSON 的 `h` 语义变了（最小高 / 8px 一档），但**结构与读写口径不变**：
-  `section get --json` / `section update --layout` 照旧；老版式读进来会被夹到最小高，
+  `template get --json` / `template update --layout` 照旧；老版式读进来会被夹到最小高，
   视觉上相当于「内容多长就多长」，不需要迁移脚本。
-- 全局样式改动波及所有页面（条目 / 栏目 / 附件 / 导出 / 设置），逐页截图确认过没有退化。
+- 全局样式改动波及所有页面（条目 / 条目模板 / 附件 / 导出 / 设置），逐页截图确认过没有退化。
 
 ## 0.24.0 (2026-11-08)
 
@@ -710,7 +835,7 @@
 
 过去正文是「分组小标题 + 自动填充的字段矩阵」：顺序由字段字典决定，想把「岗位」挪到「公司名称」
 右边、想让两块并排、想让长文独占一整行，都只能去改字段字典。现在**版式是独立的一份 JSON**
-（`section.layout`），拖动即改、自动落盘，与「字段值」是两条保存链——拖一下版式不会把没填完的值一起提交。
+（`template.layout`），拖动即改、自动落盘，与「字段值」是两条保存链——拖一下版式不会把没填完的值一起提交。
 
 ### Added
 
@@ -718,14 +843,14 @@
   底层用 `react-grid-layout`（MIT）做网格引擎：拖块头 `⠿` 搬块、拖右下角改宽高、单列变多列、
   窄屏按断点自动折成一列。碰撞 / 回弹 / 折行都交给引擎，**不自己实现面板引擎**——
   这一层最容易出错，也最没有复用价值。
-- **版式单独存**（`section.layout`）：
+- **版式单独存**（`template.layout`）：
   `{v, mode, panels[], groups{分组:{collapsed, layouts{断点:[{i,x,y,w,h}]}}}}`。面板顺序、折叠态、
   每个块的位置/宽度/高度都在里面，`i` 就是字段 key；坐标是列单位（lg 12 / md 10 / sm 6 / xs 4 / xxs 2）。
 - **结构变了版式自愈**（幂等，读写两条路都过一遍）：删字段 → 对应块消失且不留空位；加字段 →
   接到该组最底部（不插队打散已排好的版式）；删分组整块移除、新分组接末尾。
   没存过版式 = 按默认编排铺一遍（窄字段半列、宽字段整行、窄屏单列）。
-- **CLI 对等**：`section get --json` 带出**已按当前字段对齐**的 `layout`；
-  `section update --layout @layout.json` 整体写版式、`--clear-layout` 回到默认编排。
+- **CLI 对等**：`template get --json` 带出**已按当前字段对齐**的 `layout`；
+  `template update --layout @layout.json` 整体写版式、`--clear-layout` 回到默认编排。
   端到端冒烟把「面板走的那条 HTTP PATCH」与 CLI 两头都钉住了。
 - **落位吸附**：半宽的块从「缝上」（x=3 这种）吸附到 0 / 6 这类档位，两块并排才齐；
   用户特意拉的自由宽度（除不尽列数，如 5 列）保持原样，不被「自动摆正」。
@@ -747,28 +872,28 @@
 
 ## 0.23.0 (2026-10-31)
 
-**栏目结构在面板里可自己搭了：分组能增删改序，字段能改名 / 换组 / 换类型 / 换位置。**
+**条目模板结构在面板里可自己搭了：分组能增删改序，字段能改名 / 换组 / 换类型 / 换位置。**
 
-过去面板只能「加字段」，连建一个分组都要回 CLI 或换模板——于是「这个栏目长什么样」
+过去面板只能「加字段」，连建一个分组都要回 CLI 或换模板——于是「这个条目模板长什么样」
 这件事实际上只有命令行能控制，面板就不是控制面板。这次把结构的四个分组操作与两个字段操作
-做成 action（面板与 CLI 同一份），面板「编辑栏目」里直接可改。
+做成 action（面板与 CLI 同一份），面板「编辑条目模板」里直接可改。
 
 ### Added
 
-- **分组骨架**：`section update --add-group / --rename-group / --move-group / --remove-group`。
+- **分组骨架**：`template update --add-group / --rename-group / --move-group / --remove-group`。
   改名可以**连 id 一起换**（组里字段的 `group` 引用跟着改，不会整组从表单里消失）。
   三条规矩全是**拦下来**而不是悄悄做：id 重复报 `CONFLICT`（不覆盖同名分组）、
   **非空分组不给删**（报 `BLOCKED` 并列出是哪几个字段）、内置「原始资料」分组不给删。
-- **字段级改动**：`section update --set-field`（标签 / 类型 / 分组 / 提示 / 必填策略）
+- **字段级改动**：`template update --set-field`（标签 / 类型 / 分组 / 提示 / 必填策略）
   与 `--move-field`（在自己分组内上下挪）。**key 不可改**——值按 key 存在条目里，
   改 key 等于让已有值读不出来；要换就新增字段再搬值。
-- **面板**：「编辑栏目」弹窗里两块——「分组」（id / 名字就地改、↑↓ 换序、空组才能删）
+- **面板**：「编辑条目模板」弹窗里两块——「分组」（id / 名字就地改、↑↓ 换序、空组才能删）
   与「字段字典」（每行可改标签 / 类型 / 分组 / 提示 / 必填策略，组内 ↑↓，删除）。
   一次改动一次落盘（每次改动都要过后端校验，出错时知道是哪一步），改完立刻回读。
   清单类字段（`entrylist` / `table`）的**类型置灰**：列是字段自己的结构，
   就地换类型等于换一个字段——要建就在「新增字段」里连列一起建。
 - 每次改动都把**新旧值**打进输出（`字段 phone：分组 contact → reach`），
-  不再只说「已更新栏目 job：fields」——那种输出改错了没法回溯。
+  不再只说「已更新条目模板 job：fields」——那种输出改错了没法回溯。
 
 - **表格 / 清单：行与列都能拖**（Notion 那种手感）：拖**表头**搬列、拖行尾的 ⠿ 搬行，
   松手前一条**插入线**告诉你落在哪（只高亮整行说不清「会插到哪」）。排序算法单独一个
@@ -804,7 +929,7 @@
 
 ## 0.21.0 (2026-10-30)
 
-**条目有了块正文（`entry.body`）；栏目有了数据库视图（`section.views`）。**
+**条目有了块正文（`entry.body`）；条目模板有了数据库视图（`template.views`）。**
 
 块是「递归的内容单元」，视图是「同一批数据的多种投影」。两者都**只加可选键**，
 老 store 一个字节不用改；反方向的降级被显式拦住（见 Changed）。
@@ -812,20 +937,20 @@
 ### Added
 
 - **块正文**：`entry.body: Block[]`，七种叶块（段落 / 标题 / 图文 / 表格 / 清单 / 附件 / 密钥）
-  与两种容器块（内嵌栏目 `section` / 分栏 `column`，容器块的编辑随下一版）。
+  与两种容器块（内嵌条目模板 `template` / 分栏 `column`，容器块的编辑随下一版）。
   - CLI：`entry block add | update | move | remove | remove-many`、`entry body <ref> [--mask]`；
     HTTP 同名路由，**一条 action 双端**（面板与 CLI 走同一份 service）。
   - 详细页下半部分是块面板：双击编辑文本块、表格块复用表格字段的同一台机器（公式/统计照旧）、
     密钥块与 secret 字段同一条 AES-256-GCM 路径，打码态**只读**（把星号写回去等于把星号存成密钥）。
   - 块随导出包往返；file 块里的附件 id 计入引用扫描（`file cleanup` 不会误删）；
     md 块里的贴图随包重映射。
-- **数据库视图**：`section.views` / `section.defaultView`。
-  - CLI：`section view list | add | update | remove | set-default`（HTTP 同名路由）。
-  - **缺省视图是推断的、不落盘**：非 KV 栏目给「表格 / 精简 / 看板」，KV 栏目给「KV」；
+- **数据库视图**：`template.views` / `template.defaultView`。
+  - CLI：`template view list | add | update | remove | set-default`（HTTP 同名路由）。
+  - **缺省视图是推断的、不落盘**：非 KV 条目模板给「表格 / 精简 / 看板」，KV 条目模板给「KV」；
     第一次改视图才固化（并把当时生效的那套一起写进去，chips 不会凭空消失）。
   - 投影只存 `key/width/hidden`，标签与类型回查字段字典；引用的字段被删 → 列还在，
     表头写「已删字段」、单元格「—」（不炸、也不静默消失）。
-  - 面板：栏目页顶部视图 chips + 表格视图（横向投影，密文列在表格里一律打码）。
+  - 面板：条目模板页顶部视图 chips + 表格视图（横向投影，密文列在表格里一律打码）。
     看板**渲染**随下一版（配置与 action 已可用）。
 
 ### Changed
@@ -833,9 +958,9 @@
 - **`STORE_VERSION` 3 → 4**。只加可选键、无迁移函数；但**老版本读 v4 store 后写入会被拒**
   （`BLOCKED`：「store 由更新版本的 nx-sk 写入」）。不拦的话，老版本的白名单归一会把
   `body` / `views` 静默抹掉，且版本号相同、无从警告。
-- **导出包 `formatVersion` 1 → 2**（包里多了 `entries[].body` 与 `section.views`）。
+- **导出包 `formatVersion` 1 → 2**（包里多了 `entries[].body` 与 `template.views`）。
   老版本读到新包会明确报「版本过新，请先升级」，而不是把两个键静默丢掉。
-  导入时视图只在「新建栏目」或「目标没配过视图」时应用——目标已有视图说明用户自己配过，不覆盖。
+  导入时视图只在「新建条目模板」或「目标没配过视图」时应用——目标已有视图说明用户自己配过，不覆盖。
 
 ### Fixed
 
@@ -845,27 +970,27 @@
 
 ## 0.20.0 (2026-10-30)
 
-**栏目管理重构成树；初始化不再播种一堆场景栏目，改播一个「字段样例」说明书。**
+**条目模板管理重构成树；初始化不再播种一堆场景条目模板，改播一个「字段样例」说明书。**
 
 ### Added
 
-- **栏目管理 = 栏目 → 条目的树**（`section tree`，HTTP `GET /api/sections/tree`）：
-  可展开/收起（展开态记在面板设置里）、**多选 / 全选**（勾栏目 = 连条目一起，条目可单独勾）、
-  **批量删除**（`section remove-many` / `entry remove-many`，HTTP 同名 POST 路由）——
-  精确到条目，删栏目等同删文件夹（连带条目，需显式确认）；找不到的跳过并报告（status: partial），
-  一个都找不到才报错。栏目多时的搜索：栏目命中整棵留下，只有条目命中时只留命中的并临时展开。
-- **初始化只播种一个「字段样例」栏目**（`demo` 模板，连一条示例条目一起）：
+- **条目模板管理 = 条目模板 → 条目的树**（`template tree`，HTTP `GET /api/templates/tree`）：
+  可展开/收起（展开态记在面板设置里）、**多选 / 全选**（勾条目模板 = 连条目一起，条目可单独勾）、
+  **批量删除**（`template remove-many` / `entry remove-many`，HTTP 同名 POST 路由）——
+  精确到条目，删条目模板等同删文件夹（连带条目，需显式确认）；找不到的跳过并报告（status: partial），
+  一个都找不到才报错。条目模板多时的搜索：条目模板命中整棵留下，只有条目命中时只留命中的并临时展开。
+- **初始化只播种一个「字段样例」条目模板**（`demo` 模板，连一条示例条目一起）：
   标量字段（文本/数字/是否/下拉/日期/标签）、组合字段（结构清单 + 表格：计算列与表尾统计）、
   富内容（图文 / 附件 / 密钥）各来一份，外加自带的「原始资料」袋——
-  第一屏是说明书，不是别人的表格。求职 / 密钥 / 项目那 6 个场景模板仍是模板（`section add --template`）。
-- **没有 KV 栏目时第一次 `key set` 自动补建**（与 `section add secret --template secret` 同形状；
-  读命令不建）。播种不再自带密钥栏目后，`key set` 的「我要存」不该被「先建栏目」挡住。
+  第一屏是说明书，不是别人的表格。求职 / 密钥 / 项目那 6 个场景模板仍是模板（`template add --preset`）。
+- **没有 KV 条目模板时第一次 `key set` 自动补建**（与 `template add secret --preset secret` 同形状；
+  读命令不建）。播种不再自带密钥条目模板后，`key set` 的「我要存」不该被「先建条目模板」挡住。
 
 ### Changed
 
-- `settings.defaultSection` 缺省从 `job` 改为 `demo`（指向播种的那个栏目）。
-- 面板「栏目」页整页重构：平铺列表 → 树 + 批量条 + 搜索；存量用户的 store 不受影响
-  （播种只发生在「store 文件不存在」时，文件在、栏目为空依旧不复活）。
+- `settings.defaultSection` 缺省从 `job` 改为 `demo`（指向播种的那个条目模板）。
+- 面板「条目模板」页整页重构：平铺列表 → 树 + 批量条 + 搜索；存量用户的 store 不受影响
+  （播种只发生在「store 文件不存在」时，文件在、条目模板为空依旧不复活）。
 
 ## 0.19.0 (2026-10-30)
 
@@ -873,8 +998,8 @@
 
 `entrylist` 是「变长的几列文本」；`table` 是它的进阶形态——每格有类型（勾选 / 下拉 / 数字 /
 日期），带**计算列**与**表尾统计**。关键差别不在功能多少，在**结构归谁**：
-`table` 的列定义、行、公式、统计配置全部存在**条目值里**，不在栏目字典里。
-因此「这一条想多一列」不必改 schema，也不会波及同栏目的其它条目；
+`table` 的列定义、行、公式、统计配置全部存在**条目值里**，不在条目模板字典里。
+因此「这一条想多一列」不必改 schema，也不会波及同条目模板的其它条目；
 面板上直接加列 / 改类型 / 写公式，改完就是这份数据的一部分。
 
 ### Added
@@ -898,14 +1023,14 @@
   - 面板：`tableField.jsx` 的表格控件——勾选框 / 下拉框 / 数字 / 日期就地编辑，
     回车换下一行、Alt+↑↓ 跳上下格、行可上下移与删除；「列设置」里加列 / 改类型 /
     写公式 / 指定统计方式 / 默认值 / 左右移 / 删列（连值一起删，改 key 会搬值）。
-    栏目编辑页新增字段时可直接配初始列。
+    条目模板编辑页新增字段时可直接配初始列。
   - **写入即体检**：每条公式在保存前用一行空值当探针跑一遍，只拦**与数据无关**的错
     （语法错 / 名字解析不到 / 结果不是单值），除零这类「这条数据不巧」留到渲染时逐格报。
     列、行、默认值、下拉候选、`total`、`totals` 全走同一条校验，面板与 CLI 共用。
   - 列可以带 `default`（新增行时的初值，按类型强转；`0` / `false` 都合法）。
   - 新 reference `assets/nx-sk/references/15-special-fields.md`：值不是标量的字段
     （`table` / `entrylist` / `md` / `file` / `source` / `secret`）的形状、规矩、
-    公式与统计口径、错误对照表；`10-sections-entries` 里那份表格说明改为指向它（不留两份）。
+    公式与统计口径、错误对照表；`10-templates-entries` 里那份表格说明改为指向它（不留两份）。
 
 ### Changed
 
@@ -915,7 +1040,7 @@
 - `isBlank` 与 `isStoredEmpty` 分开了：前者判完整度（有列没行的表算没填），
   后者判「值要不要输出」（骨架必须带出去，否则面板拿不到列，搭好的结构一保存就"消失"）。
 - `serializeEntry` 对表格字段永远输出**自描述文档**（列跟着数据走），
-  所以 `entry get` / `section dump` / 导出拿到的东西不需要再回查栏目字典。
+  所以 `entry get` / `template dump` / 导出拿到的东西不需要再回查条目模板字典。
 - `sensitiveViewer` 现在也认表格的密文列（原先只探 entrylist 的 `fields`），
   并且列存在数据里时按「任一格是密文」判定，不会再退化成「需要密钥才能解密」。
 - **短值的打码占位现在也认得出**：`maskValue` 对 ≤10 字符的值返回全星（`***`），
@@ -926,14 +1051,14 @@
 
 - 表格的密文列在**打码显示**时保存：打码占位优先按打码值反查原密文（行被拖动过也能认对），
   认不出来才退回行号兜底；已知限制（两格打码值一模一样又拖了行）写进文档。
-- `sections` 的「新增字段」表单里 `toast` 未定义（校验失败时会抛 ReferenceError），现按 props 传入。
+- `templates` 的「新增字段」表单里 `toast` 未定义（校验失败时会抛 ReferenceError），现按 props 传入。
 
 ## 0.18.0 (2026-10-28)
 
-**拖拽不再闪，悬浮不再乱弹；「原始资料」袋对每个栏目都成立。**
+**拖拽不再闪，悬浮不再乱弹；「原始资料」袋对每个条目模板都成立。**
 
-这一版没有新栏目，都是「原来能用、但用起来别扭」的地方：设置页拖分组时列表自己
-在动，于是闪；头部悬浮分组入口时一秒钟弹开又收起好几个；自定义栏目丢了资料袋。
+这一版没有新条目模板，都是「原来能用、但用起来别扭」的地方：设置页拖分组时列表自己
+在动，于是闪；头部悬浮分组入口时一秒钟弹开又收起好几个；自定义条目模板丢了资料袋。
 
 ### Changed
 
@@ -944,16 +1069,16 @@
   展开态交给 App 托管成「只开一个」、点击改为切换（触屏没有 hover，只能走这条路——
   按 `(hover: hover)` 分流，避免 tap 时合成的 mouseenter 先把菜单开掉、click 又把它关掉）。
   另加：展开时三角翻上去（只动 transform，不改布局）。
-- **「原始资料」袋（`source` 字段）成为每个非 KV 栏目自带的结构**：此前只有模板实例
-  自带，自定义栏目一旦传了 `--fields`/`--groups`（sk-needdo 的常规路径），袋就被
+- **「原始资料」袋（`source` 字段）成为每个非 KV 条目模板自带的结构**：此前只有模板实例
+  自带，自定义条目模板一旦传了 `--fields`/`--groups`（sk-needdo 的常规路径），袋就被
   整体覆盖掉了。现在内置规则收口为唯一函数 `ensureSourceBuiltin`，在 `instantiateTemplate`、
-  `section add`、`normalizeSection` 三处生效——存量栏目缺袋时读一次即自愈，
+  `template add`、`normalizeSection` 三处生效——存量条目模板缺袋时读一次即自愈，
   KV 表仍不加（形状固定）。sk-needdo 文档同步改为「杂乱输入先入袋、再整理」，
   并去掉字段设计里重复的「来源」text 字段（与 `source` 键冲突）。
 
 ### Fixed
 
-- **设置页「栏目管理」拖拽闪屏、边缘落点乱跳**：两处根因都在「拖的时候列表自己在动」。
+- **设置页「条目模板管理」拖拽闪屏、边缘落点乱跳**：两处根因都在「拖的时候列表自己在动」。
   - 闪屏：原先用**实时预览**（拖动中就把被拖的行挪到落点上）。行一挪，指针底下的元素
     就换了、下方容器整体位移一行（28px），`dragover` 于是算出另一个落点，再挪再算——
     自己推自己。现在拖动期间**列表静止**（被拖的那行半透明留在原地），落点用一条
@@ -962,7 +1087,7 @@
   - 边缘乱跳：容器空白处（缝隙、内边距、说明文字）原先一律判成「追加到末尾」，
     指针一进缝隙整列表就跳到队尾；现在整块容器都按**行中线**算插入位
     （`navModel.slotAt`），边缘与缝隙都归到最近的一侧。
-  - 平铺区索引错位：`containerOf` 的平铺分支拿 `poolOrder`（含已归组 / 隐藏栏目的全量顺序）
+  - 平铺区索引错位：`containerOf` 的平铺分支拿 `poolOrder`（含已归组 / 隐藏条目模板的全量顺序）
     当行号，与屏幕上第几行差好几格，落点因此偏——改为按**可见行**（`viewRows`）取索引。
   - 分组换位从「交换」改成「挪」：0 拖到 2 时中间那组上移一格，不再把 B 留在原地。
   - 顺带：拖回原位不再提示「有未保存的改动」（导航按 `sameStructure` 判脏，
@@ -978,7 +1103,7 @@
 
 **附件不再靠下拉框挑，孤儿附件能一键清，改动不用翻到页底才保存。**
 
-三处都是「长栏目 / 附件多了以后，原来的做法开始难受」逼出来的：
+三处都是「长条目模板 / 附件多了以后，原来的做法开始难受」逼出来的：
 
 ### Added
 
@@ -994,7 +1119,7 @@
   有 `--dry-run`（先列清单）；没有可清的返回 `skipped`（不是失败）。
   面板上：附件中心工具条「清理未引用（N）」，点了弹确认并报清数量。
 - **条目表单的保存按钮固定在右上角**：有改动时表单顶栏出现「N 处改动未保存 · 保存」，
-  且顶栏**吸顶**（`position: sticky`）——长栏目滚到一半也看得见保存，不必翻到表单最底。
+  且顶栏**吸顶**（`position: sticky`）——长条目模板滚到一半也看得见保存，不必翻到表单最底。
   底部的保存按钮保留；关标签页前会拦一下（`beforeunload`），改到一半不留神关掉不丢改动。
 
 ### Changed
@@ -1011,7 +1136,7 @@
 **凭据自动化：账号密码跟着场景走，直接渲染成配置文件。**
 
 nx-sk 的定位从来不是「另一个密码管理器」，而是**把凭据变成能用的东西**。
-这一版把这条主用途补齐：凭据不再必须绕去「密钥」栏目，agent 可以大胆写、直接出成品配置。
+这一版把这条主用途补齐：凭据不再必须绕去「密钥」条目模板，agent 可以大胆写、直接出成品配置。
 
 ### Added
 
@@ -1022,20 +1147,20 @@ nx-sk 的定位从来不是「另一个密码管理器」，而是**把凭据变
   判据刻意宽松：把不是凭据的字段多加密一次只是多几行密文，反过来漏加密的代价是凭据裸奔。
 - **deploy 模板自带「凭据清单」字段**（分组「凭据」）：结构清单，一行一组账号，
   密码与令牌列 `sensitive` 密文落盘。**一个场景的凭据写在那个场景的条目里**，
-  不再需要为它单开一个密钥栏目。老栏目用 `section sync deploy` 补上。
+  不再需要为它单开一个密钥条目模板。老条目模板用 `template sync deploy` 补上。
 - **结构清单的行可以用**列标签**写**（`密码` 与 `pass` 等价），与顶层 `--set` 同一口径 ——
   之前只认列 key，文档里的示例是错的，agent 按文档写就会报错。
 - **渲染脚本 `assets/nx-sk/scripts/render-config.js`**：把条目里的凭据替换进模板正文的
   `${VAR}`，产出成品配置文件（compose / k8s / .env / Dockerfile）。
   跑完报「替换了哪些、哪些没解析」。固化成文件是因为**多行 `node -e` 在 Windows 终端里
   会被吃掉引号**（实测是静默不执行、退出码 0）。
-- **新 ref `30-credentials`**：凭据归属哪个栏目、多组账号怎么建清单、跨栏目台账、
+- **新 ref `30-credentials`**：凭据归属哪个条目模板、多组账号怎么建清单、跨条目模板台账、
   渲染流程、安全边界与常见场景落位。SKILL.md 与 `10` / `20` / `50` 三个 ref 同步改写，
   整体口径从「怕明文」改成「**模板层与场景层分工**」。
 - **随包 skill 改成「完全客户端」**：只回答「怎么用」与「东西该往哪儿放」，
   不再夹带开发侧知识。`references/00-design.md` **整篇重写**——
   从「代码分层 / action 声明 / 错误契约 / 踩坑记录」改成**用户侧的心智模型**：
-  栏目确定结构、条目确定数据、内置字段是建议清单、动态栏目 + 动态条目、
+  条目模板确定结构、条目确定数据、内置字段是建议清单、动态条目模板 + 动态条目、
   四个聚合点、密文边界、给 agent 的三条不变量。
   开发侧内容（分层与依赖方向、action 机制、错误契约表、实测踩坑表）**归位到仓库 README**
   的「设计取舍与踩坑记录」——装了包也用不上它，但仓库开发者需要它。
@@ -1043,10 +1168,10 @@ nx-sk 的定位从来不是「另一个密码管理器」，而是**把凭据变
 
 ### Changed
 
-- **密钥（KV）栏目的定位收窄为「跨场景通用的 key」**：只服务于一个场景的凭据
-  （某台服务器的密码、某个平台的账号）改写进场景自己的栏目条目。理由是凭据的寿命跟着场景 ——
+- **密钥（KV）条目模板的定位收窄为「跨场景通用的 key」**：只服务于一个场景的凭据
+  （某台服务器的密码、某个平台的账号）改写进场景自己的条目。理由是凭据的寿命跟着场景 ——
   堆在一个 KV 表里，到头来只能靠键名前缀编码场景，等于把结构塞进键名。
-- **`entry keys` 台账的地位明确**：它是「凭据散在各个栏目里」的对账表 ——
+- **`entry keys` 台账的地位明确**：它是「凭据散在各个条目模板里」的对账表 ——
   改密码、找入口、迁移机器前先跑一遍。
 - skill 文档补齐了两个漏写的内置模板（`platform` / `thesis`，共 8 个），
   以及 `entrylist` 行的列标签写法。
@@ -1054,7 +1179,7 @@ nx-sk 的定位从来不是「另一个密码管理器」，而是**把凭据变
 ### Fixed
 
 - 模板里 `deploy` 的 `content` 字段提示与 `50-deploy` 的口径此前互相矛盾
-  （一个说「真值放密钥栏目」、一个说「明文密钥不写在这里」），现在统一为
+  （一个说「真值放密钥条目模板」、一个说「明文密钥不写在这里」），现在统一为
   「模板正文写占位符、场景真值写凭据清单」。
 - **`entry keys` 台账漏掉结构清单里的凭据**：场景凭据现在住在 entrylist 的行里
   （`creds` 清单），而台账只扫顶层字段 —— 于是「一条命令看全部凭据」恰好看不见
@@ -1100,11 +1225,11 @@ nx-sk 的定位从来不是「另一个密码管理器」，而是**把凭据变
 
 ## 0.15.0 (2026-10-20)
 
-**原始资料袋：每个栏目都自带一个「乱入区」**
+**原始资料袋：每个条目模板都自带一个「乱入区」**
 
 ### Added
 
-- **毕业论文栏目模板（`section add --template thesis`）+ 随包 skill `sk-thesis`**：把信息工程学院
+- **毕业论文预置模板（`template add --preset thesis`）+ 随包 skill `sk-thesis`**：把信息工程学院
   2022 版撰写规范（设计开发类）做成 9 组 / 59 个字段——页面与字体硬指标、章节结构、图表与三线表、
   代码要求、参考文献（GB/T 7714-2015）、打印装订与日期红线，外加一份可直接勾选的「交稿自检」清单。
   配套 `assets/sk-thesis/templates/毕业论文模板-设计开发类.docx`：A4、页边距 2.5/2/2.5/2 cm、
@@ -1114,8 +1239,8 @@ nx-sk 的定位从来不是「另一个密码管理器」，而是**把凭据变
   `20-structure` 是章节骨架与装订顺序，`30-pitfalls` 记录真实错法（一级标题加粗、
   图题「图 1」多空格、（1）用自动编号带悬挂缩进、批注未删导致 PDF 整页缩到 74%）。
 
-- **原始资料袋（`source` 字段）：每个栏目都自带一个的「乱入区」**——杂乱资料（邮件、截图、
-  PDF 摘录、手抄的表）先**原样**收进袋子，之后由 agent 或人按栏目字段字典整理成结构化字段。
+- **原始资料袋（`source` 字段）：每个条目模板都自带一个的「乱入区」**——杂乱资料（邮件、截图、
+  PDF 摘录、手抄的表）先**原样**收进袋子，之后由 agent 或人按条目模板字段字典整理成结构化字段。
   「先乱入、后整理」因此成立：没有这个袋子，用户只有把乱数据硬塞进结构化字段（把结构搞脏）
   或干脆不存（信息丢了）两个坏选择。
   - **面板**：条目表单底部一条折叠条「原始资料 · N 条」，点开是右侧抽屉——左清单、中正文，
@@ -1126,8 +1251,8 @@ nx-sk 的定位从来不是「另一个密码管理器」，而是**把凭据变
   - **双向同步**：整理完用 `source update --mapped 字段key` 给用上的资料打锚点，
     字段值也可回写进袋子留出处——「哪个字段的值来自哪条原始资料」永远反查得回来。
   - 三条纪律写进代码与文档：**原文不改写**、**不确定就留空**、**敏感内容不进袋**（袋是明文的，
-    密码走「密钥」栏目或 `sensitive` 字段）；袋**不计完整度**（暂存区不是「该填的格子」）。
-  - 新栏目（模板或自定义）都自带这个字段；老栏目用 `nx-sk source ensure` 一次补齐。
+    密码走「密钥」条目模板或 `sensitive` 字段）；袋**不计完整度**（暂存区不是「该填的格子」）。
+  - 新条目模板（模板或自定义）都自带这个字段；老条目模板用 `nx-sk source ensure` 一次补齐。
 - **`sk-source` skill**（随包分发，`nx-sk skill install sk-source`）：讲透「原始资料 ↔ 字段」
   的双向同步、映射表纪律（把握不足就不写）、以及各种文件（PDF/截图/邮件/表格）怎么进袋。
 
@@ -1139,15 +1264,15 @@ nx-sk 的定位从来不是「另一个密码管理器」，而是**把凭据变
 
 ## 0.14.0 (2026-10-19)
 
-**统一列表机制：跨栏目关键 key 台账 + 容器平台字段模板 + 结构清单**
+**统一列表机制：跨条目模板关键 key 台账 + 容器平台字段模板 + 结构清单**
 
 ### Added
 
-- **关键 key 台账（`nx-sk entry keys [--reveal]`）**：跨栏目聚合 链接 / 账号 / 密码 / 镜像 / token 等
-  关键字段统一列表——不管是 job/school 还是自己手搓的「容器平台」栏目里的 accessUrl / account /
+- **关键 key 台账（`nx-sk entry keys [--reveal]`）**：跨条目模板聚合 链接 / 账号 / 密码 / 镜像 / token 等
+  关键字段统一列表——不管是 job/school 还是自己手搓的「容器平台」条目模板里的 accessUrl / account /
   password 字段，全部进同一张台账。值默认打码（链接类保留原文便于点击；账号/密码/token 一律掩码）；
   `--reveal` 出明文（密文字段走解密）。给 agent 一句「把川农控制台链接和账号密码贴出来」就能直接拿到。
-- **容器平台模板（`nx-sk section add --template platform`）**：一个平台（KubeSphere / Rancher / 自建 k8s…）
+- **容器平台模板（`nx-sk template add --preset platform`）**：一个平台（KubeSphere / Rancher / 自建 k8s…）
   一个条目，字段：基本信息（平台名/提供方/环境）/ 访问凭据（控制台链接/账号/密码[密文]）/ 镜像与部署
   （项目命名空间/仓库/镜像名/部署清单附件）/ 网络入口（应用入口链接）/ 备注。
   配合 `entry keys` 把分散在每个平台条目里的链接/账号/密码自动汇总成台账。
@@ -1156,9 +1281,9 @@ nx-sk 的定位从来不是「另一个密码管理器」，而是**把凭据变
   （localStorage），跨会话保留。拖动过程只改本地 state，松手才落盘，不因 mousemove 重渲染表单。
 
 - **条目定位面包屑：点击即复制，方便把「改哪个条目」一键贴给 agent**。条目列表每行悬浮出 ⧉
-  （hover 才显示，不打扰），右侧详情头的「栏目 › 条目 ⧉」整条可点；复制出的定位同时带
-  人读路径（栏目「标题」(id) › 条目「标题」(id)）与可直接执行的 CLI
-  （`entry get` / `entry update --section <栏目id> <条目id>`）——标题可能重名或被改，
+  （hover 才显示，不打扰），右侧详情头的「条目模板 › 条目 ⧉」整条可点；复制出的定位同时带
+  人读路径（条目模板「标题」(id) › 条目「标题」(id)）与可直接执行的 CLI
+  （`entry get` / `entry update --template <条目模板id> <条目id>`）——标题可能重名或被改，
   定位与命令一律用 id，agent 拿到就能精确动手，不用再猜「是哪一条」。
 
 - **`entrylist` 字段类型：结构清单（变长行）**——一个字段的值是**行对象的数组**，行数不限；
@@ -1173,7 +1298,7 @@ nx-sk 的定位从来不是「另一个密码管理器」，而是**把凭据变
     空串 = 清空）；没登记过的键直接写行数组会自动登记成 entrylist 并从行推断列；
     `entry get` 里清单一行一条、带列标签；模板漂移把列定义也算进去（列变了 sync 会报）。
 
-- **`sk-pdf` skill：把 PDF 转成图文 SOP 栏目**（随包分发，`nx-sk skill install sk-pdf`）。
+- **`sk-pdf` skill：把 PDF 转成图文 SOP 条目模板**（随包分发，`nx-sk skill install sk-pdf`）。
   解决「照着一份 PDF 手册把流程沉淀进 nx-sk」这件事每次都要重新摸索的问题 ——
   流程、脚本、坑都固化下来了。
   - 两个脚本（唯一第三方依赖 PyMuPDF，其余全是标准库）：
@@ -1188,12 +1313,12 @@ nx-sk 的定位从来不是「另一个密码管理器」，而是**把凭据变
     图文拼接靠的就是 y 坐标，别的库给不出位置就不适用。
     缺依赖时脚本会打印**可操作提示**（装什么、装到哪、Windows 上装完还报错多半是解释器指错了），
     而不是只丢一句 `No module named`。
-  - 栏目结构模板：简介 / **准备材料** / 入口与地址 / 操作手册 / 常见问题 / 自检清单，
+  - 条目模板结构模板：简介 / **准备材料** / 入口与地址 / 操作手册 / 常见问题 / 自检清单，
     以及账号密码各自一个 `sensitive` 字段、正文只写「见〈某字段〉」。
   - `30-pitfalls` 记的是真做一份 52 页手册时踩到的：51 张图只该留 18 张、
     占位符忘换附件 id、本地路径渲染不出、`file add` 默认移动原件、
     扫描件抽出来是空、md 图片曾被附件中心误判「未引用」。
-  - 已端到端验证：探查 → 抽图 48 张 → 上传 → 建栏目/字段/条目 → 写 md →
+  - 已端到端验证：探查 → 抽图 48 张 → 上传 → 建条目模板/字段/条目 → 写 md →
     `file get` 的 `usedBy` 正确指向本条目、未引用数 = 0。
   - 主 skill 补了 `md` 字段与图片引用的说明（此前完全没提，是缺口）。
 
@@ -1207,11 +1332,11 @@ nx-sk 的定位从来不是「另一个密码管理器」，而是**把凭据变
   依赖文件名含数字（`sqlh` 等字母名字段也能正确入台账）。
 - **md 正文里的图片在附件中心被显示成「未引用」**：`fileReferences` 只扫 `type: 'file'` 的字段，
   完全不看 `md` 字段正文里的 `![说明](f_xxx)` —— 而图片是内嵌在 markdown 里的正式引用。
-  实际影响：一份 18 张截图的 SOP 容器平台栏目，全部 18 张图都被判成孤儿，
+  实际影响：一份 18 张截图的 SOP 容器平台条目模板，全部 18 张图都被判成孤儿，
   「未引用」筛选会把它们捞出来，看着像附件丢了。
-  - 现在 `file` 与 `md` 两种引用都反查，并给出栏目 / 条目 / 字段的完整定位。
-  - `collectFileSections` 同步放开：只有 `md` 字段的栏目也出现在附件中心的栏目筛选里
-    （原先只有 `file` 字段的栏目才出现，按栏目筛选时根本找不到 md 图片所在栏目）。
+  - 现在 `file` 与 `md` 两种引用都反查，并给出条目模板 / 条目 / 字段的完整定位。
+  - `collectFileSections` 同步放开：只有 `md` 字段的条目模板也出现在附件中心的条目模板筛选里
+    （原先只有 `file` 字段的条目模板才出现，按条目模板筛选时根本找不到 md 图片所在条目模板）。
   - **顺带修掉一个更隐蔽的坑**：命中判定原先是 `findFileRecord(store, id) === rec`
     （对象引用相等）。调用方拿到的通常是 `listFiles` 加工过的**副本**，引用不同 →
     静默判成「未引用」。改成按 id / 唯一文件名判定，副本传参也能命中。
@@ -1232,7 +1357,7 @@ nx-sk 的定位从来不是「另一个密码管理器」，而是**把凭据变
   - 设置页移除：可读导出面板（格式 / 输出目录 / 凭据开关 / 历次导出 / 目录内文件），
     以及「默认导出格式」「默认导出目录」「导出默认带明文密钥」三项设置；
     `SETTING_KEYS` 里的 `exportDir` / `exportFormat` / `includeSecretsInExport` 一并去掉。
-  - 栏目页「更多」里的「导出 JSON / Markdown」菜单项移除（ZIP 导出 / 导入不动）。
+  - 条目模板页「更多」里的「导出 JSON / Markdown」菜单项移除（ZIP 导出 / 导入不动）。
   - **「导出导入」页与 transfer 五条命令完全不动** —— 那是本项目唯一的导出路径。
 
 ## [0.12.0] - 2026-10-18
@@ -1243,14 +1368,14 @@ nx-sk 的定位从来不是「另一个密码管理器」，而是**把凭据变
 
 ### Added
 
-- **导出包可设口令加密**（按栏目 ZIP 与全局 bundle 都支持）：导出选项里填口令（输两次），
+- **导出包可设口令加密**（按条目模板 ZIP 与全局 bundle 都支持）：导出选项里填口令（输两次），
   下载的包整体 AES-256-GCM 加密。密钥由口令经 scrypt 派生，与密钥库同一套参数；
   每次导出盐与 IV 都重新随机 —— 同一个包加密两次密文不同。
   - 导入是同一个入口：自动识别加密包，**先问口令**再预览 —— 不会把「缺口令」
     误报成「包坏了」。口令错 / 内容被改都在 GCM 认证阶段报错，不会解出垃圾。
   - CLI：`--passphrase`，也认环境变量 `NX_SK_TRANSFER_PASSPHRASE`（命令行口令会进进程列表）。
 - **导入预览列出冲突明细**：哪条撞上哪条（同 id / 同标题）、另存会变成什么标题
-  （选「另存」后实时显示 `→ 甲（导入）」）。单栏目与整库预览口径一致。
+  （选「另存」后实时显示 `→ 甲（导入）」）。单条目模板与整库预览口径一致。
 - **零依赖 ZIP 实现**（`src/core/zip.js`：store/deflate、CRC32、路径安全校验），
   不引第三方压缩库就能产出合法的跨平台 ZIP。
 - **图文（`md`）正文改用 markdown 组件渲染**（新增依赖 `react-markdown` + `remark-gfm` + `remark-breaks`，
@@ -1283,12 +1408,12 @@ nx-sk 的定位从来不是「另一个密码管理器」，而是**把凭据变
 - **去掉「打码 / 明文」二选，口令即保护**（BREAKING，flag 层）：`--no-secrets` 移除。
   要分享就设口令，不设口令的包自己收好。读取侧仍兼容 0.11.0 及更早的打码包
   （遇到 `******` 跳过该字段并计数，不会把打码串当新密码存进去）。
-- **「按栏目 / 整库备份」两个 tab 合并成一个面板**：栏目的全选就是整库导出，
+- **「按条目模板 / 整库备份」两个 tab 合并成一个面板**：条目模板的全选就是整库导出，
   「整库」按钮只是全选的快捷方式，产物与逐栏勾选是同一个包、同一套导入逻辑。
 - **导出包支持 `--no-files`**：只带元数据不带附件原件，跨机传配置时省体积。
-- **`transfer import-new` 自动识别包结构**：不用手动挑单栏目导入还是整库导入。
+- **`transfer import-new` 自动识别包结构**：不用手动挑单条目模板导入还是整库导入。
 - **面板重排（UI）**：左右两栏（左 = 选内容 + 设口令，右 = 解密导入）；
-  栏目横向 chips，**指针移上去自动展开该栏目条目**（点击/键盘同样可用，不只靠悬浮），
+  条目模板横向 chips，**指针移上去自动展开该条目**（点击/键盘同样可用，不只靠悬浮），
   「整库 / 清空」预设；口令与「导出 ZIP」提到卡片头部常驻，条目再多也不用滚动找按钮。
   chips 用原生 `<button>` + `aria-pressed`/`aria-expanded`，长标题省略号 + title 兜底。
 - **附件中心分页**：面板每页 24 个，避免一次加载全部图片把浏览器撑爆；
@@ -1296,22 +1421,22 @@ nx-sk 的定位从来不是「另一个密码管理器」，而是**把凭据变
 
 ### Fixed
 
-- **头部导航的分组角标显示成了条目数之和**：「求职资料」分组只有 6 个栏目，角标却是 16 ——
-  那是组内所有栏目的条目数加总。角标紧挨组名，本该回答「这一坨里有多少个栏目」；
-  加总出来的数字看着像「这个分组本身是个栏目、底下挂着 16 条记录」，而展开后每行
-  又各有自己的条目数，既冗余又误导。现在显示**栏目数**，并给 button 补了
-  `title="求职资料：6 个栏目"`。平铺 tab 不变（它的角标本就是该栏目的条目数）。
+- **头部导航的分组角标显示成了条目数之和**：「求职资料」分组只有 6 个条目模板，角标却是 16 ——
+  那是组内所有条目模板的条目数加总。角标紧挨组名，本该回答「这一坨里有多少个条目模板」；
+  加总出来的数字看着像「这个分组本身是个条目模板、底下挂着 16 条记录」，而展开后每行
+  又各有自己的条目数，既冗余又误导。现在显示**条目模板数**，并给 button 补了
+  `title="求职资料：6 个条目模板"`。平铺 tab 不变（它的角标本就是该条目模板的条目数）。
 - **`entryIds` 在路由层没透传**：服务层单测是绿的，但 ZIP 仍打全量。
   修复后浏览器解包确认只含所选条目。
-- **group 回落不一致**：多处各自兜底成不同栏目名，统一到一处。
+- **group 回落不一致**：多处各自兜底成不同条目模板名，统一到一处。
 - **阅读态下没有图片的 `md` 字段不再显示空的图片区**：纯文字字段（上线检查清单、常用链接）
   底下会多出「图片（0）」和一句「正文里还没有图片」，纯噪音。现在只有正文真有图、
   或正在编辑时才渲染那块；编辑态保留，因为它是「贴进来的图会出现在这里」的落点提示。
 - **「另存」的标题在极端情况下会重复加「（导入）」**：`uniqueTitle` 的基准原本传的是
   `标题（导入）`，二次重名会变成 `A（导入）（导入）`，与预览里算给用户看的 `copyTitle` 也对不上。
   现在基准统一用原标题，预览与实际落盘一致。
-- **空栏目被整库选中时，chip 的 `aria-pressed` 是 false**：选中态原先按条目数推导
-  （`!!n`），0 条目的栏目于是即使用户勾了也读成「未选」—— 读屏用户得到错误状态。
+- **空条目模板被整库选中时，chip 的 `aria-pressed` 是 false**：选中态原先按条目数推导
+  （`!!n`），0 条目的条目模板于是即使用户勾了也读成「未选」—— 读屏用户得到错误状态。
   选中态现在与条目数无关。
 
 ### Removed
@@ -1319,7 +1444,7 @@ nx-sk 的定位从来不是「另一个密码管理器」，而是**把凭据变
 - **备份模块整体删除**（BREAKING）：`nx-sk backup *` 命令、`.nxskbak` 格式、
   `src/modules/backup/` 与 `references/30-export-backup.md` 全部移除。
   有文件导出就够了，本地快照备份是重复的第二套回退机制，而且两边口径必然漂移。
-  - 删条目 / 栏目 / 附件**不再留快照** —— 改为「先导出再删」，`transfer export`
+  - 删条目 / 条目模板 / 附件**不再留快照** —— 改为「先导出再删」，`transfer export`
     出来的包就是唯一回退手段。
   - 跨机敏感字段的重新加密逻辑迁到 `transfer`：导入后用**本机 vaultKey** 重加密落盘，
     与手填字段没有区别。
@@ -1331,30 +1456,30 @@ nx-sk 的定位从来不是「另一个密码管理器」，而是**把凭据变
 
 ### Added
 
-- **栏目导出 / 导入 ZIP（局部迁移）**：栏目页右上角「更多」里有四项 ——
+- **条目模板导出 / 导入 ZIP（局部迁移）**：条目模板页右上角「更多」里有四项 ——
   导出 ZIP（含凭据）、导出 ZIP（打码）、导入 ZIP…、导出 JSON/Markdown。
-  导入支持**整页拖入**，先出预览（来源/目标栏目、条目新增与冲突、将补字段、附件新增/复用、
+  导入支持**整页拖入**，先出预览（来源/目标条目模板、条目新增与冲突、将补字段、附件新增/复用、
   凭据是否打码），再选冲突策略（跳过 / 另存 / 覆盖）确认后才写盘。
-  - 包结构：`manifest.json`（栏目定义 + 条目 + 附件清单 sha256）+ `attachments/<id><ext>` + `README.txt`；
+  - 包结构：`manifest.json`（条目模板定义 + 条目 + 附件清单 sha256）+ `attachments/<id><ext>` + `README.txt`；
     纯 Node 实现 ZIP 读写（store/deflate），零依赖，拒绝绝对路径与 `..`。
   - 附件按 sha256 **去重复用**；正文 / 附件字段里的旧 file id 自动重映射到新 id。
   - 导出的凭据默认明文（与 export 模块一致）；`--no-secrets` 打码，导入侧识别 `******` 并跳过该字段，
     不会把打码串当新密码存进去。
-  - CLI：`nx-sk transfer export <栏目> --out x.zip [--no-secrets]`、
-    `nx-sk transfer import <栏目> --file x.zip [--dry-run] [--on-conflict skip|copy|overwrite]`。
-  - HTTP：`GET /api/sections/:ref/export.zip`、`POST /api/sections/:ref/import.zip`（原始二进制 body，
+  - CLI：`nx-sk transfer export <条目模板> --out x.zip [--no-secrets]`、
+    `nx-sk transfer import <条目模板> --file x.zip [--dry-run] [--on-conflict skip|copy|overwrite]`。
+  - HTTP：`GET /api/templates/:ref/export.zip`、`POST /api/templates/:ref/import.zip`（原始二进制 body，
     不走 base64/JSON，避免大包膨胀 1/3 与 32MB 上限）。
   - **精确导出**：条目列表可勾选（表头全选 / 清空），选中后只打包这些条目与**它们引用到的附件**；
     `--entries` 接受 id 或标题（逗号分隔）。
-  - **零配置导入**：`POST /api/import.zip`（栏目页「导入 ZIP」/ 拖入）按包内结构**新建栏目** ——
+  - **零配置导入**：`POST /api/import.zip`（条目模板页「导入 ZIP」/ 拖入）按包内结构**新建条目模板** ——
     字段字典、分组、KV 标记、附件一起建好；id 冲突自动加序号、标题加「（导入）」，
-    同一份包可反复导入成多份，不会静默并进现有栏目。
+    同一份包可反复导入成多份，不会静默并进现有条目模板。
 
-- **统一的全局导出 / 导入面板**：「导出与备份」页顶部是栏目树（栏目/条目多选、全选/清空），
-  导出为一个多栏目 bundle（`bundle.json` + 每栏目同构 `sections/<id>.zip`）；
-  下方拖入/点击选择 ZIP，先预览将产生的变更（栏目、条目新增/冲突、补字段、附件新增/复用、凭据），
-  再选冲突策略应用。全局导入逐栏目复用单栏目逻辑，行为与栏目页一致。
-  CLI：`transfer bundle-export --sections ...`、`transfer bundle-import --file ...`。
+- **统一的全局导出 / 导入面板**：「导出与备份」页顶部是条目模板树（条目模板/条目多选、全选/清空），
+  导出为一个多条目模板 bundle（`bundle.json` + 每条目模板同构 `templates/<id>.zip`）；
+  下方拖入/点击选择 ZIP，先预览将产生的变更（条目模板、条目新增/冲突、补字段、附件新增/复用、凭据），
+  再选冲突策略应用。全局导入逐条目模板复用单条目模板逻辑，行为与条目模板页一致。
+  CLI：`transfer bundle-export --templates ...`、`transfer bundle-import --file ...`。
 - **附件中心分页**：`GET /api/files` 支持 `limit` / `offset` 并返回 `page` 信息；面板每页 24 个，
   避免一次性把整库图片加载进浏览器导致 OOM；CLI 不传 limit 时仍是全量（行为不变）。
 
@@ -1381,19 +1506,19 @@ nx-sk 的定位从来不是「另一个密码管理器」，而是**把凭据变
     `fieldTypes`（键 → 类型），渲染据此决定要不要做这层还原。
   - 面板的类型下拉框改为「中文名（id）」，如「图文（可贴图）（md）」——此前只显示内部 id。
   - **`deploy` 模板同时新增 `sop` 字段**（`md` 类型，`fill: optional`）：部署资源的「操作步骤（图文）」。
-    已建的 `deploy` 栏目不会自动回溯，用 `nx-sk section sync deploy` 补上（只增不改）；
+    已建的 `deploy` 条目模板不会自动回溯，用 `nx-sk template sync deploy` 补上（只增不改）；
     `references/50-deploy.md` 同步补了「写操作步骤」一节（含「截屏里有 token 先打码」）。
 
-- **新栏目模板 `deploy`（部署配置）**：把 Dockerfile / docker-compose / k8s 清单存成**可复用资源**。
+- **新预置模板 `deploy`（部署配置）**：把 Dockerfile / docker-compose / k8s 清单存成**可复用资源**。
   一份文件一个条目 —— `content`（文件原文）+ `path`（建议落盘路径）+ `vars`（复用前要替换的变量）
   + `usage`（何时用、坑在哪）+ `kind` / `stack` / `tags` / `files`。
   只有正文、没有后三项的配置是「没有上下文的 YAML」，下次没法照着用，所以它们不是可选装饰。
   首次运行随其余 5 个模板一起播种（内置模板共 6 个）；**已有 store 不会自动回溯**，用
-  `nx-sk section add deploy --template deploy` 补上。
-  - 约定：`content` 里**只写 `${VAR}` 占位**，真值放「密钥」栏目（密文落盘）。
+  `nx-sk template add deploy --preset deploy` 补上。
+  - 约定：`content` 里**只写 `${VAR}` 占位**，真值放「密钥」条目模板（密文落盘）。
     配置文件是最容易被整份复制粘贴分享的东西（发同事 / 贴 issue / 进聊天记录），
     两者混在一起等于给凭据开了一条最宽的出口。这条写进字段 hint 和 `references/50-deploy.md`。
-  - 新增 ref 文档 `50-deploy`：为什么单开一个栏目（vs 附件库 / git）、`kind` 取值约定、
+  - 新增 ref 文档 `50-deploy`：为什么单开一个条目模板（vs 附件库 / git）、`kind` 取值约定、
     复用四步（找 → 取正文 → 替换变量 → 落盘）、什么时候不该放这里。SKILL.md 的 ref 路由表已登记。
 
 ### Fixed
@@ -1421,43 +1546,43 @@ nx-sk 的定位从来不是「另一个密码管理器」，而是**把凭据变
   现在续行统一缩进到内容列（对长 YAML / Dockerfile 尤其明显）。
 - **`settings.defaultSection` 不再是死配置**。此前它只是被落盘，**没有任何读取方**：
   面板初始 tab 来自 `DEFAULT_UI.view = 'job'`（写死），CLI 也不读它 ——
-  于是「默认栏目」改完毫无反应，删掉 `job` 栏目还会让首屏停在一个不存在的 id 上。
+  于是「默认条目模板」改完毫无反应，删掉 `job` 条目模板还会让首屏停在一个不存在的 id 上。
   - 面板当前 tab 的解析规则抽成纯函数 `src/web/frontend/activeView.js`：
     **地址栏深链 → 本次选择 → `settings.defaultSection` → 第一个 tab**，
     并由 `tests/unit/active-view.test.mjs` 覆盖两条最容易回归的分支
-    （boot 之前不许兜底，否则深链被第一个工具页顶掉；默认栏目指向已删栏目要优雅降级）。
+    （boot 之前不许兜底，否则深链被第一个工具页顶掉；默认条目模板指向已删条目模板要优雅降级）。
   - 当前 tab 不再写 localStorage：它归地址栏管。两个记忆源并存时，
-    落盘的那个会永远压住默认栏目，这正是「改了设置看不到效果」的来源。
-  - 写入 `defaultSection` 时校验栏目真实存在（写标题也认，归一成 id），
+    落盘的那个会永远压住默认条目模板，这正是「改了设置看不到效果」的来源。
+  - 写入 `defaultSection` 时校验条目模板真实存在（写标题也认，归一成 id），
     失败会列出可选项而不是静默存一个永远不生效的值；设置页改成下拉选择，不再手打 id。
     `setting get` 仍然列出这一项（带校验器的标量项，不是「结构化项」）。
-- **`section sync` 会报告「模板漂移」**：同名字段在「栏目 vs 模板」之间哪些属性不同
+- **`template sync` 会报告「模板漂移」**：同名字段在「条目模板 vs 模板」之间哪些属性不同
   （label / type / group / hint / options / maxItems / sensitive / fill），`--dry-run` 也报。
-  仍然**只增不改** —— 定义归栏目，你可能就是刻意改过的；提示里给出真正能跟进的命令
+  仍然**只增不改** —— 定义归条目模板，你可能就是刻意改过的；提示里给出真正能跟进的命令
   （`--fields` 整份替换，或先 `--remove-field` 再 `--add-field`）。
   `upToDate` 仍只看「有没有可补的」，否则改过一个标签就会永远报「不是最新」。
 
 ### Changed
 
 - **字段类型清单单一来源**：`bootstrap` 下发 `fieldTypes`，面板「新增字段」的类型下拉框据此渲染。
-  此前 `modules/sections/view.jsx` 自己抄了一份 10 项清单 —— 后端加一种类型时下拉框永远看不到它。
+  此前 `modules/templates/view.jsx` 自己抄了一份 10 项清单 —— 后端加一种类型时下拉框永远看不到它。
 - **文案修正**：内置模板是 **6 个**（`job` / `secret` / `projects` / `internships` / `campus` / `deploy`），
-  而 `section templates` / `section add` 的摘要与 `--template` 的提示一直只写「求职 / 密钥」，
-  会把人引向「只有两个模板」的误解。README 与 `assets/nx-sk/SKILL.md` 的栏目表同步补齐，
+  而 `template presets` / `template add` 的摘要与 `--preset` 的提示一直只写「求职 / 密钥」，
+  会把人引向「只有两个模板」的误解。README 与 `assets/nx-sk/SKILL.md` 的条目模板表同步补齐，
   并说明「这 6 个是首次运行播种的默认值，不是固定清单」。
 
 ## [0.10.0] - 2026-10-15
 
 ### Added
 
-- **「栏目管理」重做成容器 + 拖拽**（设置页）。整页只有一个心智模型：一个栏目要么在「平铺」里、要么在某个分组里、要么在「隐藏」里；拖，就是把它从一个容器挪到另一个。
-  - **「隐藏」不再是一个开关，就是一个容器**：与分组同构，拖进去即不进头部（`#/栏目` 直达仍可用）——「显隐」与「归组」因此是同一套操作，不用记两种交互。
+- **「条目模板管理」重做成容器 + 拖拽**（设置页）。整页只有一个心智模型：一个条目模板要么在「平铺」里、要么在某个分组里、要么在「隐藏」里；拖，就是把它从一个容器挪到另一个。
+  - **「隐藏」不再是一个开关，就是一个容器**：与分组同构，拖进去即不进头部（`#/条目模板` 直达仍可用）——「显隐」与「归组」因此是同一套操作，不用记两种交互。
   - **拖拽实时预览**：拖动过程中列表就按落点重排（被拖的行半透明停在新位置），松手直接提交这个顺序——所见即所得，不再「先松手再猜落在哪」。
-  - **平铺区也能拖排序**：新增 `settings.navOrder`（栏目 id 数组）——显式排过的按它排，没排过的新栏目按栏目自身 `order` 跟在后面，所以「从没拖过」= 老行为不变。
+  - **平铺区也能拖排序**：新增 `settings.navOrder`（条目模板 id 数组）——显式排过的按它排，没排过的新条目模板按条目模板自身 `order` 跟在后面，所以「从没拖过」= 老行为不变。
   - 行内只留一个「移出」逃逸按钮（上一版的 上移/下移/显示中/隐藏中 全部去掉）；分组把手可拖，换分组之间顺序。
   - 设置页改为**一次保存**：标量设置与导航配置一起存，顶部只出现一次「有未保存的改动 / 保存 / 放弃改动」。
 
-- **`settings.navHidden` / `settings.navOrder` 的后端校验**：与分组同构的「栏目 id 清单」校验（栏目必须真实存在、去重保序）；CLI 三种写法都认：`--set navOrder=["a","b"]` / `navOrder=a,b` / `navHidden=a`。`setting get` 人类模式现在能一次看全「栏目 + 隐藏状态 + 平铺顺序 + 分组」。
+- **`settings.navHidden` / `settings.navOrder` 的后端校验**：与分组同构的「条目模板 id 清单」校验（条目模板必须真实存在、去重保序）；CLI 三种写法都认：`--set navOrder=["a","b"]` / `navOrder=a,b` / `navHidden=a`。`setting get` 人类模式现在能一次看全「条目模板 + 隐藏状态 + 平铺顺序 + 分组」。
 
 ### Fixed
 
@@ -1468,7 +1593,7 @@ nx-sk 的定位从来不是「另一个密码管理器」，而是**把凭据变
 
 ### Added
 
-- **分组内的栏目顺序可调**：设置页的每个分组改成**有序列表**——每个成员一行（序号 + 名称 + 条目数），用「上移 / 下移」调整，**头部展开列表就按这个顺序显示**；「移除」出组，下方列出尚未归组的栏目（点一下追加到组尾）。组内出现「栏目已删除」的行会标红提示（保存前移除即可，否则保存会被后端的严格校验拦住）。
+- **分组内的条目模板顺序可调**：设置页的每个分组改成**有序列表**——每个成员一行（序号 + 名称 + 条目数），用「上移 / 下移」调整，**头部展开列表就按这个顺序显示**；「移除」出组，下方列出尚未归组的条目模板（点一下追加到组尾）。组内出现「条目模板已删除」的行会标红提示（保存前移除即可，否则保存会被后端的严格校验拦住）。
 
 ## [0.9.1] - 2026-10-15
 
@@ -1486,11 +1611,11 @@ nx-sk 的定位从来不是「另一个密码管理器」，而是**把凭据变
 
 ### Added
 
-- **头部导航分组：设置里自己配，栏目收拢 + 悬浮展开**。栏目越建越多时，头部一排 pill 一眼分不出主次——现在可以在**设置页**（或 CLI）把同域栏目归成一组（如 项目经历 / 实习工作经历 / 校内职务实践 / 学校信息 / 申请相关 →「求职」），头部只显示**一个分组入口**（带成员条目数汇总），**悬浮展开上下列表**选具体栏目（点击行切换、当前栏目加粗；外点 / Esc 关闭；触屏点 pill 也能开）。
-  - 配置存在 `settings.navGroups`（`{title, sections[]}` 数组，**数组顺序 = 头部显示顺序**）；缺省空数组 = 全部栏目平铺（老 store 读一次自动补默认，无需迁移）。
-  - 校验严格且明确：形状不对 / 栏目不存在 / 一个栏目进两个组 / 缺组名 / 空组 —— 都报 `INVALID_INPUT` 并说清是哪一组哪一项（栏目写**标题**也认，统一归一到 id）。
-  - 分组只是**显示配置**：不动栏目与条目数据；组内栏目被删掉时头部优雅略过（配置保留）。CLI：`nx-sk setting set --set 'navGroups=[…]'`，清空即恢复平铺。
-  - 未分组的栏目与系统工具（附件 / 导出与备份 / 设置）照旧平铺，顺序不变。
+- **头部导航分组：设置里自己配，条目模板收拢 + 悬浮展开**。条目模板越建越多时，头部一排 pill 一眼分不出主次——现在可以在**设置页**（或 CLI）把同域条目模板归成一组（如 项目经历 / 实习工作经历 / 校内职务实践 / 学校信息 / 申请相关 →「求职」），头部只显示**一个分组入口**（带成员条目数汇总），**悬浮展开上下列表**选具体条目模板（点击行切换、当前条目模板加粗；外点 / Esc 关闭；触屏点 pill 也能开）。
+  - 配置存在 `settings.navGroups`（`{title, templates[]}` 数组，**数组顺序 = 头部显示顺序**）；缺省空数组 = 全部条目模板平铺（老 store 读一次自动补默认，无需迁移）。
+  - 校验严格且明确：形状不对 / 条目模板不存在 / 一个条目模板进两个组 / 缺组名 / 空组 —— 都报 `INVALID_INPUT` 并说清是哪一组哪一项（条目模板写**标题**也认，统一归一到 id）。
+  - 分组只是**显示配置**：不动条目模板与条目数据；组内条目模板被删掉时头部优雅略过（配置保留）。CLI：`nx-sk setting set --set 'navGroups=[…]'`，清空即恢复平铺。
+  - 未分组的条目模板与系统工具（附件 / 导出与备份 / 设置）照旧平铺，顺序不变。
 
 ## [0.8.2] - 2026-10-15
 
@@ -1524,7 +1649,7 @@ nx-sk 的定位从来不是「另一个密码管理器」，而是**把凭据变
 
 ### Added
 
-- **导入缺省「合并」：只增不减，不再整份替换**。`backup import` 旧行为是整份替换——跨源导入一个老结构的备份，本机栏目结构、条目、附件台账全被覆盖成备份的样子（原始事故：求职栏目的「附件资料」组消失）。现在缺省按「只增不减」合并：补缺失的栏目/条目/附件台账、补空字段、把备份多出的分组与字段只增补进已有栏目（复用 `mergeTemplate`）；**两边都有值且不同 → 保留本地**、列入冲突清单交用户处理；本地已有数据与结构**永不删改**。KV 栏目按名称匹配（跨机器 id 不可靠），普通栏目按 id。导入完成输出完整报告（CLI 文本 / 面板弹窗）：新增、补空、冲突、结构差异、附件统计、快照路径；`--dry-run` 可先看计划不落盘。`--replace` 保留旧的整份替换语义。敏感字段的补空值自动用本机 vaultKey 重新加密；报告里的值一律打码，密钥明文不进报告。
+- **导入缺省「合并」：只增不减，不再整份替换**。`backup import` 旧行为是整份替换——跨源导入一个老结构的备份，本机条目模板结构、条目、附件台账全被覆盖成备份的样子（原始事故：求职条目模板的「附件资料」组消失）。现在缺省按「只增不减」合并：补缺失的条目模板/条目/附件台账、补空字段、把备份多出的分组与字段只增补进已有条目模板（复用 `mergeTemplate`）；**两边都有值且不同 → 保留本地**、列入冲突清单交用户处理；本地已有数据与结构**永不删改**。KV 条目模板按名称匹配（跨机器 id 不可靠），普通条目模板按 id。导入完成输出完整报告（CLI 文本 / 面板弹窗）：新增、补空、冲突、结构差异、附件统计、快照路径；`--dry-run` 可先看计划不落盘。`--replace` 保留旧的整份替换语义。敏感字段的补空值自动用本机 vaultKey 重新加密；报告里的值一律打码，密钥明文不进报告。
 - **`backup export --with-files`：附件原件入包（压缩包式）**。附件台账随包携带升级为**恒定行为**（v3 格式——0.5.x–0.6.2 的包根本不含 `files`，任何一次导入都会把台账清零，本次一并根修并加了回归钉）；`--with-files` 再把台账指向的原件读成 `{rel → {b64, sha256}}` 单块加密嵌入 `filesData`（与主数据同一把口令派生 key）。导入时自动落盘还原（sha256 校验；磁盘已有且内容不同以磁盘为准）；v2 旧包继续可导，缺原件在报告里如实列出。
 
 ### Changed
@@ -1541,28 +1666,28 @@ nx-sk 的定位从来不是「另一个密码管理器」，而是**把凭据变
 
 ### Changed
 
-- **加密备份跨机器恢复：密钥栏目与其他栏目走同一路径**。`backup export --password` 导出时，先把 secret 栏目的密文字段用本机 vaultKey **解开为明文**，再随整份 payload 一起用口令派生密钥（AES-256-GCM）加密入 `.nxskbak`；导入时直接拿明文落回 store.json，B 机不需要 A 机的 `~/.vaultkey` 即可 `key get` 出原文。理由：密钥条目就是一段文本，"跨机器恢复要看"才是它的实际场景，再绕一层「reWrapped 兑回本机 vaultKey」是多余的间接层。落回 store.json 后，下次写入会由 B 机 vaultKey 重新加密（落盘仍是密文），所以单机"store.json 泄露不等于密钥泄露"这条不变量没退化。
+- **加密备份跨机器恢复：密钥条目模板与其他条目模板走同一路径**。`backup export --password` 导出时，先把 secret 条目模板的密文字段用本机 vaultKey **解开为明文**，再随整份 payload 一起用口令派生密钥（AES-256-GCM）加密入 `.nxskbak`；导入时直接拿明文落回 store.json，B 机不需要 A 机的 `~/.vaultkey` 即可 `key get` 出原文。理由：密钥条目就是一段文本，"跨机器恢复要看"才是它的实际场景，再绕一层「reWrapped 兑回本机 vaultKey」是多余的间接层。落回 store.json 后，下次写入会由 B 机 vaultKey 重新加密（落盘仍是密文），所以单机"store.json 泄露不等于密钥泄露"这条不变量没退化。
 
 ## [0.6.0] - 2026-10-12
 
 ### Added
 
-- **agent 手册补齐附件域**：随包分发的 `assets/nx-sk/` 新增 `references/40-files.md`（附件库：导入默认移动、`file` 字段值 = 附件 id 的链接、可逆还原、附件中心为什么由栏目驱动、看不到上传字段怎么办），并在 `SKILL.md` 与 `README.md` 的 ref 路由表登记；同步修订 `10-sections-entries`（求职模板 79 字段 / 10 分组、字段类型表补 `file`、栏目命令补 `sync`）与 `00-design`（core 清单补 `attachments`、错误案例补附件组织方式的取舍）。
+- **agent 手册补齐附件域**：随包分发的 `assets/nx-sk/` 新增 `references/40-files.md`（附件库：导入默认移动、`file` 字段值 = 附件 id 的链接、可逆还原、附件中心为什么由条目模板驱动、看不到上传字段怎么办），并在 `SKILL.md` 与 `README.md` 的 ref 路由表登记；同步修订 `10-templates-entries`（求职模板 79 字段 / 10 分组、字段类型表补 `file`、条目模板命令补 `sync`）与 `00-design`（core 清单补 `attachments`、错误案例补附件组织方式的取舍）。
 
 ### Changed
 
-- **顶栏层级重排**：品牌升为标题（15px / 700），副标题与版本号降为从属元信息并整体右移，超长存储路径自动省略（完整值在 `title`）；身份栏与导航栏拉开 padding 差异，并在「内容栏目」与「系统工具」之间加一条分组细线；计数降为等宽小字。
+- **顶栏层级重排**：品牌升为标题（15px / 700），副标题与版本号降为从属元信息并整体右移，超长存储路径自动省略（完整值在 `title`）；身份栏与导航栏拉开 padding 差异，并在「内容条目模板」与「系统工具」之间加一条分组细线；计数降为等宽小字。
 
 ### Fixed
 
-- **默认视图被顶成「栏目」**：`/api/bootstrap` 返回前用静态视图兜底并写回 ui 状态，导致默认视图与头部高亮错位（首屏还会覆盖 `#/job` 这类深链）；改用 `booted` 门控——未拿到 bootstrap 就显示「正在装载…」，不兜底、不写入。顺带清理已无定义的 `header.top .meta` 样式，残留处改用已有的 `.muted`。
+- **默认视图被顶成「条目模板」**：`/api/bootstrap` 返回前用静态视图兜底并写回 ui 状态，导致默认视图与头部高亮错位（首屏还会覆盖 `#/job` 这类深链）；改用 `booted` 门控——未拿到 bootstrap 就显示「正在装载…」，不兜底、不写入。顺带清理已无定义的 `header.top .meta` 样式，残留处改用已有的 `.muted`。
 - **CI 跨平台单测**：附件单测里 `join('\\')` 拼路径只在 Windows 成立，ubuntu 上 ENOENT——0.5.0 / 0.5.1 因此都没发出去；改为跨平台 `join(...rel.split('/'))`。
 
 ## [0.5.1] - 2026-10-12
 
 ### Fixed
 
-- **加密备份跨机器恢复后密钥栏目无法解开**（原始事故：用户将 A 机 `backup export --password` 出的 `.nxskbak` 文件拷贝到 B 机再 `backup import` 后，B 机 `key get` 报「密钥或密文与写入时不一致」）。原因：原备份包只对整包加密，**包内密文字段仍用 A 机的 `~/.vaultkey` / `NX_SK_PASSPHRASE` 派生 kid**——B 机的本地密钥与其不一致，GCM 校验失败。修法：导出时给每条密文追加一个口令派生的 `reWrapped` 副本；导入时解开 `reWrapped` 拿明文、用 B 机本机 vaultKey 重新加密后写回主字段、`reWrapped` 丢弃——B 机后续 `key get` 走的就是 B 机的本机密钥。备份包不再依赖导出机的本地密钥状态；同时给 smoke 加了「换 vaultkey 后口令导入仍能解出明文」的端到端断言。
+- **加密备份跨机器恢复后密钥条目模板无法解开**（原始事故：用户将 A 机 `backup export --password` 出的 `.nxskbak` 文件拷贝到 B 机再 `backup import` 后，B 机 `key get` 报「密钥或密文与写入时不一致」）。原因：原备份包只对整包加密，**包内密文字段仍用 A 机的 `~/.vaultkey` / `NX_SK_PASSPHRASE` 派生 kid**——B 机的本地密钥与其不一致，GCM 校验失败。修法：导出时给每条密文追加一个口令派生的 `reWrapped` 副本；导入时解开 `reWrapped` 拿明文、用 B 机本机 vaultKey 重新加密后写回主字段、`reWrapped` 丢弃——B 机后续 `key get` 走的就是 B 机的本机密钥。备份包不再依赖导出机的本地密钥状态；同时给 smoke 加了「换 vaultkey 后口令导入仍能解出明文」的端到端断言。
 
 ## [0.5.0] - 2026-10-12
 
@@ -1574,19 +1699,19 @@ nx-sk 的定位从来不是「另一个密码管理器」，而是**把凭据变
   - **可逆**：`file restore` 把附件移回原始位置（或 `--to` 指定目录）并撤销台账；`--copy` 只导出副本、库中保留。
   - 每个附件给出物理路径与浏览器链接（`/api/files/:id/content`，支持内联预览与 `?download=1` 下载，正确的 Content-Type 与 UTF-8 文件名）。
   - 新增 `file` 字段类型，**值 = 附件 id**：id 全局唯一 → 各条目的附件空间天然隔离；去重后同一原件又可被多条条目引用。求职模板新增「附件资料」组：**简历附件 / 头像图片 / 成绩单 / 证书扫描件（不必填）**。
-  - **上传 / 选择发生在栏目条目里**：条目表单的 file 字段可直接「上传文件」或从附件库选一个，保存即建立链接；字段里显示附件名 / 缩略图 / 物理路径 / 下载 / 清除。
-  - **「附件」中心由栏目驱动、不预定义**：不做指派，也没有预设分类或槽位；筛选片按「哪些栏目在引用附件」动态生成（外加「未引用」），每张卡片显示被哪个栏目 / 条目 / 字段引用（`fileReferences` 反查）。CLI 侧为 `file list --section <栏目|none>`。
+  - **上传 / 选择发生在条目里**：条目表单的 file 字段可直接「上传文件」或从附件库选一个，保存即建立链接；字段里显示附件名 / 缩略图 / 物理路径 / 下载 / 清除。
+  - **「附件」中心由条目模板驱动、不预定义**：不做指派，也没有预设分类或槽位；筛选片按「哪些条目模板在引用附件」动态生成（外加「未引用」），每张卡片显示被哪个条目模板 / 条目 / 字段引用（`fileReferences` 反查）。CLI 侧为 `file list --template <条目模板|none>`。
   - 修复 `file update` 的结果被误报成「已还原」的渲染 bug（还原与更新的 payload 都带 `path`，现改用独立的 `restored` 标记区分）。
   - HTTP 请求体上限由 4MB 提升至 32MB（base64 上传扫描件 / 照片）。
 
-- **`section sync`：按模板补齐栏目字段（只增不改不删）**：栏目字段字典是**持久化数据**（实例化时深拷贝，此后独立演化），模板新增的字段**不会回溯**到已建栏目——于是「模板给求职加了 `file` 的附件字段，老栏目里却看不到上传入口」。新增 `section sync <ref>`（CLI）/ `POST /api/sections/:ref/sync`（HTTP）/ 栏目编辑弹窗的「同步模板字段」按钮，把模板里新增、本栏目还缺的分组与字段补进来，并保持模板顺序；已有字段（含用户改过的 label / hint / fill）与自定义分组原样保留。带快照与 `--dry-run`。顺带修复 `section update --add-field` 引用未声明分组时不补声明、导致面板整组字段消失的隐患。
+- **`template sync`：按模板补齐条目模板字段（只增不改不删）**：条目模板字段字典是**持久化数据**（实例化时深拷贝，此后独立演化），模板新增的字段**不会回溯**到已建条目模板——于是「模板给求职加了 `file` 的附件字段，老条目模板里却看不到上传入口」。新增 `template sync <ref>`（CLI）/ `POST /api/templates/:ref/sync`（HTTP）/ 条目模板编辑弹窗的「同步模板字段」按钮，把模板里新增、本条目模板还缺的分组与字段补进来，并保持模板顺序；已有字段（含用户改过的 label / hint / fill）与自定义分组原样保留。带快照与 `--dry-run`。顺带修复 `template update --add-field` 引用未声明分组时不补声明、导致面板整组字段消失的隐患。
 
 ## [0.4.0] - 2026-10-08
 
 ### Added
 
 - **口令对称加密的整库备份 / 恢复（导入导出）**：新增「加密备份」模块（CLI `backup export|import`，Web 同名面板，HTTP `POST /api/backup` 与 `POST /api/backup/restore`）。
-  - 导出：设置口令 → 整份数据（栏目 / 条目 / 设置）经 **scrypt 口令派生密钥 + AES-256-GCM** 加密为单个 `.nxskbak` 文件并在浏览器下载；文件内含随机盐，**口令不落盘**。
+  - 导出：设置口令 → 整份数据（条目模板 / 条目 / 设置）经 **scrypt 口令派生密钥 + AES-256-GCM** 加密为单个 `.nxskbak` 文件并在浏览器下载；文件内含随机盐，**口令不落盘**。
   - 导入：选择备份文件并输入口令 → 解密校验后整份恢复；**恢复前自动给当前数据留安全快照**（可回滚）。
   - 口令错误或文件被篡改：GCM 认证失败、明确报 BLOCKED，且不改动当前数据；两个动作均支持 `--dry-run`（只演练 / 只解密校验）。
   - 口令也可用环境变量 `NX_SK_BACKUP_PASSWORD` 提供；复用 `core/crypto.js` 原语，与字段级密钥库（`core/vault.js`）相互独立。
@@ -1624,13 +1749,13 @@ nx-sk 的定位从来不是「另一个密码管理器」，而是**把凭据变
 
 ### Fixed
 
-- **自定义栏目在 Web 面板整页空白**：栏目的分组元数据有两条读取路径——CLI 从字段
-  **推导**（`groupFields(fields)`），面板按**声明数组**（`section.groups`）渲染。
-  用 `section add --fields '{…"group":"basic"…}'` 建栏目而没同时给 `--groups` 时，
+- **自定义条目模板在 Web 面板整页空白**：条目模板的分组元数据有两条读取路径——CLI 从字段
+  **推导**（`groupFields(fields)`），面板按**声明数组**（`template.groups`）渲染。
+  用 `template add --fields '{…"group":"basic"…}'` 建条目模板而没同时给 `--groups` 时，
   `groups` 是空数组：CLI 显示正常、面板的字段表单整组消失，而页面本身不报错，
-  看起来就像「这个栏目不存在」。
-- 修复：新增 `syncSectionGroups()` 把「分组声明 ⊇ 字段引用」钉成**栏目不变量**，
-  规则只写一份，在 `normalizeSection`（store 读写的唯一收口）与 `section add` 的
+  看起来就像「这个条目模板不存在」。
+- 修复：新增 `syncSectionGroups()` 把「分组声明 ⊇ 字段引用」钉成**条目模板不变量**，
+  规则只写一份，在 `normalizeSection`（store 读写的唯一收口）与 `template add` 的
   草稿两处调用——**存量数据读一次即自愈**，此后 `--add-field` / 面板加字段引用到
   未声明的分组也会自动补齐声明。
 
@@ -1646,7 +1771,7 @@ nx-sk 的定位从来不是「另一个密码管理器」，而是**把凭据变
 - **密钥页 CRUD 全挂**：`guard` 返回的包装函数不透传参数，所有 `guard(async (row) => …)`
   形式的行级操作拿到 `undefined`，读 `row.name` 抛
   "Cannot read properties of undefined (reading 'name')"。改值/改名/删除、
-  栏目页 8 个操作、导出 dry-run 全部中招；blur 触发的改名让「点一下别处就报错」。
+  条目模板页 8 个操作、导出 dry-run 全部中招；blur 触发的改名让「点一下别处就报错」。
 - `kvTable.rename`：改名成功后 `draft` 的键同步迁移到新名（原先留在旧键下，
   值输入框显示为空、blur 会把值写回旧键名）。
 
@@ -1673,8 +1798,8 @@ nx-sk 的定位从来不是「另一个密码管理器」，而是**把凭据变
     （「主动跳过」和「还没填」是两件事）；`completeness` 新增 `excluded`（个数）与
     `excludedFilled`（标了不填却仍然填了的个数，非 0 就说明策略该更新了）。
     CLI 的 `entry get` / `entry list` 把两者分开报，面板在字段标签上打中性标签。
-  - 新增 `section update --fill <字段>=normal|optional|avoid`（可重复，label 或 key 都认；
-    改回照常填传 `normal`）。`entry fields` / `section dump` 的字段字典输出带上
+  - 新增 `template update --fill <字段>=normal|optional|avoid`（可重复，label 或 key 都认；
+    改回照常填传 `normal`）。`entry fields` / `template dump` 的字段字典输出带上
     `fill` 与 `fillLabel`。
   - `validateFieldDef` 放行 `fill` —— 该函数是**白名单**，漏了会静默丢弃新属性，
     后果是「用户设了不填、完整度照旧算它」，很难查。非法策略报错而非忽略；`normal` 是缺省、不落盘。
@@ -1695,14 +1820,14 @@ nx-sk 的定位从来不是「另一个密码管理器」，而是**把凭据变
 ### Changed
 
 - **【破坏性】密文字段默认原文显示**，打码改成显式选项：
-  `--reveal` 全部换成 `--mask`（`key get/list`、`entry get`、`section dump`、`GET /api/keys?mask=1`）；
+  `--reveal` 全部换成 `--mask`（`key get/list`、`entry get`、`template dump`、`GET /api/keys?mask=1`）；
   导出默认也含明文（`settings.includeSecretsInExport` 默认 `true`，要打码加 `--no-secrets`）。
   理由：本机单人工具，数据是给自己看的，默认打码等于每次先拦自己一道。
   **落盘仍然是 AES-256-GCM 密文**——「store.json 泄露」不等于「凭据泄露」这一点没变。
   面板里的勾选框从「显示密文字段明文」翻成「打码显示（投屏/截图时用）」，默认不勾。
 - **【破坏性】skill 不再出现在 Web 面板**：删掉 Skill tab 与它的视图；`skill install` / `skill get`
   仍完整保留在 CLI（用户明确要求，偏离了骨架 ref「三条最高优先级命令要有 Web 入口」的建议）。
-- **【破坏性】密钥栏目从 8 字段缩成极简 KV**：只保留「名称（条目名）→ 值」。
+- **【破坏性】密钥条目模板从 8 字段缩成极简 KV**：只保留「名称（条目名）→ 值」。
   删掉了服务商 / 接口地址 / 模型 / 用途 / 有效期 / 额度 / 备注 ——
   存一个 key 不该先填一张表；「这个 key 干什么用」写进键名里就够了。
   - **自动迁移**：`store.json` 版本升到 `2`。首次读盘时把旧 `keyValue` 的值搬到 `value`，
@@ -1717,16 +1842,16 @@ nx-sk 的定位从来不是「另一个密码管理器」，而是**把凭据变
 - **skill 在本机改成软链**：`~/.claude/skills/nx-sk` 与 `~/.workbuddy/skills/nx-sk`
   现在都软链到项目 `assets/nx-sk`（与 `server-cli-web-scaffold` 同一种做法）。
   `skill install` 装的是**副本**，只在分发/跨机器时用；日常用软链才不会让 agent 拿到旧版手册。
-- **【破坏性】KV 栏目在面板里就是一张表**：`secret` 标了 `kv: true`，面板渲染成
+- **【破坏性】KV 条目模板在面板里就是一张表**：`secret` 标了 `kv: true`，面板渲染成
   「名称 / 值」两列表格（改值即改、加行即加键、行内重命名、一键复制），
-  **不再有**条目列表、字段表单、完整度百分比 —— 那些只对「一族同构条目」的栏目（求职）有意义。
-  CLI 侧 `key *` 缺省作用在标了 `kv` 的栏目上，并新增 `--section`；
-  `settings.kvSection` 这个间接层**删掉**（哪个栏目是 KV，由栏目自己说了算）。
-- **KV 栏目拒绝加字段**：往里塞字段会让「值在哪一列」变得不确定，所以直接报错并指出
+  **不再有**条目列表、字段表单、完整度百分比 —— 那些只对「一族同构条目」的条目模板（求职）有意义。
+  CLI 侧 `key *` 缺省作用在标了 `kv` 的条目模板上，并新增 `--template`；
+  `settings.kvSection` 这个间接层**删掉**（哪个条目模板是 KV，由条目模板自己说了算）。
+- **KV 条目模板拒绝加字段**：往里塞字段会让「值在哪一列」变得不确定，所以直接报错并指出
   该用 `key set`。这条是真实事故换来的：早先面板那行「KV 直填」把 `3123312=xxx`
   登记成了字段，用户看到的是一堆无意义的「模板建议」。
   配套 v2 → v3 迁移：把误当字段用的值搬进值列，字段收成一个，旧键一律不删，迁移前留原始快照。
-- **`entry update` 改名时挡住重名**（同栏目已有同名条目报 `CONFLICT`）——
+- **`entry update` 改名时挡住重名**（同条目模板已有同名条目报 `CONFLICT`）——
   重名会让「按名字取」变成二义。
 - **字段台账不再拦写入**：`--set 任意键=值` 一律能存，没见过的键自动登记
   （键名就是字段名，**中文也可以**；类型按值推断：`是/否` → bool、数组 → tags、其余 → text）。
@@ -1744,7 +1869,7 @@ nx-sk 的定位从来不是「另一个密码管理器」，而是**把凭据变
   - `key set` 是 **SET 语义**（同名覆盖，返回值带 `created`）。这是它与 `entry add`
     （同名报 `CONFLICT`）唯一刻意的差别。
   - 重复写同一个值 → `{ status: 'skipped', unchanged: true }`，不重写密文、不留快照。
-  - 作用栏目由新设置项 `settings.kvSection` 决定（默认 `secret`）。
+  - 作用条目模板由新设置项 `settings.kvSection` 决定（默认 `secret`）。
 - CLI 位置参数与 flag 的优先级明确为**显式 flag 覆盖位置参数**，
   于是 `key set K <值>` 与 `key set K --value=<值>` 等价 ——
   后者是值以 `-` 开头时唯一可用的写法。
@@ -1761,18 +1886,18 @@ nx-sk 的定位从来不是「另一个密码管理器」，而是**把凭据变
 
 ### Added
 
-- **栏目化数据模型**：栏目 = 一组同构条目 + 一份字段字典（字典是数据，不是代码分支）。
+- **条目化数据模型**：条目模板 = 一组同构条目 + 一份字段字典（字典是数据，不是代码分支）。
   内置两个模板：`job`（求职 / 个人信息，9 分组 75 字段）、`secret`（密钥，8 字段）。
 - **CLI**（26 条命令）：`serve` / `help` / `version` 三个平台命令，
-  以及 `bootstrap` / `health` / `routes` / `section.*` / `entry.*` / `export.*` / `setting.*` / `skill.*`。
-- **HTTP API**：由 action 声明同源编译，路由按「字面量段优先」排序（`/api/sections/templates`
-  不会被 `/api/sections/:ref` 遮蔽）。写操作校验 `Origin`。
-- **Web 面板**：栏目动态 tab、按分组渲染的字段表单、PATCH 语义保存（只发改动过的字段）、
+  以及 `bootstrap` / `health` / `routes` / `template.*` / `entry.*` / `export.*` / `setting.*` / `skill.*`。
+- **HTTP API**：由 action 声明同源编译，路由按「字面量段优先」排序（`/api/templates/templates`
+  不会被 `/api/templates/:ref` 遮蔽）。写操作校验 `Origin`。
+- **Web 面板**：条目模板动态 tab、按分组渲染的字段表单、PATCH 语义保存（只发改动过的字段）、
   密文字段一键揭示、完整度与未填清单、派生式 CLI 提示、页内 toast / dialog / 错误边界。
 - **密文存储**：敏感字段 AES-256-GCM 落盘，密钥来源支持 `NX_SK_PASSPHRASE`（scrypt + 盐）
   或本机 `~/.vaultkey`；密文带密钥指纹 `kid`，换来源时给明确的 `BLOCKED` 而不是乱码。
   打码值原样回传会被识别为「不修改」，直接写入打码占位会被拒绝。
-- **整体导出**：JSON + Markdown，支持按栏目、指定目录、`--dry-run`；凭据默认打码，
+- **整体导出**：JSON + Markdown，支持按条目模板、指定目录、`--dry-run`；凭据默认打码，
   `--with-secrets` 才出明文并在导出文件里标记 `withSecrets`。
 - **快照与回滚**：每次破坏性写入前整库快照到 `~/nx-sk/backup/`（最多 20 份）。
 - **损坏保护**：`store.json` 解析失败先改名为 `.corrupt-<时间戳>.json`，不静默覆盖。

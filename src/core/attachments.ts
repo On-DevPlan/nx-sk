@@ -9,7 +9,7 @@
 //   - 元数据是**台账**：物理文件永远以台账 rel 为准；所有移动先改物理文件、再在事务里改台账。
 //   - 链接方式：条目里 `file` 字段的值 = 附件 id（或唯一文件名）。id 全局唯一，
 //     天然实现「各条目各自的附件空间互不串台」；同一份原件也可被多条条目复用（去重后同 id）。
-//     附件**不预定义任何分类/槽位结构**：附件中心按「哪些栏目在用它」动态分组（见 fileReferences）。
+//     附件**不预定义任何分类/槽位结构**：附件中心按「哪些条目模板在用它」动态分组（见 fileReferences）。
 import { createHash } from 'node:crypto';
 import fsp from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
@@ -44,14 +44,14 @@ export interface FileRecord {
 /** 附件模块用到的 store 片段（完整 Store 形状在 core/store.ts）。 */
 export interface StoreLike {
   files: FileRecord[];
-  sections?: Array<{ id: string; title?: string; fields?: Array<{ key: string; label?: string; type: string }> }>;
-  entries?: Array<{ id: string; section: string; title?: string; values?: Record<string, unknown> }>;
+  templates?: Array<{ id: string; title?: string; fields?: Array<{ key: string; label?: string; type: string }> }>;
+  entries?: Array<{ id: string; template: string; title?: string; values?: Record<string, unknown> }>;
 }
 
-/** 反向引用的一条：哪个栏目的哪个条目的哪个字段用了它。 */
+/** 反向引用的一条：哪个条目模板的哪个条目的哪个字段用了它。 */
 export interface FileReference {
-  sectionId: string;
-  sectionTitle?: string;
+  templateId: string;
+  templateTitle?: string;
   entryId: string;
   entryTitle?: string;
   fieldKey: string;
@@ -246,10 +246,10 @@ export function findFileRecord(store: StoreLike, ref: unknown): FileRecord | nul
  *      图片是**内嵌在 markdown 里**的，和 file 字段一样是正式引用。
  *   3. `source` 字段 —— 原始资料袋里 kind='file' 的 item（袋是溯源的锚点：
  *      字段值是从这份原件整理出来的，原件被删，溯源就成了空话）。
- * 同一个（条目, 字段）只出一条。附件中心据此显示「被哪些栏目 / 条目 / 字段用到」。
+ * 同一个（条目, 字段）只出一条。附件中心据此显示「被哪些条目模板 / 条目 / 字段用到」。
  *
  * v3：传 `structures`（条目自身结构行）时，扫描的字段定义用**条目自己的行**——
- * 扩展行里的 file/md/source 引用也算数；不传退回栏目字典（旧行为）。
+ * 扩展行里的 file/md/source 引用也算数；不传退回条目模板字典（旧行为）。
  */
 export function fileReferences(
   store: StoreLike,
@@ -270,9 +270,9 @@ export function fileReferences(
   });
 
   const out: FileReference[] = [];
-  for (const sec of store.sections || []) {
-    // 一次栏目只扫一遍条目，别在字段循环里反复全表扫
-    const entries = (store.entries || []).filter((e) => e.section === sec.id);
+  for (const sec of store.templates || []) {
+    // 一次条目模板只扫一遍条目，别在字段循环里反复全表扫
+    const entries = (store.entries || []).filter((e) => e.template === sec.id);
     if (!entries.length) continue;
 
     for (const e of entries) {
@@ -281,7 +281,7 @@ export function fileReferences(
       const refFields = defs.filter(mayReferenceFiles);
       if (!refFields.length) continue;
       const push = (f: { key: string; label?: string }) => out.push({
-        sectionId: sec.id, sectionTitle: sec.title,
+        templateId: sec.id, templateTitle: sec.title,
         entryId: e.id, entryTitle: e.title,
         fieldKey: f.key, fieldLabel: f.label,
       });
@@ -297,22 +297,22 @@ export function fileReferences(
 }
 
 /**
- * 附件中心的分组素材：哪些栏目**可能**引用附件。
- * 中心据此按栏目筛选 / 分组 —— 组织方式**完全由栏目驱动，不预定义任何分类或槽位**。
- * 带 `file` / `md` 字段的栏目都算数：md 字段正文里贴的图也是正式引用；
- * `source` 袋也算——袋里的原始文件是溯源的锚点，同样要能按栏目筛出来。
- * v3：字典没有但条目自身行有的（扩展 file 键），该栏目同样算数。
+ * 附件中心的分组素材：哪些条目模板**可能**引用附件。
+ * 中心据此按条目模板筛选 / 分组 —— 组织方式**完全由条目模板驱动，不预定义任何分类或槽位**。
+ * 带 `file` / `md` 字段的条目模板都算数：md 字段正文里贴的图也是正式引用；
+ * `source` 袋也算——袋里的原始文件是溯源的锚点，同样要能按条目模板筛出来。
+ * v3：字典没有但条目自身行有的（扩展 file 键），该条目模板同样算数。
  */
-export function collectFileSections(
+export function collectFileTemplates(
   store: StoreLike,
   structures?: Map<string, { key: string; spec: Record<string, unknown> }[]>,
 ): Array<{ id: string; title?: string }> {
   const out: Array<{ id: string; title?: string }> = [];
-  for (const s of store.sections || []) {
+  for (const s of store.templates || []) {
     let hit = (s.fields || []).some(mayReferenceFiles);
     if (!hit && structures) {
       for (const e of store.entries || []) {
-        if (e.section !== s.id) continue;
+        if (e.template !== s.id) continue;
         const rows = structures.get(e.id);
         if (rows?.some((r) => mayReferenceFiles(r.spec as { type: string }))) { hit = true; break; }
       }

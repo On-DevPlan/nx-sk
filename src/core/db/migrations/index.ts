@@ -18,6 +18,8 @@ import type { Conn } from '../driver.ts';
 import { applyV3 } from './v3-apply.ts';
 import { applyV4 } from './v4-apply.ts';
 import { applyV6 } from './v6-apply.ts';
+import { applyV7 } from './v7-apply.ts';
+import { applyV9 } from './v9-apply.ts';
 
 /** 每条直接边 = 一次版本跃迁。`apply` 与 DDL 在同一个事务里执行（纯 SQL 表达不了的数据迁移用）。 */
 export interface MigrationStep {
@@ -35,6 +37,9 @@ export const DIRECT_EDGES: MigrationStep[] = [
   { from: 3, to: 4, file: 'v4.sql', title: '字段类型去 DB CHECK：加新类型不再需要 schema 迁移（合法性由运行时 validateFieldDef/behaviorOf 保证）', apply: applyV4 },
   { from: 4, to: 5, file: 'v5.sql', title: '字段值历史：新增 field_history（单调 rev + 值快照 + op/source/at，无外键）' },
   { from: 5, to: 6, file: 'v6.sql', title: '分组变成字段：删 groups 表与 fields.group_id，分组折成 type=group 的字段（keys 引用成员）', apply: applyV6 },
+  { from: 6, to: 7, file: 'v7.sql', title: '条目模板→模板 + 条目树：sections/fields 改名 templates/template_fields，entries 用 template_id，新增 folders 父子关系', apply: applyV7 },
+  { from: 7, to: 8, file: 'v8.sql', title: 'KV 模板标记退役：删除 templates.kv；模板结构只剩字段 + 条目' },
+  { from: 8, to: 9, file: 'v9.sql', title: '模板默认标签：templates.tags；模板创建条目时继承 tag，CLI 可按 tag 检索', apply: applyV9 },
 ];
 
 const keyOf = (from: number, to: number) => `${from}->${to}`;
@@ -105,7 +110,4 @@ export function planMigrationPath(from: number, to: number = CURRENT_SCHEMA_VERS
 export function readMigrationSql(file: string): string {
   return readFileSync(new URL('./' + file, import.meta.url), 'utf8');
 }
-
-/** 所有直接边按目标版本排序（供 pendingSteps 使用）。 */
-export const MIGRATION_STEPS = [...DIRECT_EDGES].sort((x, y) => x.to - y.to);
 

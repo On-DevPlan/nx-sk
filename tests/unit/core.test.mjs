@@ -6,8 +6,8 @@ await useTempHome();
 
 const { decryptValue, deriveKey, encryptValue, isCipherBlob, keyId, maskValue, newKey } = await import('../../src/core/crypto.ts');
 const { resolveVaultKey, vaultStatus } = await import('../../src/core/vault.ts');
-const { completeness, displaySensitive, dumpSection, formatValue, serializeEntry } = await import('../../src/core/render.ts');
-const { findSection, groupFields, instantiateTemplate, isSensitiveField } = await import('../../src/core/fields.ts');
+const { completeness, displaySensitive, dumpTemplate, formatValue, serializeEntry } = await import('../../src/core/render.ts');
+const { findTemplate, groupFields, instantiateTemplate, isSensitiveField } = await import('../../src/core/fields.ts');
 const { normalizeStructure, groupKeysOf } = await import('../../src/shared/fields/structure.ts');
 
 const SEC = instantiateTemplate('secret', { id: 'secret', title: '密钥' });
@@ -98,16 +98,15 @@ test('completeness：给出已填数与未填字段清单', () => {
   assert.deepEqual(c.missing.map((m) => m.key).includes('name'), false);
 });
 
-test('serializeEntry：密文字段默认原文，--mask 才打码', () => {
+test('serializeEntry：密钥列表里的值默认原文，--mask 才打码', () => {
   const entry = {
-    id: 'e_1', section: 'secret', title: 'OpenAI 主号', tags: [],
-    values: { value: 'sk-1234567890abcdef' },
+    id: 'e_1', template: 'secret', title: 'OpenAI 主号', tags: [],
+    values: { keys: [{ name: 'OpenAI', value: 'sk-1234567890abcdef' }] },
     createdAt: null, updatedAt: null,
   };
   const plain = serializeEntry(SEC, entry);
-  assert.equal(plain.values.value, 'sk-1234567890abcdef', '本机单人工具：默认不拦自己');
-  assert.equal(serializeEntry(SEC, entry, { mask: true }).values.value, 'sk-1******cdef');
-  assert.deepEqual(Object.keys(plain.values), ['value'], '密钥栏目就一个字段：KV');
+  assert.equal(plain.values.keys[0].value, 'sk-1234567890abcdef', '本机单人工具：默认不拦自己');
+  assert.equal(serializeEntry(SEC, entry, { mask: true }).values.keys[0].value, 'sk-1******cdef');
 });
 
 test('displaySensitive：默认原文；打码要显式要', () => {
@@ -123,13 +122,13 @@ test('displaySensitive：默认原文；打码要显式要', () => {
   assert.equal(displaySensitive(null, { decrypt }), null);
 });
 
-test('serializeEntry：密文对象经 decrypt 后默认出明文', () => {
+test('serializeEntry：密钥列表的密文经 decrypt 后默认出明文', () => {
   const key = newKey();
-  const entry = { id: 'e_2', section: 'secret', title: 'x', tags: [], values: { value: encryptValue(key, 'sk-live-abcdefghijklmn') } };
+  const entry = { id: 'e_2', template: 'secret', title: 'x', tags: [], values: { keys: [{ name: 'k', value: encryptValue(key, 'sk-live-abcdefghijklmn') }] } };
   const decrypt = (b) => decryptValue(key, b);
-  assert.equal(serializeEntry(SEC, entry, { decrypt }).values.value, 'sk-live-abcdefghijklmn');
-  assert.equal(serializeEntry(SEC, entry, { decrypt, mask: true }).values.value, 'sk-l******klmn');
-  assert.equal(serializeEntry(SEC, entry).values.value, '[需要密钥才能解密]');
+  assert.equal(serializeEntry(SEC, entry, { decrypt }).values.keys[0].value, 'sk-live-abcdefghijklmn');
+  assert.equal(serializeEntry(SEC, entry, { decrypt, mask: true }).values.keys[0].value, 'sk-l******klmn');
+  assert.equal(serializeEntry(SEC, entry).values.keys[0].value, '[需要密钥才能解密]');
 });
 
 test('formatValue：bool / tags / 空值 的人读形态一致', () => {
@@ -140,27 +139,28 @@ test('formatValue：bool / tags / 空值 的人读形态一致', () => {
   assert.equal(formatValue(null, { type: 'text' }), '');
 });
 
-test('dumpSection：字段台账带 sensitive 标记，值默认原文、mask 时打码', () => {
-  const entry = { id: 'e_9', section: 'secret', title: 'x', tags: [], values: { value: 'sk-abcdefghijklmnop' } };
-  const d = dumpSection(SEC, [entry]);
-  assert.equal(d.section.id, 'secret');
-  assert.equal(d.fields.find((f) => f.key === 'value').sensitive, true);
-  assert.equal(d.entries[0].values.value, 'sk-abcdefghijklmnop');
-  const m = dumpSection(SEC, [entry], { mask: true });
-  assert.equal(m.entries[0].values.value.includes('abcdefghij'), false);
+test('dumpTemplate：密钥列表子列带 sensitive 标记，值默认原文、mask 时打码', () => {
+  const entry = { id: 'e_9', template: 'secret', title: 'x', tags: [], values: { keys: [{ name: 'k', value: 'sk-abcdefghijklmnop' }] } };
+  const d = dumpTemplate(SEC, [entry]);
+  assert.equal(d.template.id, 'secret');
+  assert.equal(d.fields.find((f) => f.key === 'keys').fields.find((f) => f.key === 'value').sensitive, true);
+  assert.equal(d.entries[0].values.keys[0].value, 'sk-abcdefghijklmnop');
+  const m = dumpTemplate(SEC, [entry], { mask: true });
+  assert.equal(m.entries[0].values.keys[0].value.includes('abcdefghij'), false);
   assert.equal(d.count, 1);
 });
 
-test('isSensitiveField：type=secret 与显式 sensitive 都算密文', () => {
-  assert.equal(isSensitiveField(SEC, 'value'), true);
+test('isSensitiveField：显式 sensitive 与 secret 类型都算密文', () => {
+  assert.equal(isSensitiveField(SEC, 'keys'), false, 'entrylist 容器本身不是密文，密文在子列');
+  assert.equal(isSensitiveField({ fields: SEC.fields.find((f) => f.key === 'keys').fields.map((f) => ({ ...f, sensitive: undefined })) }, 'value'), false);
   assert.equal(isSensitiveField(JOB, 'name'), false);
 });
 
-test('findSection：id 与标题都能定位，未命中返回 null', () => {
-  const store = { sections: [JOB, SEC] };
-  assert.equal(findSection(store, 'job').id, 'job');
-  assert.equal(findSection(store, '求职').id, 'job');
-  assert.equal(findSection(store, '不存在'), null);
+test('findTemplate：id 与标题都能定位，未命中返回 null', () => {
+  const store = { templates: [JOB, SEC] };
+  assert.equal(findTemplate(store, 'job').id, 'job');
+  assert.equal(findTemplate(store, '求职').id, 'job');
+  assert.equal(findTemplate(store, '不存在'), null);
 });
 
 test('groupFields：按字段顺序产出分组，组字段不算成员，不丢字段', () => {
@@ -171,16 +171,17 @@ test('groupFields：按字段顺序产出分组，组字段不算成员，不丢
   assert.equal(groups[0].id, 'basic');
 });
 
-test('密钥模板是严格的 KV：一个字段 + 条目名就是键名', () => {
-  assert.equal(SEC.fields.length, 1, '存个 key 不该先填一张表');
-  assert.equal(SEC.fields[0].key, 'value');
-  assert.equal(isSensitiveField(SEC, 'value'), true);
-  assert.equal(SEC.titleField, null, '键名就是条目名，不该再从某个字段推导');
-  assert.equal(SEC.titleLabel, '密钥名');
-  assert.equal(SEC.kv, true, '密钥模板必须自带 kv 标记 —— 面板据此渲染 KV 表格而不是条目列表');
+test('密钥模板是普通条目模板：一个密钥列表字段，子列值加密', () => {
+  const keys = SEC.fields.find((f) => f.key === 'keys');
+  assert.ok(keys, '密钥模板必须有 keys 字段');
+  assert.equal(keys.type, 'entrylist', '密钥列表本质是普通的 entrylist 字段');
+  assert.equal(keys.fields.find((f) => f.key === 'value').sensitive, true, '值列加密');
+  assert.equal(SEC.titleField, null, '键名是行里的 name 列，不从条目名推导');
+  assert.equal(SEC.titleLabel, '条目名');
+  assert.equal('kv' in SEC, false, '模板对象里不再有 kv 特例字段');
 });
 
-// —— 结构不变量（servers 栏目事故回归）——
+// —— 结构不变量（servers 条目模板事故回归）——
 // 过去「分组声明 ⊇ 字段引用」是两份数据要对账；0.42 起组就是字段，
 // 这份不变量由 normalizeStructure 一家收口（读路径与写路径共用）。
 test('normalizeStructure：没有组字段时合成根组，把所有普通字段收编进去', () => {
@@ -204,17 +205,17 @@ test('normalizeStructure：组声明里不存在/自己的成员被剪掉，重�
   assert.deepEqual(groupKeysOf(out.find((f) => f.key === 'b')), [], '同一个字段只归一个组');
 });
 
-test('normalizeSection 收口自愈：老形状（groups + field.group）读一次就折成组字段', async () => {
+test('normalizeTemplate 收口自愈：老形状（groups + field.group）读一次就折成组字段', async () => {
   const { normalize } = await import('../../src/core/store.ts');
   const store = normalize({
     version: 3,
-    sections: [{
+    templates: [{
       id: 'servers', title: '服务器', groups: [{ id: 'basic', title: '基本信息' }],
       fields: [{ key: 'host', label: '公网IP', type: 'text', group: 'basic' }],
     }],
     entries: [],
   });
-  const sec = store.sections.find((s) => s.id === 'servers');
+  const sec = store.templates.find((s) => s.id === 'servers');
   // 组折成字段（旧分组 id 就是组字段 key），外貌与「原始资料」袋一致
   const groupKeys = sec.fields.filter((f) => f.type === 'group').map((f) => f.key);
   assert.ok(groupKeys.includes('basic'), JSON.stringify(groupKeys));

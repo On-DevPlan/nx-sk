@@ -286,7 +286,7 @@ export function sanitizeTotals(input: unknown, columns: JsonRow[], { where = '�
  * 把「字段定义 + 条目里的值」合成一份自描述的表定义。
  *
  * 合并顺序（后者优先）：行推断 < 字段定义里的初始列 < 数据里自己的列。
- * 数据里的 columns 一旦存在就是**权威**的：栏目 schema 是给所有条目共用的，
+ * 数据里的 columns 一旦存在就是**权威**的：条目模板 schema 是给所有条目共用的，
  * 而一张表的列常常只对这条有意义 —— 拿 schema 去覆盖数据，等于每次编辑都被打回去。
  */
 export function normalizeSpec(def: JsonRow | null | undefined, value: unknown): TableSpec {

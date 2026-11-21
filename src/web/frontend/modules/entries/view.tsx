@@ -9,29 +9,29 @@ import type { BlockLayout } from '../../../../shared/blockLayout.ts';
 import type { FieldDef } from '../../../../shared/fields/types.ts';
 import { copyText, entryRefText } from '../../entryRef.ts';
 import type { ViewProps } from '../../registry.ts';
-import KvTable from './kvTable.tsx';
 import EntryListColumn from './EntryListColumn.tsx';
 import EntryDetailColumn from './EntryDetailColumn.tsx';
-import SectionToolbar from './SectionToolbar.tsx';
+import TemplateToolbar from './TemplateToolbar.tsx';
 import ImportModals from './ImportModals.tsx';
 import AddFieldModal from './AddFieldModal.tsx';
+import SaveAsTemplateModal from './SaveAsTemplateModal.tsx';
+import type { SaveAsTemplateForm } from './SaveAsTemplateModal.tsx';
+import TagEditorModal from './TagEditorModal.tsx';
+import { TEMPLATE_ID_RE } from './SaveAsTemplateModal.tsx';
 import FieldModals from './FieldModals.tsx';
 import { norm, syncEntryHash } from './viewTypes.ts';
-import type { ApplySectionResult, AskState, Conflict, Draft, ImportPreview, ModalState, SectionDump, ZipState } from './viewTypes.ts';
+import type { ApplyTemplateResult, AskState, Conflict, Draft, ImportPreview, ModalState, TemplateDump, ZipState } from './viewTypes.ts';
 
 /**
- * 栏目详情视图。按栏目的形状分两种布局：
- *
- * - `kv: true`（密钥那种）→ 交给 [[kvTable]]，**一行一个键值对**。没有条目列表、
- *   没有字段表单、没有完整性——密钥就是一张表。
- * - 其余栏目 → 模板建议的分组表单（求职那种需要中文标签/候选值/未填清单的场景）。
+ * 条目模板详情视图：模板建议的分组表单（求职那种需要中文标签/候选值/未填清单的场景）。
+ * 密钥也走这里——它只是普通模板 + 一个 keys 结构清单字段，不再是特例。
  *
  * 字段与分组全部来自后端，所以新增字段不需要改前端。
  */
-export default function SectionView({ sectionId: rawId, listHidden = false, sidebarCollapsed = false }: ViewProps) {
-  const sectionId = rawId || '';
+export default function TemplateView({ templateId: rawId, listHidden = false, sidebarCollapsed = false, onCreateEntry }: ViewProps) {
+  const templateId = rawId || '';
   const { ui, patchUi, toast, guard, dialog, reload, boot } = useStore();
-  const [data, setData] = useState<SectionDump | null>(null);
+  const [data, setData] = useState<TemplateDump | null>(null);
   // 条目列表里 shortcut 字段只报数量（#5 原文：字段显示只需要分组数量）。
   const shortcutDefs = data ? data.fields.filter((f) => f.type === 'shortcut') : [];
   const [err, setErr] = useState<string | null>(null);
@@ -42,13 +42,19 @@ export default function SectionView({ sectionId: rawId, listHidden = false, side
   // （CLI/agent 的 --set 未知键自动登记通路不受影响，退役的只是这块 UI。）
   const [af, setAf] = useState<{ key: string; label: string; type: string; group: string; value: string } | null>(null);
   const [afBusy, setAfBusy] = useState(false);
+  // 任务 #48：把当前条目结构另存为条目模板（只抄结构、不抄值）
+  const [saveTpl, setSaveTpl] = useState<SaveAsTemplateForm | null>(null);
+  const [saveTplBusy, setSaveTplBusy] = useState(false);
+  // 标签编辑：条目 tags 与模板默认 tags 共用一张表单，直接 PATCH，不重拉 dump。
+  const [tagEdit, setTagEdit] = useState<{ scope: 'entry' | 'template'; tags: string[] } | null>(null);
+  const [tagBusy, setTagBusy] = useState(false);
   // 任务 #24：块头「⋯」菜单的两个弹窗——查看（只读详情）/ 编辑（改本条的显示名与描述）
   const [fieldView, setFieldView] = useState<{ def: FieldDef } | null>(null);
   const [fieldEdit, setFieldEdit] = useState<{ def: FieldDef } | null>(null);
   // 任务 #27：字段变化历史（单字段）+ 条目变化时间线（全字段）
   const [fieldHistory, setFieldHistory] = useState<{ def: FieldDef } | null>(null);
   const [entryHistoryOpen, setEntryHistoryOpen] = useState(false);
-  // 栏目 ZIP：zip = { fileName, buffer, preview }（buffer 用于确认时再 POST 一次，服务端不存状态）
+  // 条目模板 ZIP：zip = { fileName, buffer, preview }（buffer 用于确认时再 POST 一次，服务端不存状态）
   const [zip, setZip] = useState<ZipState | null>(null);
   // 加密包先问口令：ask = { fileName, buffer }
   const [ask, setAsk] = useState<AskState | null>(null);
@@ -94,7 +100,7 @@ export default function SectionView({ sectionId: rawId, listHidden = false, side
     patchUi({ listW: 300 });
   };
 
-  // ui.entry 可能在挂载之后才变（侧栏「＋」新建条目后立刻选中它，而 sectionId 没变、
+  // ui.entry 可能在挂载之后才变（侧栏「＋」新建条目后立刻选中它，而 templateId 没变、
   // 本组件不重挂）。load 的 deps 刻意不含 ui.entry（否则每次选条目都重拉 dump），
   // 所以用 ref 取最新值——否则 load 闭包里读到的还是挂载时的旧 ui.entry，
   // 重拉后会「兜底选中 entries[0]」，把刚建好的条目踢走。
@@ -105,7 +111,19 @@ export default function SectionView({ sectionId: rawId, listHidden = false, side
     setBusy(true);
     setErr(null);
     try {
-      const d = await api<SectionDump>(`/api/sections/${encodeURIComponent(sectionId)}/dump${mask ? '?mask=1' : ''}`);
+      const d = await api<TemplateDump>(`/api/templates/${encodeURIComponent(templateId)}/dump${mask ? '?mask=1' : ''}`);
+      // 0.43：条目是唯一内容节点，条目模板 dump 里不一定有它（folder / 无条目模板条目）。
+      // 目标条目不在 dump 里时，按 id 单读一条，把它自己的字段结构带进来。
+      const wanted0 = keepId || entryRef.current;
+      if (wanted0 && !d.entries.some((e) => e.id === wanted0)) {
+        const one = await api<TemplateDump['entries'][number] & {
+          fields?: FieldDef[];
+          groups?: Array<{ id: string; title: string }>;
+        }>(`/api/entries/${encodeURIComponent(wanted0)}${mask ? '?mask=1' : ''}`);
+        d.entries = [one];
+        if (one.fields?.length) d.fields = one.fields;
+        if (one.groups?.length) d.groups = one.groups;
+      }
       setData(d);
       const wanted = keepId || entryRef.current;
       const hit = d.entries.find((e) => e.id === wanted) || d.entries[0] || null;
@@ -119,7 +137,7 @@ export default function SectionView({ sectionId: rawId, listHidden = false, side
       setBusy(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sectionId, mask]);
+  }, [templateId, mask]);
 
   useEffect(() => { load(); }, [load]);
   // 任务 #30：顶栏「刷新数据」是唯一刷新入口——它只重拉 bootstrap，
@@ -129,8 +147,8 @@ export default function SectionView({ sectionId: rawId, listHidden = false, side
     window.addEventListener(REFRESH_EVENT, onRefresh);
     return () => window.removeEventListener(REFRESH_EVENT, onRefresh);
   }, [load]);
-  // 侧栏条目树点击：外部（App 侧栏）把 ui.entry 换成**同栏目**的另一条时，跟随切换选中。
-  // 数据不用重拉（dump 里本来就有全部条目）；目标条目不在本栏目时不动（load 的兜底逻辑管它）。
+  // 侧栏条目树点击：外部（App 侧栏）把 ui.entry 换成**同条目模板**的另一条时，跟随切换选中。
+  // 数据不用重拉（dump 里本来就有全部条目）；目标条目不在本条目模板时不动（load 的兜底逻辑管它）。
   const entryWanted = ui.entry;
   useEffect(() => {
     if (!entryWanted || !data) return;
@@ -167,23 +185,26 @@ export default function SectionView({ sectionId: rawId, listHidden = false, side
   const groups = useMemo<BoardGroup[]>(() => {
     if (!data) return [];
     // v3：块渲染跟随**条目自身的字段行**（含条目内添加的扩展字段）；
-    // 没有行数据（旧数据/兜底）才回退栏目字典。
-    const defs = current?.entryFields?.length ? current.entryFields : data.fields;
-    // 归属是服务端推导好的（`group` 指向组字段的 key）；组字段自己作为块出现时
-    // 就是一条小标题（GroupControl），不经这里分组。
-    return data.groups
+    // 没有行数据（旧数据/兜底）才回退条目模板字典。
+    const rawDefs = current?.entryFields?.length ? current.entryFields : data.fields;
+    // 0.43 无条目模板 / folder 条目没有组字段：给一个「内容」根组，别把字段全过滤掉。
+    const defs = data.groups.length
+      ? rawDefs
+      : rawDefs.map((f) => ({ ...f, group: 'root' }));
+    const groupsView = data.groups.length ? data.groups : (defs.length ? [{ id: 'root', title: '内容' }] : []);
+    return groupsView
       .map((g) => ({ ...g, fields: defs.filter((f) => (f as { group?: string }).group === g.id) }))
       .filter((g) => g.fields.length);
   }, [data, current]);
 
   // —— 正文版式（块布局）——
-  // 版式是**显示关系**，存在 section.layout 里（与字段字典分开），所以有两条保存链：
+  // 版式是**显示关系**，存在 template.layout 里（与字段字典分开），所以有两条保存链：
   // 拖块 / 改宽高 / 换面板顺序只写版式（防抖自动存），填字段仍然走「N 处改动 → 保存」。
   // 这样拖一下版式不会把没填完的值一起提交，反过来改字段也不会打乱版式。
   const [board, setBoard] = useState<BlockLayout | null>(null);
   const boardTouched = useRef(false);
   const boardTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => { boardTouched.current = false; setBoard(null); }, [sectionId]);
+  useEffect(() => { boardTouched.current = false; setBoard(null); }, [templateId]);
   // 服务端读回来的版式已经按当前字段对齐过；只有当用户还没动过版式时才跟着刷新
   // （否则「保存字段」触发的重读会把刚拖好的版式弹回去）
   useEffect(() => { if (!boardTouched.current && data?.layout) setBoard(data.layout); }, [data]);
@@ -196,7 +217,7 @@ export default function SectionView({ sectionId: rawId, listHidden = false, side
     if (boardTimer.current) clearTimeout(boardTimer.current);
     boardTimer.current = setTimeout(guard(async () => {
       boardTimer.current = null;
-      await api(`/api/sections/${encodeURIComponent(sectionId)}`, { method: 'PATCH', body: { layout: next } });
+      await api(`/api/templates/${encodeURIComponent(templateId)}`, { method: 'PATCH', body: { layout: next } });
       toast('版式已保存');
     }), 700);
   };
@@ -204,7 +225,7 @@ export default function SectionView({ sectionId: rawId, listHidden = false, side
   const patchField = (key: string, value: unknown) => setDraft((d) => (d ? { ...d, values: { ...d.values, [key]: value } } : d));
 
   // 脏值判定的字段集合 = **本条目的结构行**（含条目内自建的扩展字段），
-  // 不是栏目字典。任务 #25 的真根因：只遍历 data.fields 时，扩展字段的改动
+  // 不是条目模板字典。任务 #25 的真根因：只遍历 data.fields 时，扩展字段的改动
   // 永远不进 dirty → 保存按钮不出现、值也存不下去（debug 引用因此看着「不更新」）。
   const dirty = useMemo(() => {
     if (!draft || !current) return { set: {} as Record<string, unknown>, titleChanged: false, count: 0 };
@@ -227,6 +248,70 @@ export default function SectionView({ sectionId: rawId, listHidden = false, side
     await reload();
   });
 
+  // 标签是独立元数据，不进字段 dirty；直接 PATCH 后只改本地 data.tags，
+  // 不重拉 dump——否则会把用户尚未保存的字段草稿一起冲掉。
+  const saveTags = guard(async (tags: string[]) => {
+    if (!tagEdit) return;
+    setTagBusy(true);
+    try {
+      if (tagEdit.scope === 'entry') {
+        if (!current) return;
+        await api(`/api/entries/${encodeURIComponent(current.id)}`, { method: 'PATCH', body: { tags } });
+        setData((d) => (d ? { ...d, entries: d.entries.map((e) => (e.id === current.id ? { ...e, tags } : e)) } : d));
+        toast('条目标签已保存');
+      } else {
+        await api(`/api/templates/${encodeURIComponent(templateId)}`, { method: 'PATCH', body: { tags } });
+        setData((d) => (d ? { ...d, template: { ...d.template, tags } } : d));
+        toast('模板默认标签已保存，只影响以后从该模板新建的条目');
+      }
+      setTagEdit(null);
+      await reload();
+    } finally {
+      setTagBusy(false);
+    }
+  });
+
+  const openSaveAsTemplate = () => {
+    const entry = current || draft;
+    if (!entry) return;
+    if (dirty.count) {
+      toast('先保存当前改动，再存为条目模板（未保存的字段不会进模板）', 'bad');
+      return;
+    }
+    const raw = `tpl_${entry.id.replace(/^e_/, '')}`;
+    const base = raw.slice(0, 55);
+    let id = base;
+    let suffix = 2;
+    while (boot?.templates.some((t) => t.id === id)) id = `${base}_${suffix++}`.slice(0, 64);
+    setSaveTpl({
+      entryId: entry.id,
+      id,
+      title: entry.title || '未命名模板',
+      description: `从条目「${entry.title || entry.id}」保存的条目模板`,
+    });
+  };
+
+  const saveAsTemplate = guard(async () => {
+    if (!saveTpl || saveTplBusy) return;
+    const id = saveTpl.id.trim();
+    if (!TEMPLATE_ID_RE.test(id)) {
+      toast('条目模板 id 必须是小写字母开头，仅含 a-z 0-9 _ -', 'bad');
+      return;
+    }
+    setSaveTplBusy(true);
+    try {
+      const r = await api<{ template: { id: string; title: string } }>(
+        `/api/entries/${encodeURIComponent(saveTpl.entryId)}/save-as-template`,
+        { method: 'POST', body: { id, title: saveTpl.title.trim() || id, description: saveTpl.description.trim() } },
+      );
+      toast(`已保存为条目模板：${r.template.title}（${r.template.id}）`);
+      setSaveTpl(null);
+      await reload();
+    } finally {
+      setSaveTplBusy(false);
+    }
+  });
+
   // 任务 #26：偏好「编辑后自动保存」。复用上面同一条保存链（PATCH + 重读），
   // 停手 800ms 触发；偏好关闭时这段完全不参与，行为与之前的手动保存一致。
   // save 每渲染都是新函数，用 ref 取最新一版，避免把它写进依赖导致计时器被无谓重置。
@@ -246,6 +331,34 @@ export default function SectionView({ sectionId: rawId, listHidden = false, side
     };
   }, [autoSave, dirty.count, dirty.set, dirty.titleChanged]);
   useEffect(() => () => { if (autoTimer.current) clearTimeout(autoTimer.current); }, []);
+
+  /**
+   * 字段级回写：grill 的「确认并回写」走这里。
+   *
+   * 不能只 `onChange` 然后调 `save()`：同一个事件里 state 还没提交，save 会读到旧草稿，
+   * 新答案刚好漏掉。这里把 override 合并进整份 dirty set 再 PATCH，既保住别的未保存字段，
+   * 又保证这次答案真的落库；成功后重新 load，面板拿到的就是服务端回读值。
+   */
+  const commitField = guard(async (key: string, value: unknown) => {
+    if (!draft || !current) return false;
+    const nextValues = { ...draft.values, [key]: value };
+    const defs = current.entryFields?.length ? current.entryFields : (data?.fields || []);
+    const set: Record<string, unknown> = {};
+    for (const f of defs) {
+      if (norm(current.values[f.key]) !== norm(nextValues[f.key])) set[f.key] = nextValues[f.key];
+    }
+    const titleChanged = draft.title !== current.title;
+    const count = Object.keys(set).length + (titleChanged ? 1 : 0);
+    if (!count) { toast('没有改动'); return true; }
+    if (autoTimer.current) { clearTimeout(autoTimer.current); autoTimer.current = null; }
+    const body: { set: Record<string, unknown>; title?: string } = { set };
+    if (titleChanged) body.title = draft.title;
+    await api(`/api/entries/${encodeURIComponent(draft.id)}`, { method: 'PATCH', body });
+    toast(`已回写 ${count} 处改动`);
+    await load(draft.id);
+    await reload();
+    return true;
+  });
 
   // 改到一半关标签页 = 改动全丢。浏览器只允许弹一句「确定要离开吗」，
   // 拦不住也改不了文案，但至少别让未保存的改动无声消失。
@@ -286,7 +399,7 @@ export default function SectionView({ sectionId: rawId, listHidden = false, side
     }
   });
 
-  // 任务 #20：条目级字段移除。模板字段=脱离（值保留、可恢复，字典与他条不受影响）；
+  // 任务 #20：条目级字段移除。条目模板字段=脱离（值保留、可恢复，字典与他条不受影响）；
   // 扩展字段=硬删（值一并删，不可恢复）——两种语义两种确认文案，danger 只给不可恢复那条。
   const removeField = guard(async (key: string, def: FieldDef) => {
     if (!draft) return;
@@ -295,7 +408,7 @@ export default function SectionView({ sectionId: rawId, listHidden = false, side
     const ok = await dialog({
       message: isExtension
         ? `删除扩展字段「${label}」？值会一并删除，不可恢复`
-        : `从本条目移除「${label}」？（不影响栏目模板与其他条目）`,
+        : `从本条目移除「${label}」？（不影响条目模板定义与其他条目）`,
       danger: isExtension,
       confirmText: isExtension ? '删除字段' : '移除',
     });
@@ -326,20 +439,9 @@ export default function SectionView({ sectionId: rawId, listHidden = false, side
     await reload();
   });
 
-  const addEntry = guard(async () => {
-    const label = data?.section.titleLabel || '名称';
-    const answer = await dialog({ message: `新建「${data?.section.title}」条目，${label}是？`, input: { placeholder: '给这条起个名字' } });
-    if (!answer) return;
-    const name = String(answer);
-    const body: { section: string; title: string; set?: Record<string, string> } = { section: sectionId, title: name };
-    if (data?.section.titleField) body.set = { [data.section.titleField]: name };
-    const created = await api<{ id: string; title: string }>('/api/entries', { method: 'POST', body });
-    toast(`已新建：${created.title}`);
-    patchUi({ entry: created.id });
-    syncEntryHash(sectionId, created.id);
-    await load(created.id);
-    await reload();
-  });
+  // 任务 #49：条目页的「新建条目」不再自己问名字，统一交给 App 的创建弹窗。
+  // 当前条目模板只作为弹窗里的默认选项，用户仍可改选其他模板或空白条目。
+  const addEntry = () => onCreateEntry?.(templateId);
 
   const removeEntry = guard(async () => {
     if (!current) return;
@@ -352,22 +454,22 @@ export default function SectionView({ sectionId: rawId, listHidden = false, side
     await api(`/api/entries/${encodeURIComponent(current.id)}`, { method: 'DELETE' });
     toast('已删除');
     patchUi({ entry: '' });
-    syncEntryHash(sectionId, '');
+    syncEntryHash(templateId, '');
     await load('');
     await reload();
   });
 
-  // 面包屑点击复制：把「栏目›条目」定位（含 id 与 CLI 命令）贴进剪贴板，
-  // 粘给任意 agent 即可精确定位这条条目去做修改
+  // 面包屑点击复制：把条目定位（id + CLI 命令）贴进剪贴板，
+  // 粘给任意 agent 即可精确定位这条条目去做修改；条目模板不参与定位。
   const copyEntryRef = guard(async (entry: { id: string; title: string } | null) => {
     if (!entry || !data) return;
-    const text = entryRefText(data.section, entry);
+    const text = entryRefText(entry);
     // copyText 内部：优先剪贴板 API，被拒时退回 textarea+execCommand——两条 toast
-    // 文案与抽出前逐字一致（API 直路带「贴给 agent 即可」，退回路径不带）。
+    // 文案都只带条目标题，避免把「模板›条目」重新写回成层级关系。
     const direct = await copyText(text);
     toast(direct
-      ? `已复制条目定位：${data.section.title} › ${entry.title}（贴给 agent 即可）`
-      : `已复制条目定位：${data.section.title} › ${entry.title}`);
+      ? `已复制条目定位：${entry.title}（贴给 agent 即可）`
+      : `已复制条目定位：${entry.title}`);
   });
 
   // 加密包先问口令（与全局面板同一套交互）：别把「缺口令」报成「包坏了」
@@ -377,7 +479,7 @@ export default function SectionView({ sectionId: rawId, listHidden = false, side
       const qs = new URLSearchParams({ 'dry-run': '1' });
       if (passphrase) qs.set('passphrase', passphrase);
       const preview = await postZip<ImportPreview>(
-        `/api/sections/${encodeURIComponent(sectionId)}/import.zip?${qs}`, buffer, fileName,
+        `/api/templates/${encodeURIComponent(templateId)}/import.zip?${qs}`, buffer, fileName,
       );
       setZip({ fileName, buffer, preview, passphrase: passphrase || '' });
       setConflict('skip');
@@ -428,8 +530,8 @@ export default function SectionView({ sectionId: rawId, listHidden = false, side
     try {
       const qs = new URLSearchParams({ 'on-conflict': conflict });
       if (zip.passphrase) qs.set('passphrase', zip.passphrase);
-      const r = await postZip<ApplySectionResult>(
-        `/api/sections/${encodeURIComponent(sectionId)}/import.zip?${qs}`,
+      const r = await postZip<ApplyTemplateResult>(
+        `/api/templates/${encodeURIComponent(templateId)}/import.zip?${qs}`,
         zip.buffer, zip.fileName,
       );
       setZip(null);
@@ -459,36 +561,36 @@ export default function SectionView({ sectionId: rawId, listHidden = false, side
   if (err) {
     return (
       <div className="pad stack">
-        <div className="bad"><strong>栏目读不到</strong></div>
+        <div className="bad"><strong>条目模板读不到</strong></div>
         <pre className="block">{err}</pre>
-        <div className="hint">如果这个栏目刚被删掉，切到「栏目」tab 看看现有栏目。</div>
+        <div className="hint">如果这个条目模板刚被删掉，切到「条目模板」tab 看看现有条目模板。</div>
       </div>
     );
   }
   if (!data) return <div className="pad muted">{busy ? '加载中…' : '暂无数据'}</div>;
 
-  // KV 栏目单独一套界面（宿主的 hooks 都已经跑完，这里是合法提前返回）
-  if (data.section.kv) return <KvTable sectionId={sectionId} sectionTitle={data.section.title} />;
+  // 模板所有形状统一走普通条目列表 + 字段表单（密钥也是普通字段）。
 
   return (
     <div
-      className="section-wrap"
+      className="template-wrap"
       onDragEnter={onDragEnter}
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
     >
-      <SectionToolbar
-        section={data.section}
+      <TemplateToolbar
+        template={data.template}
         count={data.count}
         mask={mask}
         onToggleMask={() => patchUi({ mask: !mask })}
+        onEditTags={() => setTagEdit({ scope: 'template', tags: data.template.tags })}
         onAddEntry={addEntry}
         showAdd={sidebarCollapsed}
       />
 
       <div className="cols" ref={colsRef}>
-        {/* #14：侧栏树里已经有这个栏目的条目时，列表列与它的拖拽线一起隐藏——
+        {/* #14：侧栏树里已经有这个条目模板的条目时，列表列与它的拖拽线一起隐藏——
             条目导航交给侧栏树，正文只留编辑器。收起侧栏（或侧栏还没加载出条目）
             列表照旧出现：它是收起态下唯一的条目导航。 */}
         {listHidden ? null : (
@@ -501,7 +603,7 @@ export default function SectionView({ sectionId: rawId, listHidden = false, side
             dragging={draggingCol}
             onPick={(e) => {
               patchUi({ entry: e.id });
-              syncEntryHash(sectionId, e.id);
+              syncEntryHash(templateId, e.id);
               setDraft({ id: e.id, title: e.title, values: { ...e.values } });
             }}
             onCopyRef={copyEntryRef}
@@ -517,17 +619,20 @@ export default function SectionView({ sectionId: rawId, listHidden = false, side
           current={current}
           dirtyCount={dirty.count}
           skippedExcluded={skippedExcluded}
-          sectionId={sectionId}
+          templateId={templateId}
           groups={groups}
           boardView={boardView}
           fieldActions={fieldActions}
           onSave={save}
           onCopyRef={copyEntryRef}
+          onSaveAsTemplate={openSaveAsTemplate}
           onDraftTitle={(title) => setDraft((d) => (d ? { ...d, title } : d))}
+          onEditTags={() => setTagEdit({ scope: 'entry', tags: current?.tags || [] })}
           onAddField={() => setAf({ key: '', label: '', type: 'text', group: groups[0]?.id || '', value: '' })}
           onRestoreField={restoreField}
           onBoard={applyBoard}
           onPatchField={patchField}
+          onCommitField={commitField}
           onDiscard={() => { if (draft) load(draft.id); }}
           onRemoveEntry={removeEntry}
           onOpenHistory={() => setEntryHistoryOpen(true)}
@@ -535,7 +640,7 @@ export default function SectionView({ sectionId: rawId, listHidden = false, side
       </div>
 
       {dragDepth > 0 ? (
-        <div className="drop-mask"><div>松开导入栏目 ZIP</div></div>
+        <div className="drop-mask"><div>松开导入条目模板 ZIP</div></div>
       ) : null}
 
       <ImportModals
@@ -563,7 +668,7 @@ export default function SectionView({ sectionId: rawId, listHidden = false, side
         entryHistoryOpen={entryHistoryOpen}
         draft={draft}
         current={current}
-        sectionTitle={data.section.title}
+        templateTitle={data.template.title}
         onCloseView={() => setFieldView(null)}
         onCloseEdit={() => setFieldEdit(null)}
         onCloseHistory={() => setFieldHistory(null)}
@@ -574,7 +679,7 @@ export default function SectionView({ sectionId: rawId, listHidden = false, side
       <AddFieldModal
         af={af}
         afBusy={afBusy}
-        sectionTitle={data.section.title}
+        templateTitle={data.template.title}
         groups={groups}
         fieldTypes={boot?.fieldTypes}
         fieldTypeLabels={boot?.fieldTypeLabels}
@@ -582,6 +687,26 @@ export default function SectionView({ sectionId: rawId, listHidden = false, side
         onClose={() => { if (!afBusy) setAf(null); }}
         onCancel={() => setAf(null)}
         onSubmit={submitAddField}
+      />
+
+      <SaveAsTemplateModal
+        form={saveTpl}
+        busy={saveTplBusy}
+        onChange={setSaveTpl}
+        onClose={() => { if (!saveTplBusy) setSaveTpl(null); }}
+        onSubmit={saveAsTemplate}
+      />
+
+      <TagEditorModal
+        open={!!tagEdit}
+        title={tagEdit?.scope === 'template' ? '编辑模板默认标签' : '编辑条目标签'}
+        hint={tagEdit?.scope === 'template'
+          ? '模板默认标签只影响以后从该模板新建的条目；已建条目的标签不会自动改。'
+          : '标签是条目元数据，保存后立即生效，不会影响未保存的字段草稿。'}
+        initialTags={tagEdit?.tags || []}
+        busy={tagBusy}
+        onClose={() => { if (!tagBusy) setTagEdit(null); }}
+        onSubmit={saveTags}
       />
     </div>
   );

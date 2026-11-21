@@ -10,13 +10,10 @@
 // 拿着旧 schema 干活的路径一条都不留；后续版本升级只提供新脚本，不改旧脚本。
 import { statSync } from 'node:fs';
 import { CURRENT_SCHEMA_VERSION } from './version.ts';
-import { MIGRATION_STEPS, planMigrationPath, readMigrationSql } from './migrations/index.ts';
+import { planMigrationPath, readMigrationSql } from './migrations/index.ts';
 import { tx } from './tx.ts';
 import { nowIso } from '../ids.ts';
 import type { Conn } from './driver.ts';
-
-/** 迁移步骤表 = migrations/index.js 的直接边。未来加版本 → 在那边追加。 */
-export const MIGRATIONS = MIGRATION_STEPS;
 
 // 连接级 PRAGMA 由 driver.ts 在每个连接上执行（journal_mode 在事务里改不动）。
 // 留在过滤规则里是为了让人可以在 .sql 里写 PRAGMA 而 runner 不炸。

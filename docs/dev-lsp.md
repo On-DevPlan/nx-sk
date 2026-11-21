@@ -71,7 +71,7 @@ Anthropic Directory 返回 **HTTP 403**（网络受限），`marketplace update`
 所以 `src/core/fields.ts` 归 `tsconfig.server.json`、`src/web/frontend/**` 归 `tsconfig.web.json`——
 这正是我们想要的（前端不能 import core 的边界，靠的也是这两份配置）。
 
-实测跨文件解析正常：`sections/service.ts` 里 hover 从 `core/fields.ts` import 的
+实测跨文件解析正常：`templates/service.ts` 里 hover 从 `core/fields.ts` import 的
 `findSection` 能出 `import findSection`，`select.tsx` 里 hover 从 `types.ts` import 的
 `ControlProps` 也能出类型。
 

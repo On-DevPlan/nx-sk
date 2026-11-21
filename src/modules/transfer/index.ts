@@ -1,4 +1,4 @@
-// 栏目级导出 / 导入（ZIP）。没有 view —— 入口在栏目页右上角「更多」里，
+// 条目模板级导出 / 导入（ZIP）。没有 view —— 入口在条目模板页右上角「更多」里，
 // 不在侧栏占一个 tab；CLI 与 HTTP 仍与其它模块同源。
 import * as service from './service.ts';
 import type { ServerResponse } from 'node:http';
@@ -8,7 +8,7 @@ interface TransferCtx {
   ref?: string;
   out?: string;
   entries?: string;
-  sections?: string;
+  templates?: string;
   selection?: unknown;
   file?: string;
   passphrase?: string;
@@ -33,8 +33,8 @@ export default {
     {
       id: 'transfer.export',
       cli: ['transfer', 'export'],
-      http: ['GET', '/api/sections/:ref/export.zip'],
-      summary: '把栏目（条目 + 引用附件）打成一个 ZIP；--passphrase 可整包加密',
+      http: ['GET', '/api/templates/:ref/export.zip'],
+      summary: '把条目模板（条目 + 引用附件）打成一个 ZIP；--passphrase 可整包加密',
       args: ['ref'],
       flags: {
         out: { type: 'string', hint: '保存路径（CLI）；缺省写到 ~/nx-sk/export/' },
@@ -50,8 +50,8 @@ export default {
     {
       id: 'transfer.import',
       cli: ['transfer', 'import'],
-      http: ['POST', '/api/sections/:ref/import.zip'],
-      summary: '从 ZIP 导入栏目条目（先 --dry-run 预览）；同名条目按 --on-conflict 处理，缺省跳过',
+      http: ['POST', '/api/templates/:ref/import.zip'],
+      summary: '从 ZIP 导入条目（先 --dry-run 预览）；同名条目按 --on-conflict 处理，缺省跳过',
       args: ['ref'],
       flags: {
         file: { type: 'string', hint: 'ZIP 路径（CLI）；浏览器上传走原始请求体' },
@@ -74,9 +74,9 @@ export default {
       id: 'transfer.bundleExport',
       cli: ['transfer', 'bundle-export'],
       http: ['POST', '/api/bundle/export.zip'],
-      summary: '全局导出：选栏目（可选每个栏目的条目）打成一个 zip；结构与附件随包',
+      summary: '全局导出：选条目模板（可选每个条目模板的条目）打成一个 zip；结构与附件随包',
       flags: {
-        sections: { type: 'string', hint: '栏目 id，逗号分隔（导出整个栏目）' },
+        templates: { type: 'string', hint: '条目模板 id，逗号分隔（导出整个条目模板）' },
         selection: { type: 'json', hint: '精确选择：[{"id":"job","entries":["条目id"]}]（面板用）' },
         out: { type: 'string', hint: '保存路径（CLI）；缺省 ~/nx-sk/export/' },
         'dry-run': { type: 'boolean', hint: '只算体积与数量，不写盘' },
@@ -84,15 +84,15 @@ export default {
         'no-files': { type: 'boolean', hint: '不带附件原件（包更小；导入后引用会指向不存在的附件）' },
       },
       raw: true,
-      run: (ctx: TransferCtx = {}) => service.exportBundleToFile({ sections: ctx.selection ?? ctx.sections, out: ctx.out, dryRun: ctx['dry-run'] === true, passphrase: pwOf(ctx), includeFiles: ctx['no-files'] !== true }),
-      serveRaw: (ctx: TransferCtx, frame: { res: ServerResponse }) => service.serveBundleZip({ sections: ctx.selection ?? ctx.sections, res: frame.res, passphrase: pwOf(ctx), includeFiles: ctx['no-files'] !== true }),
+      run: (ctx: TransferCtx = {}) => service.exportBundleToFile({ templates: ctx.selection ?? ctx.templates, out: ctx.out, dryRun: ctx['dry-run'] === true, passphrase: pwOf(ctx), includeFiles: ctx['no-files'] !== true }),
+      serveRaw: (ctx: TransferCtx, frame: { res: ServerResponse }) => service.serveBundleZip({ templates: ctx.selection ?? ctx.templates, res: frame.res, passphrase: pwOf(ctx), includeFiles: ctx['no-files'] !== true }),
       render: (d: Parameters<typeof service.renderBundleExport>[0]) => service.renderBundleExport(d),
     },
     {
       id: 'transfer.bundleImport',
       cli: ['transfer', 'bundle-import'],
       http: ['POST', '/api/bundle/import.zip'],
-      summary: '全局导入：多栏目包先 --dry-run 预览，再按冲突策略逐栏目合并/新建',
+      summary: '全局导入：多条目模板包先 --dry-run 预览，再按冲突策略逐条目模板合并/新建',
       flags: {
         file: { type: 'string', hint: 'ZIP 路径（CLI）；浏览器上传走原始请求体' },
         'on-conflict': { type: 'string', enum: ['skip', 'copy', 'overwrite'], hint: 'skip 跳过 / copy 另存 / overwrite 覆盖' },
@@ -111,7 +111,7 @@ export default {
       id: 'transfer.importNew',
       cli: ['transfer', 'import-new'],
       http: ['POST', '/api/import.zip'],
-      summary: '零配置导入：不指定栏目，按包内结构新建（id 冲突自动加序号，不合并）',
+      summary: '零配置导入：不指定条目模板，按包内结构新建（id 冲突自动加序号，不合并）',
       flags: {
         file: { type: 'string', hint: 'ZIP 路径（CLI）；浏览器上传走原始请求体' },
         'dry-run': { type: 'boolean', hint: '只预览，不写盘' },

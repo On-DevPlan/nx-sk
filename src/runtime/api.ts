@@ -9,7 +9,7 @@ import type { Action } from './spec.ts';
 
 // 附件可能是扫描件/照片，base64 再膨胀约 1/3；32MB 上限覆盖绝大多数简历、成绩单与头像
 const MAX_BODY = 32 * 1024 * 1024;
-// 栏目 ZIP 走**原始二进制**上传（不 base64），上限单独放宽
+// 条目模板 ZIP 走**原始二进制**上传（不 base64），上限单独放宽
 const MAX_UPLOAD_BODY = 64 * 1024 * 1024;
 // CLI 代理口（/api/cli）：binaryBody 上传在这里以 base64 随 JSON 走，上限按原始包 64MB 折算
 const MAX_PROXY_BODY = 96 * 1024 * 1024;
@@ -17,7 +17,7 @@ const MAX_PROXY_BODY = 96 * 1024 * 1024;
 export const ROUTES = ACTIONS
   .filter((a): a is Action & { module: string; http: string[] } => Array.isArray(a.http))
   .map((a) => ({ action: a, ...compileRoute(a.http) }))
-  // 字面量段优先：否则 GET /api/sections/templates 会被 GET /api/sections/:ref 遮蔽，
+  // 字面量段优先：否则 GET /api/templates/presets 会被 GET /api/templates/:ref 遮蔽，
   // 命中哪条取决于 actions 的声明顺序——有人调整顺序就静默错乱。
   .sort(compareRoutes);
 

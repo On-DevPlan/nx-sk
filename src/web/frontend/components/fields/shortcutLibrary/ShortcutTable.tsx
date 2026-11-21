@@ -99,7 +99,7 @@ export default function ShortcutTable({
   }
 
   return (
-    <section className="sl-sl-table">
+    <div className="sl-sl-table">
       <header className="sl-sl-table__head">
         <div>
           <h2 className="sl-sl-table__title">{group.name}</h2>
@@ -261,7 +261,7 @@ export default function ShortcutTable({
           )}
         </div>
       )}
-    </section>
+    </div>
   );
 }
 

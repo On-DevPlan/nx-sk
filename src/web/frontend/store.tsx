@@ -7,18 +7,18 @@ export const LS_KEY = 'nx-sk-ui';
 
 /**
  * 任务 #30：顶栏「刷新数据」一个入口同时刷新**全局**（bootstrap：侧栏计数 / 设置）
- * 与**当前页自己的数据**（栏目的 dump）。store 只管 bootstrap，页面级数据各自订阅
+ * 与**当前页自己的数据**（条目模板的 dump）。store 只管 bootstrap，页面级数据各自订阅
  * 这个事件重拉——避免每个模块都往顶栏塞一份「刷新」按钮。
  */
 export const REFRESH_EVENT = 'nx-sk:refresh';
 
 // 只持久化**选择**，不持久化**数据**——数据永远从 /api 拉，避免陈旧缓存。
 export const DEFAULT_UI: UiState = {
-  // 当前 tab。空串 = **还没做过选择**，此时由 App 回落到 settings.defaultSection
-  // （再不行才是第一个栏目）。写死成 'job' 会让「默认栏目」这个设置项彻底失效，
-  // 而且删掉 job 栏目后首屏就落在一个不存在的 id 上。
+  // 当前 tab。空串 = **还没做过选择**，此时由 App 回落到 settings.defaultTemplate
+  // （再不行才是第一个条目模板）。写死成 'job' 会让「默认条目模板」这个设置项彻底失效，
+  // 而且删掉 job 条目模板后首屏就落在一个不存在的 id 上。
   view: '',
-  entry: '', // 各栏目选中的条目
+  entry: '', // 各条目模板选中的条目
   q: '', // 搜索词
   mask: false, // 打码显示密文字段（默认原文；投屏时勾上）
 };
@@ -27,7 +27,7 @@ function loadUi(): UiState {
   try {
     const saved = JSON.parse(localStorage.getItem(LS_KEY) || '{}');
     // 旧版本把「当前 tab」也落了盘。现在它归地址栏管（见 App 的 hash 处理），
-    // 落盘会和 settings.defaultSection 抢「打开时落在哪」——用户改了默认栏目
+    // 落盘会和 settings.defaultTemplate 抢「打开时落在哪」——用户改了默认条目模板
     // 却看不到变化，正是双记忆源最典型的表现。老数据就地丢弃。
     if (saved && typeof saved === 'object') delete saved.view;
     return { ...DEFAULT_UI, ...saved };
@@ -70,7 +70,7 @@ export interface StoreValue {
   toast: (message: string, kind?: string) => void;
   dialog: (opts: DialogOptions) => Promise<unknown>;
   closeDialog: (value?: unknown) => void;
-  guard: <A extends unknown[], R>(fn: (...args: A) => R) => (...args: A) => Promise<R | undefined>;
+  guard: <A extends unknown[], R>(fn: (...args: A) => R) => (...args: A) => Promise<Awaited<R> | undefined>;
   toasts: ToastItem[];
   dialogState: DialogState | null;
 }
@@ -132,7 +132,7 @@ export function StoreProvider({ children }: { children?: ReactNode }) {
   // 抛 "Cannot read properties of undefined (reading 'name')"（真实事故：密钥页 CRUD 全挂）。
   // 返回值也要透传（失败时给 undefined）：调用处据此决定「要不要清空刚填的表单」，
   // 否则失败的输入被清掉，用户只能重打一遍。
-  const guard = useCallback(<A extends unknown[], R>(fn: (...args: A) => R) => async (...args: A): Promise<R | undefined> => {
+  const guard = useCallback(<A extends unknown[], R>(fn: (...args: A) => R) => async (...args: A): Promise<Awaited<R> | undefined> => {
     try {
       return await fn(...args);
     } catch (e) {

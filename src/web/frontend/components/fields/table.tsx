@@ -1,8 +1,8 @@
 // 表格字段（`type: 'table'`）的编辑界面 —— 目标手感是「Notion 的数据库」。
 //
-// **这张表是自描述的**：列、行、公式、统计配置全部存在条目数据里（不在栏目字典里）。
+// **这张表是自描述的**：列、行、公式、统计配置全部存在条目数据里（不在条目模板字典里）。
 // 所以这里除了填格子，还能直接**加列 / 改列类型 / 改公式**——改完就是这条数据的一部分，
-// 不会影响同栏目下的其它条目。字段定义里的 columns 只是「新建时的初始列」。
+// 不会影响同条目模板下的其它条目。字段定义里的 columns 只是「新建时的初始列」。
 //
 // 六条刻意的取舍：
 //   1. **行与列都有抓手**：行抓手在**左侧沟槽**（⠿ 拖动 + ⋮ 菜单），列抓手就是表头本身。
@@ -544,8 +544,6 @@ export function TableControl({ def, value, onChange }: ControlProps) {
           {table.errors.length > 3 ? <div className="hint bad">另有 {table.errors.length - 3} 处</div> : null}
         </div>
       ) : null}
-
-      {def.hint ? <span className="hint">{def.hint}</span> : null}
 
       {menuCol ? (
         <Popover anchor={colMenu.rect} onClose={() => setColMenu(null)} width={344}>

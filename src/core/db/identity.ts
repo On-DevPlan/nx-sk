@@ -8,7 +8,7 @@
 //   file    → id = FileRecord.id **原样**（`f_...`）：条目 values 里嵌的附件 id
 //             一字不改，这是「不在运行时做旧结构兼容」的边界——引用本来就稳定。
 //   url     → att_url_<sha1(小写 url)[0:16]>
-//   section → att_section_<sha1(id)[0:16]>
+//   template → id = att_section_<sha1(id)[0:16]>（历史前缀，见下方 attIdForTemplate）
 //   entry   → att_entry_<sha1(id)[0:16]>
 //   field   → att_field_<sha1(entry_field id)[0:16]>（v3：target_key = 条目结构行 id；
 //             行 id 本身是 ef_<sha1(entry_id + ':' + key)[0:16]>，确定性派生）
@@ -19,7 +19,7 @@ import { formatFieldComposite } from '../../shared/locator.ts';
 export const ATTACHMENT_KINDS = ['file', 'url', 'section', 'entry', 'field'] as const;
 export type AttachmentKind = (typeof ATTACHMENT_KINDS)[number];
 
-/** 内部指针种类（kind ∈ 这三个时 target_kind/target_key 有值）。 */
+/** 内部指针种类（kind ∈ 这三个时 target_kind/target_key 有值；'section' 是历史取值）。 */
 export const POINTER_KINDS = ['section', 'entry', 'field'] as const;
 
 /** 边的语义（role 在边上，不在资源上——照抄 nx-kv 的纪律）。 */
@@ -35,8 +35,8 @@ function sha1_16(s: string): string {
  * 构造规则的唯一实现下沉到 shared/locator.ts（formatFieldComposite）——
  * 落盘格式一字不改，这里只是转发，保证「locator ↔ 复合串」永远同一口径。
  */
-export function fieldTargetKey(sectionId: unknown, key: unknown): string {
-  return formatFieldComposite(sectionId, key);
+export function fieldTargetKey(templateId: unknown, key: unknown): string {
+  return formatFieldComposite(templateId, key);
 }
 
 /**
@@ -56,8 +56,12 @@ export function attIdForUrl(url: unknown): string {
   return 'att_url_' + sha1_16(String(url || '').toLowerCase());
 }
 
-export function attIdForSection(sectionId: unknown): string {
-  return 'att_section_' + sha1_16(String(sectionId));
+/**
+ * 条目模板指针的 id。历史前缀 `att_section_` 保留：老库里已经有这些行，
+ * 换前缀会让同一条逻辑指针算出新 id，撞上 dedupe 唯一索引。新概念只叫条目模板。
+ */
+export function attIdForTemplate(templateId: unknown): string {
+  return 'att_section_' + sha1_16(String(templateId));
 }
 
 export function attIdForEntry(entryId: unknown): string {
@@ -70,10 +74,10 @@ export function attIdForField(entryField: unknown): string {
 }
 
 /** 按种类算内部指针的 (id, target_kind, target_key)；file/url 不走这里（id 自带）。 */
-export function pointerIdentity(kind: AttachmentKind, ref: { sectionId?: string; key?: string; entryId?: string; entryFieldId?: string }): { id: string; targetKind: string; targetKey: string } {
+export function pointerIdentity(kind: AttachmentKind, ref: { templateId?: string; key?: string; entryId?: string; entryFieldId?: string }): { id: string; targetKind: string; targetKey: string } {
   if (kind === 'section') {
-    const id = String(ref.sectionId || '');
-    return { id: attIdForSection(id), targetKind: 'section', targetKey: id };
+    const id = String(ref.templateId || '');
+    return { id: attIdForTemplate(id), targetKind: 'section', targetKey: id };
   }
   if (kind === 'entry') {
     const id = String(ref.entryId || '');

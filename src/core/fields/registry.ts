@@ -5,7 +5,7 @@
 // store.json 里出现历史脏类型时不至于整个面板/CLI 崩掉，不是漏实现的许可。
 //
 // 为什么要注册表而不是 if/else：同一件事（怎么强转、哪些子值是密文、引用哪些附件）
-// 以前散在 entries / render / vault / attachments / transfer / sections 六个文件里，
+// 以前散在 entries / render / vault / attachments / transfer / templates 六个文件里，
 // 加一种类型要改六处、漏一处不会报错。收成一张表之后，加类型只需要「加行为文件 + 加一行」，
 // 漏了由类型系统当场拦住。
 import { FIELD_TYPES } from '../../shared/fields/types.ts';
@@ -26,6 +26,7 @@ import { secretBehavior } from './behaviors/secret.ts';
 import { fileBehavior } from './behaviors/file.ts';
 import { mdBehavior } from './behaviors/md.ts';
 import { debugBehavior } from './behaviors/debug.ts';
+import { grillBehavior } from './behaviors/grill.ts';
 import { groupBehavior } from './behaviors/group.ts';
 
 export const FIELD_BEHAVIOR: Record<FieldType, FieldBehavior> = {
@@ -45,6 +46,7 @@ export const FIELD_BEHAVIOR: Record<FieldType, FieldBehavior> = {
   file: fileBehavior,
   md: mdBehavior,
   debug: debugBehavior,
+  grill: grillBehavior,
   group: groupBehavior,
 };
 

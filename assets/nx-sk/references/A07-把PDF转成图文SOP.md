@@ -1,6 +1,6 @@
 # A07 · 把 PDF 转成图文 SOP
 
-> 一份手册 / 用户指南 / 操作说明，要变成「新手打开就会做」的 nx-sk 栏目时走这条线。
+> 一份手册 / 用户指南 / 操作说明，要变成「新手打开就会做」的 nx-sk 条目模板时走这条线。
 > 只是要读 PDF 回答问题 → 直接读，不落盘。
 
 ## 三条铁律
@@ -16,7 +16,7 @@ python scripts/pdf_probe.py <pdf>                      # ① 探查：页数 / �
 python scripts/pdf_extract.py <pdf> --out /tmp/pdf-out  # ② 抽文字 + 图片占位（按版面 y 坐标）
 python scripts/pdf_extract.py <pdf> --images-only --img-dir /tmp/pdf-imgs  # ③ 挑图
 nx-sk file add --path <图> --note "p6 第1图" --json      # ④ 图进附件库
-nx-sk section add <id> --title "<标题>"                  # ⑤ 建栏目（结构见下节）
+nx-sk template add <id> --title "<标题>"                  # ⑤ 建条目模板（结构见下节）
 nx-sk entry update <条目> --set "操作手册=$SOP"           # ⑥ 写正文并回读验收
 ```
 
@@ -25,8 +25,8 @@ nx-sk entry update <条目> --set "操作手册=$SOP"           # ⑥ 写正文�
 
 ## 结构设计（摘要）
 
-聚合类文档的标准栏目：简介 / 准备材料 / 入口与地址 / 操作手册 / 常见问题 / 自检清单，
-三层账号体系各一个 `sensitive` 字段。细节见下节「栏目结构」。
+聚合类文档的标准条目模板：简介 / 准备材料 / 入口与地址 / 操作手册 / 常见问题 / 自检清单，
+三层账号体系各一个 `sensitive` 字段。细节见下节「条目模板结构」。
 
 ## 抽取原理：为什么按版面位置来
 
@@ -102,9 +102,9 @@ PDF 里取文字和取图片，各自有「自己的顺序」，都不等于人�
 
 
 
-## 栏目结构：新手照着能做完
+## 条目模板结构：新手照着能做完
 
-栏目结构：怎么设计才「新手照着能做完」
+条目模板结构：怎么设计才「新手照着能做完」
 
 ### 不要照抄 PDF 的目录
 
@@ -171,13 +171,13 @@ PDF 里取文字和取图片，各自有「自己的顺序」，都不等于人�
 
 这样新手先读总览就知道整体要干什么，再按需进子条目，不必一次读完 50 页。
 
-### 可直接粘贴的建栏目命令
+### 可直接粘贴的建条目模板命令
 
 ```bash
-nx-sk section add <栏目id> --title "<标题>" --description "<一句话说明>" --json
+nx-sk template add <条目模板id> --title "<标题>" --description "<一句话说明>" --json
 
 ## 建字段（分组 / 类型 / 是否密文）
-nx-sk section update <栏目id> \
+nx-sk template update <条目模板id> \
   --add-field '{"key":"简介","label":"简介","type":"md","group":"g1","groupTitle":"入门"}' \
   --add-field '{"key":"准备材料","label":"准备材料","type":"md","group":"g1","groupTitle":"入门"}' \
   --add-field '{"key":"入口与地址","label":"入口与地址","type":"md","group":"g1","groupTitle":"入门"}' \
@@ -187,12 +187,12 @@ nx-sk section update <栏目id> \
   --json
 
 ## 账号类字段一律 sensitive: true（密文落盘）
-nx-sk section update <栏目id> \
+nx-sk template update <条目模板id> \
   --add-field '{"key":"平台密码","label":"平台密码","type":"text","group":"g0","groupTitle":"账号","sensitive":true}' \
   --json
 ```
 
-`--add-field` 遇到同名 key 会报冲突；先 `nx-sk entry fields --section <栏目id> --json`
+`--add-field` 遇到同名 key 会报冲突；先 `nx-sk entry fields --template <条目模板id> --json`
 看已有字段，别重复登记。
 
 ### 写 md 字段的实操

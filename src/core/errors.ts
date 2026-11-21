@@ -43,11 +43,6 @@ export function httpStatusOf(code: string): number {
   return HTTP[code] || 500;
 }
 
-/** 失败一律退出码 1。冲突是**业务结果**不是失败——那种情况根本不会走到这里。 */
-export function exitCodeOf(_code: string): number {
-  return 1;
-}
-
 /** 把任意 throw 出来的东西归一成 { code, message }，供 CLI / API 统一渲染。 */
 export function toErrorShape(err: unknown): { code: string; message: string; details?: unknown } {
   if (err instanceof AppError) return { code: err.code, message: err.message, details: err.details };

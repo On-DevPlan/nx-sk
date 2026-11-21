@@ -281,7 +281,7 @@ export function openRaw(dbPath: string, { readOnly = false, busyTimeoutMs = 5000
     }
 
     // ── 连接级 PRAGMA：每个连接都要设，且必须在任何业务语句之前 ──
-    // foreign_keys 默认关：漏了它，所有 REFERENCES 静默失效（删栏目不级联），而且不报错。
+    // foreign_keys 默认关：漏了它，所有 REFERENCES 静默失效（删条目模板不级联），而且不报错。
     const waitMs = Number.isFinite(Number(busyTimeoutMs)) ? Math.max(0, Number(busyTimeoutMs)) : 5000;
     try {
       api.exec('PRAGMA busy_timeout = ' + waitMs);

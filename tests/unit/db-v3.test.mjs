@@ -13,10 +13,9 @@ await useTempHome('nx-sk-v3-');
 
 const { openRaw } = await import('../../src/core/db/driver.ts');
 const { migrate, setMeta, getMeta } = await import('../../src/core/db/migrator.ts');
-const { readStore } = await import('../../src/core/db/repo.ts');
 const identity = await import('../../src/core/db/identity.ts');
 const store = await import('../../src/core/store.ts');
-const sections = await import('../../src/modules/sections/service.ts');
+const templates = await import('../../src/modules/templates/service.ts');
 const entries = await import('../../src/modules/entries/service.ts');
 
 const CIPHER = { v: 1, alg: 'aes-256-gcm', kid: 'aabbccddeeff', iv: '0123456789abcdef', tag: 'fedcba9876543210', ct: 'ZmFrZS1jdA==' };
@@ -53,13 +52,20 @@ test('① 真 v2 库 2→3：拆行保真、确定性 id、边重映射、unmapp
   const applied = migrate(db, { to: 3 });
   assert.deepEqual(applied, [3]);
 
-  const { raw, structures } = readStore(db);
-  const e1 = raw.entries.find((x) => x.id === 'e1');
-  assert.deepEqual(e1.values, values, '逐键搬运：密文对象/引用/字典外键原样');
-
-  const rows = structures.get('e1');
-  assert.equal(rows.length, 4, '模板行 a/b + 扩展行 ghost/cipher');
+  // readStore 只认当前 schema；这里直接查 v3 的行，钉住 2→3 搬出来的形状。
+  const rowSql = `SELECT ef.id, ef.entry_id, ef.template_field_id, ef.key, ef.type, ef.spec,
+      fd.value, fd.id AS data_id
+    FROM entry_fields ef JOIN field_data fd ON fd.entry_field_id = ef.id
+    WHERE ef.entry_id = 'e1'`;
+  const rawRows = db.all(rowSql);
+  const rows = rawRows.map((r) => ({
+    id: r.id, key: r.key, spec: JSON.parse(r.spec), templateFieldId: r.template_field_id, value: r.value,
+  }));
   const byKey = new Map(rows.map((r) => [r.key, r]));
+  const entryValues = Object.fromEntries(rows.map((r) => [r.key, JSON.parse(r.value)]));
+  assert.deepEqual(entryValues, values, '逐键搬运：密文对象/引用/字典外键原样');
+
+  assert.equal(rows.length, 4, '模板行 a/b + 扩展行 ghost/cipher');
   assert.equal(byKey.get('a').templateFieldId, 's:a', '出身模板 = 复合串');
   assert.equal(byKey.get('b').templateFieldId, 's:b');
   assert.equal(byKey.get('ghost').templateFieldId, null, '字典外的键 = 扩展行');
@@ -88,7 +94,7 @@ test('① 真 v2 库 2→3：拆行保真、确定性 id、边重映射、unmapp
 });
 
 test('② facade：addEntry 实例化全部模板行，defaultValue 落数据行', async () => {
-  await sections.addSection({
+  await templates.addTemplate({
     id: 'v3def', title: '默认值',
     fields: [
       { key: 'a', label: 'A', type: 'text', group: 'g' },
@@ -96,7 +102,7 @@ test('② facade：addEntry 实例化全部模板行，defaultValue 落数据行
     ],
     groups: [{ id: 'g', title: 'G' }],
   });
-  const created = await entries.addEntry({ section: 'v3def', title: '一条', set: { a: '1' } });
+  const created = await entries.addEntry({ template: 'v3def', title: '一条', set: { a: '1' } });
   assert.equal(created.status, 'ok');
 
   const st = await store.loadStore();
@@ -105,32 +111,32 @@ test('② facade：addEntry 实例化全部模板行，defaultValue 落数据行
   assert.ok(keys.includes('a') && keys.includes('b') && keys.includes('source'), `模板行全实例化：${keys}`);
   assert.ok(rows.every((r) => r.templateFieldId != null), '没有扩展行');
 
-  const got = await entries.getEntry('一条', { section: 'v3def' });
+  const got = await entries.getEntry('一条', { template: 'v3def' });
   assert.equal(got.values.a, '1');
   assert.equal(got.values.b, '默认B', 'defaultValue 没给值也要落');
 });
 
 test('③ sync 只增不改：字典改 label 不回刷存量行；补缺行且默认值只给新行', async () => {
-  await sections.addSection({
+  await templates.addTemplate({
     id: 'v3sync', title: '同步',
     fields: [{ key: 'a', label: 'A', type: 'text', group: 'g' }],
     groups: [{ id: 'g', title: 'G' }],
   });
-  const created = await entries.addEntry({ section: 'v3sync', title: '一条', set: { a: '1' } });
+  const created = await entries.addEntry({ template: 'v3sync', title: '一条', set: { a: '1' } });
 
   // 字典改 label → 条目自身行不回刷
-  await sections.updateSection('v3sync', { 'set-field': { key: 'a', label: 'A改' } });
+  await templates.updateTemplate('v3sync', { 'set-field': { key: 'a', label: 'A改' } });
   let st = await store.loadStore();
   let rowA = (store.entryStructures(st).get(created.id) || []).find((r) => r.key === 'a');
   assert.equal(rowA.spec.label, 'A', '存量行属性不动');
   // 行没缺：sync 报 upToDate
-  const r0 = await sections.syncSection('v3sync');
+  const r0 = await templates.syncTemplate('v3sync');
   assert.equal(r0.upToDate, true, '只改 label 不产生缺口');
   assert.equal(rowA.spec.label, 'A', 'sync 也不回刷');
 
   // 加带默认值的字段 → sync 补缺行，默认值只给**新行**
-  await sections.updateSection('v3sync', { 'add-field': { key: 'b', label: 'B', type: 'text', group: 'g', defaultValue: '默认B' } });
-  const r1 = await sections.syncSection('v3sync');
+  await templates.updateTemplate('v3sync', { 'add-field': { key: 'b', label: 'B', type: 'text', group: 'g', defaultValue: '默认B' } });
+  const r1 = await templates.syncTemplate('v3sync');
   assert.equal(r1.upToDate, false);
   assert.equal(r1.fieldsAdded, 1, '每个条目补一行 b');
   assert.equal(r1.defaultsFilled, 1, '新行落默认值');
@@ -142,27 +148,27 @@ test('③ sync 只增不改：字典改 label 不回刷存量行；补缺行且�
   assert.equal(rowA.spec.label, 'A', '老行仍不回刷');
   assert.equal(rowB.spec.label, 'B');
   assert.equal(rowB.templateFieldId, 'v3sync:b');
-  const got = await entries.getEntry('一条', { section: 'v3sync' });
+  const got = await entries.getEntry('一条', { template: 'v3sync' });
   assert.equal(got.values.a, '1', '老值不动');
   assert.equal(got.values.b, '默认B', '新行有默认值');
 });
 
 test('④ quickAdd 不污染字典：bool/secretish 推断落扩展行，台账可读', async () => {
-  await sections.addSection({
+  await templates.addTemplate({
     id: 'v3quick', title: '大胆写',
     fields: [{ key: 'name', label: '名称', type: 'text', group: 'g' }],
     groups: [{ id: 'g', title: 'G' }],
   });
-  const created = await entries.addEntry({ section: 'v3quick', title: '一条', set: { name: 'X' } });
+  const created = await entries.addEntry({ template: 'v3quick', title: '一条', set: { name: 'X' } });
   const upd = await entries.updateEntry('一条', {
-    section: 'v3quick',
+    template: 'v3quick',
     set: { 是否有offer: '否', 密码: 'P@ss-秘密' },
   });
   assert.equal(upd.status, 'ok');
   assert.deepEqual(upd.newFields.sort(), ['密码', '是否有offer']);
 
   const st = await store.loadStore();
-  const sec = st.sections.find((s) => s.id === 'v3quick');
+  const sec = st.templates.find((s) => s.id === 'v3quick');
   assert.equal(sec.fields.some((f) => f.key === '是否有offer' || f.key === '密码'), false, '字典不被污染');
 
   const rows = store.entryStructures(st).get(created.id) || [];
@@ -173,15 +179,15 @@ test('④ quickAdd 不污染字典：bool/secretish 推断落扩展行，台账�
   assert.equal(boolRow?.templateFieldId, null);
 
   // 值与类型：bool 读出是 false；密码读出是原文（密文在存储层）
-  const got = await entries.getEntry('一条', { section: 'v3quick' });
+  const got = await entries.getEntry('一条', { template: 'v3quick' });
   assert.equal(got.values['是否有offer'], false);
   assert.equal(got.values['密码'], 'P@ss-秘密');
   assert.equal(got.fieldTypes['是否有offer'], 'bool');
   assert.equal(got.fieldTypes['密码'], 'secret');
 
   // 台账（entry fields）含扩展键
-  const ledger = await entries.fieldDictionary({ section: 'v3quick' });
-  const ledgerKeys = new Set(ledger.sections[0].fields.map((f) => f.key));
+  const ledger = await entries.fieldDictionary({ template: 'v3quick' });
+  const ledgerKeys = new Set(ledger.templates[0].fields.map((f) => f.key));
   assert.ok(ledgerKeys.has('是否有offer') && ledgerKeys.has('密码'), '扩展行进台账');
 
   // 密文真的落盘（field_data 里是 JSON 密文对象）
@@ -195,38 +201,38 @@ test('④ quickAdd 不污染字典：bool/secretish 推断落扩展行，台账�
 });
 
 test('⑤ 完整度按条目自身行：add-field 后 total 不变，sync 后才变', async () => {
-  await sections.addSection({
+  await templates.addTemplate({
     id: 'v3comp', title: '完整度',
     fields: [{ key: 'a', label: 'A', type: 'text', group: 'g' }, { key: 'b', label: 'B', type: 'text', group: 'g' }],
     groups: [{ id: 'g', title: 'G' }],
   });
-  await entries.addEntry({ section: 'v3comp', title: '一条', set: { a: '1' } });
+  await entries.addEntry({ template: 'v3comp', title: '一条', set: { a: '1' } });
 
-  let got = await entries.getEntry('一条', { section: 'v3comp' });
+  let got = await entries.getEntry('一条', { template: 'v3comp' });
   assert.equal(got.completeness.total, 2, '两个模板行（source 是 optional 不计）');
 
-  await sections.updateSection('v3comp', { 'add-field': { key: 'c', label: 'C', type: 'text', group: 'g' } });
-  got = await entries.getEntry('一条', { section: 'v3comp' });
+  await templates.updateTemplate('v3comp', { 'add-field': { key: 'c', label: 'C', type: 'text', group: 'g' } });
+  got = await entries.getEntry('一条', { template: 'v3comp' });
   assert.equal(got.completeness.total, 2, 'add-field 不动存量条目 → total 不变');
 
-  await sections.syncSection('v3comp');
-  got = await entries.getEntry('一条', { section: 'v3comp' });
+  await templates.syncTemplate('v3comp');
+  got = await entries.getEntry('一条', { template: 'v3comp' });
   assert.equal(got.completeness.total, 3, 'sync 补行后 total 才变');
   assert.ok(got.missing.some((m) => m.key === 'c'));
 });
 
 test('⑥ --set 走 service 与直接写 store 等价（行/值/读回一致）', async () => {
-  await sections.addSection({
+  await templates.addTemplate({
     id: 'v3equiv', title: '等价',
     fields: [{ key: 'a', label: 'A', type: 'text', group: 'g' }],
     groups: [{ id: 'g', title: 'G' }],
   });
-  const viaService = await entries.addEntry({ section: 'v3equiv', title: '走服务', set: { a: '1' } });
+  const viaService = await entries.addEntry({ template: 'v3equiv', title: '走服务', set: { a: '1' } });
 
   // 直接 mutateStore 写同形状条目（面板/导入的旁路写法）
   const { newId, nowIso } = await import('../../src/core/ids.ts');
   const at = nowIso();
-  const direct = { id: newId('e'), section: 'v3equiv', title: '直接写', tags: [], values: { a: '2' }, createdAt: at, updatedAt: at };
+  const direct = { id: newId('e'), template: 'v3equiv', title: '直接写', tags: [], values: { a: '2' }, createdAt: at, updatedAt: at };
   await store.mutateStore((s) => { s.entries.push(direct); });
 
   const st = await store.loadStore();
@@ -235,8 +241,8 @@ test('⑥ --set 走 service 与直接写 store 等价（行/值/读回一致）'
   assert.deepEqual(rowsA.map((r) => r.key).sort(), rowsB.map((r) => r.key).sort(), '两条目的结构行键集一致');
   assert.ok(rowsA.every((r) => r.templateFieldId != null), '都是模板行');
 
-  const gA = await entries.getEntry('走服务', { section: 'v3equiv' });
-  const gB = await entries.getEntry('直接写', { section: 'v3equiv' });
+  const gA = await entries.getEntry('走服务', { template: 'v3equiv' });
+  const gB = await entries.getEntry('直接写', { template: 'v3equiv' });
   assert.equal(gA.values.a, '1');
   assert.equal(gB.values.a, '2');
   assert.deepEqual(Object.keys(gA.values).sort(), Object.keys(gB.values).sort(), '读回形状一致');

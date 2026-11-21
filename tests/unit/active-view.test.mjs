@@ -7,25 +7,25 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { LEGACY_VIEW, normalizeViewId, resolveActiveView } from '../../src/web/frontend/activeView.ts';
 
-const S = (id) => ({ id, kind: 'section' });
+const S = (id) => ({ id, kind: 'template' });
 const V = (id) => ({ id, kind: 'view' });
 const tabs = [S('job'), S('projects'), V('files'), V('settings')];
 
-test('显式选择优先于默认栏目', () => {
+test('显式选择优先于默认条目模板', () => {
   assert.equal(resolveActiveView('projects', tabs, 'job').id, 'projects');
 });
 
-test('没选过 → 落在 settings.defaultSection（这条曾经是没人读的死配置）', () => {
+test('没选过 → 落在 settings.defaultTemplate（这条曾经是没人读的死配置）', () => {
   assert.equal(resolveActiveView('', tabs, 'projects').id, 'projects');
-  assert.equal(resolveActiveView('', tabs, '').id, 'job', '没有默认栏目时取第一个 tab');
+  assert.equal(resolveActiveView('', tabs, '').id, 'job', '没有默认条目模板时取第一个 tab');
 });
 
-test('默认栏目指向已删除的栏目 → 优雅降到第一个 tab（不报错、不空白）', () => {
+test('默认条目模板指向已删除的条目模板 → 优雅降到第一个 tab（不报错、不空白）', () => {
   assert.equal(resolveActiveView('', tabs, 'gone').id, 'job');
 });
 
-test('显式选择是失效 id（删掉的栏目 / 旧书签）→ 仍按默认栏目落地', () => {
-  assert.equal(resolveActiveView('deleted-section', tabs, 'projects').id, 'projects');
+test('显式选择是失效 id（删掉的条目模板 / 旧书签）→ 仍按默认条目模板落地', () => {
+  assert.equal(resolveActiveView('deleted-template', tabs, 'projects').id, 'projects');
 });
 
 test('boot 之前绝不兜底（否则深链会被第一个静态工具页顶掉）', () => {

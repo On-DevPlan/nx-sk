@@ -1,6 +1,7 @@
 // 字段策略与类型推断：填写策略、布尔词表、凭据键名启发式、新键类型推断。
 
 import { looksLikeSourceList } from '../source.ts';
+import { GRILL_SCHEMA } from '../../shared/grill.ts';
 
 /**
  * 字段的**填写策略**——回答「这个字段值不值得填」，与 type 正交。
@@ -37,10 +38,10 @@ export const BOOL_TRUE = ['是', 'true', '1', 'yes', 'y'];
 export const BOOL_FALSE = ['否', 'false', '0', 'no', 'n'];
 
 export function isSensitiveField(
-  section: { fields?: Array<{ key: unknown; sensitive?: unknown; type?: unknown }> } | null | undefined,
+  template: { fields?: Array<{ key: unknown; sensitive?: unknown; type?: unknown }> } | null | undefined,
   key: unknown,
 ): boolean {
-  const def = (section?.fields || []).find((x) => x.key === key);
+  const def = (template?.fields || []).find((x) => x.key === key);
   return !!(def && (def.sensitive || def.type === 'secret'));
 }
 
@@ -79,6 +80,19 @@ export function looksSecretish(key: unknown): boolean {
 const looksLikeFileId = (x: unknown) => typeof x === 'string' && /^f_[0-9a-z]+$/i.test(x.trim());
 const looksLikeRow = (x: unknown) => !!x && typeof x === 'object' && !Array.isArray(x);
 
+/** 值是不是一份 Grill & Ack 文档：认显式 schema，也认最简 `{questions:[…]}` 写法。 */
+function looksLikeGrill(x: unknown): boolean {
+  let v = x;
+  if (typeof v === 'string') {
+    const s = v.trim();
+    if (!s.startsWith('{')) return false;
+    try { v = JSON.parse(s); } catch { return false; }
+  }
+  if (!looksLikeRow(v)) return false;
+  const o = v as Record<string, unknown>;
+  return o.schema === GRILL_SCHEMA || Array.isArray(o.questions);
+}
+
 // 标量类型：值就是一个字符串/数字/布尔。能安全地改成密文字段（type: 'secret'）。
 // 数组类（file / entrylist / source / tags）有自己的形状，不在自动改型的范围里。
 export const SCALAR_FIELD_TYPES = new Set(['text', 'textarea', 'number', 'date', 'month', 'bool']);
@@ -89,6 +103,7 @@ export const SCALAR_FIELD_TYPES = new Set(['text', 'textarea', 'number', 'date',
  * 值仍是字符串，所以「直接存 kv」不会因为类型推断损坏数据。
  */
 export function inferFieldType(raw: unknown): string {
+  if (looksLikeGrill(raw)) return 'grill';
   if (Array.isArray(raw)) {
     if (raw.length && raw.every(looksLikeFileId)) return 'file';
     // 一袋 source（带 kind 且有内容）→ 登记成原始资料袋；判断比 entrylist 严，

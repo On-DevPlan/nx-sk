@@ -1,7 +1,7 @@
 // Store 对象 ↔ SQLite 行的映射（facade 的两条腿：读组装 / 写全量重写）。
 //
 // ── 写策略：单事务全量重写（DELETE + CASCADE + INSERT）────────────────
-// 本地规模（几十个栏目、几千条条目、几百个附件）下整表重写是微秒级，
+// 本地规模（几十个条目模板、几千条条目、几百个附件）下整表重写是微秒级，
 // 换来的是「store 对象就是唯一真相、行是它的投影」这条不变量不可能被
 // 增量写的漏改打破。**留缝**：所有写都集中在 writeStore 一处，将来要按表
 // 增量写，只改这个函数，facade 与调用方一字不动。
@@ -29,11 +29,12 @@ import { blocked } from '../errors.ts';
 import { getMeta, setMeta } from './migrator.ts';
 import { tx } from './tx.ts';
 import type { Conn, Row } from './driver.ts';
-import type { Store, StoreEntry, StoreSection, EntryFieldView } from '../store-shape.ts';
+import type { Store, StoreEntry, StoreTemplate, EntryFieldView } from '../store-shape.ts';
 import { STORE_VERSION, isDetachedField } from '../store-shape.ts';
 import { POINTER_KINDS, entryFieldId, fieldDataId, fieldTargetKey } from './identity.ts';
 import { cleanupOrphanHistory, recordFieldChanges, sameStoredValue, type FieldValueChange } from './history.ts';
 import type { FieldDef } from '../../shared/fields/types.ts';
+import { BLANK_TEMPLATE_ID } from '../../shared/tree.ts';
 
 /** 读出来的「未过 normalize 的 json 形状」+ 当时的 rev + 条目自身结构行（v3）。 */
 export interface LoadedRaw {
@@ -76,9 +77,13 @@ function fillMirror(def: Record<string, unknown> | Row): string | null {
  * 与旧版「没填 = 没有这个键」的键存在性语义逐键一致）。
  */
 export function readStore(db: Conn): LoadedRaw {
-  const sectionRows = db.all('SELECT * FROM sections ORDER BY rowid');
-  const fieldRows = db.all('SELECT * FROM fields ORDER BY section_id, sort, rowid');
-  const entryRows = db.all('SELECT * FROM entries ORDER BY rowid');
+  const templateRows = db.all('SELECT * FROM templates ORDER BY rowid');
+  const fieldRows = db.all('SELECT * FROM template_fields ORDER BY template_id, sort, rowid');
+  const entryRows = db.all(
+    `SELECT e.*, f.parent_id AS folder_parent, f.sort AS folder_sort
+     FROM entries e LEFT JOIN folders f ON f.entry_id = e.id
+     ORDER BY e.rowid`,
+  );
   const fileRows = db.all("SELECT * FROM attachments WHERE kind = 'file' AND deleted_at IS NULL ORDER BY rowid");
   const settingRows = db.all('SELECT key, value FROM settings ORDER BY key');
   const efRows = db.all(
@@ -87,25 +92,26 @@ export function readStore(db: Conn): LoadedRaw {
      ORDER BY ef.entry_id, ef.position, ef.key`,
   );
 
-  const fieldsBySection = new Map<string, Array<Record<string, unknown>>>();
+  const fieldsByTemplate = new Map<string, Array<Record<string, unknown>>>();
   for (const f of fieldRows) {
-    const list = fieldsBySection.get(String(f.section_id)) || [];
+    const list = fieldsByTemplate.get(String(f.template_id)) || [];
     // spec 是保真源：整条 FieldDef 原样回来（列只是镜像，不参与重建）。
     // 0.42 起分组也是字段（type='group'，spec 带 keys），所以这里不再有 group_id 镜像。
     list.push(parseJson(f.spec, { key: f.key, label: f.label, type: f.type }) as unknown as Record<string, unknown>);
-    fieldsBySection.set(String(f.section_id), list);
+    fieldsByTemplate.set(String(f.template_id), list);
   }
 
-  const sections = sectionRows.map((s): StoreSection => ({
+  const templates = templateRows.map((s): StoreTemplate => ({
     id: String(s.id),
     title: String(s.title),
     description: String(s.description ?? ''),
     order: Number(s.order) || 0,
-    template: s.template == null ? null : String(s.template),
-    kv: Number(s.kv) === 1,
+    template: s.source == null ? null : String(s.source),
+    blank: Number(s.blank) === 1,
     titleField: s.title_field == null ? null : String(s.title_field),
     titleLabel: String(s.title_label ?? '名称'),
-    fields: (fieldsBySection.get(String(s.id)) || []) as unknown as StoreSection['fields'],
+    tags: (parseJson(s.tags, []) as unknown[]).map(String).filter(Boolean),
+    fields: (fieldsByTemplate.get(String(s.id)) || []) as unknown as StoreTemplate['fields'],
     layout: parseJson(s.layout, {}),
     createdAt: s.created_at == null ? null : String(s.created_at),
     updatedAt: s.updated_at == null ? null : String(s.updated_at),
@@ -142,10 +148,12 @@ export function readStore(db: Conn): LoadedRaw {
 
   const entries = entryRows.map((e): StoreEntry => ({
     id: String(e.id),
-    section: String(e.section_id),
+    template: String(e.template_id ?? BLANK_TEMPLATE_ID),
     title: String(e.title ?? ''),
     tags: (parseJson(e.tags, []) as unknown[]).map(String),
     values: valuesByEntry.get(String(e.id)) || {},
+    parent: e.folder_parent == null ? null : String(e.folder_parent),
+    sort: Number(e.folder_sort) || 0,
     createdAt: e.created_at == null ? null : String(e.created_at),
     updatedAt: e.updated_at == null ? null : String(e.updated_at),
   }));
@@ -156,7 +164,7 @@ export function readStore(db: Conn): LoadedRaw {
   for (const row of settingRows) settings[String(row.key)] = parseJson(row.value, null);
 
   return {
-    raw: { version: STORE_VERSION, settings: settings as unknown as Store['settings'], sections, entries, files },
+    raw: { version: STORE_VERSION, settings: settings as unknown as Store['settings'], templates, entries, files },
     rev: getRev(db),
     structures,
   };
@@ -210,41 +218,46 @@ export function writeStore(db: Conn, store: Store, { expectedRev = null }: Write
     for (const r of capturedRows) {
       if (r.data_value != null) oldValues.set(String(r.id), String(r.data_value));
     }
-    // 内部指针（section/entry/field）：attachments 里**不被全量重写删除**的行，
+    // 内部指针（template/entry/field）：attachments 里**不被全量重写删除**的行，
     // 删除钩子只软删（见第 6 步）。
     const livePointers = conn.all(
       `SELECT id, kind, target_key FROM attachments WHERE kind IN ('section','entry','field') AND deleted_at IS NULL`,
     );
 
-    // ── 2. 清空投影（CASCADE 带走 groups/fields/entries/entry_fields/field_data/边表）──
+    // ── 2. 清空投影（CASCADE 带走 entry_fields/field_data/边表）──
     // file/url 资源行由 store.files 重建；内部指针行**不删**（它们是软删语义的对象）。
-    conn.exec('DELETE FROM sections');
+    // 0.43：先删 folders（它没有 FK，不会随 entries 消失）。
+    conn.exec('DELETE FROM folders');
+    conn.exec('DELETE FROM entries');
+    conn.exec('DELETE FROM templates');
     conn.run('DELETE FROM attachments WHERE kind IN (\'file\', \'url\')');
     conn.exec('DELETE FROM settings');
 
     // ── 3. 行插入（数组顺序 = rowid 顺序 = 读回顺序；sort 列显式化字段/分组顺序）──
-    const insSection = `INSERT INTO sections (id, title, description, "order", template, kv, title_field, title_label, layout, created_at, updated_at)
-      VALUES (:id, :title, :description, :order, :template, :kv, :titleField, :titleLabel, :layout, :createdAt, :updatedAt)`;
-    const insField = `INSERT INTO fields (section_id, key, label, type, fill, hint, sensitive, sort, spec, default_value)
-      VALUES (:sectionId, :key, :label, :type, :fill, :hint, :sensitive, :sort, :spec, :defaultValue)`;
-    const insEntry = `INSERT INTO entries (id, section_id, title, tags, created_at, updated_at)
-      VALUES (:id, :sectionId, :title, :tags, :createdAt, :updatedAt)`;
+    const insTemplate = `INSERT INTO templates (id, title, description, "order", source, blank, title_field, title_label, tags, layout, created_at, updated_at)
+      VALUES (:id, :title, :description, :order, :source, :blank, :titleField, :titleLabel, :tags, :layout, :createdAt, :updatedAt)`;
+    const insField = `INSERT INTO template_fields (template_id, key, label, type, fill, hint, sensitive, sort, spec, default_value)
+      VALUES (:templateId, :key, :label, :type, :fill, :hint, :sensitive, :sort, :spec, :defaultValue)`;
+    const insEntry = `INSERT INTO entries (id, template_id, title, tags, created_at, updated_at)
+      VALUES (:id, :templateId, :title, :tags, :createdAt, :updatedAt)`;
+    const insFolder = `INSERT INTO folders (entry_id, parent_id, sort, created_at) VALUES (:entryId, :parentId, :sort, :at)`;
     const insSetting = 'INSERT INTO settings (key, value, updated_at) VALUES (:key, :value, :at)';
 
-    for (const s of store.sections) {
-      conn.run(insSection, {
+    for (const s of store.templates) {
+      conn.run(insTemplate, {
         id: s.id, title: s.title, description: s.description, order: s.order,
-        template: s.template ?? null, kv: s.kv === true,
+        source: s.template ?? null, blank: s.blank === true,
         titleField: s.titleField ?? null, titleLabel: s.titleLabel,
+        tags: JSON.stringify(s.tags || []),
         // null 要原样存成 JSON `null`（sanitizeLayout(null) 本来就是 null）——
-        // 把 null 折叠成 {} 会让「没配过版式」的栏目读回一个空版式对象，深比较漂。
+        // 把 null 折叠成 {} 会让「没配过版式」的条目模板读回一个空版式对象，深比较漂。
         layout: s.layout === undefined || s.layout === null ? 'null' : JSON.stringify(s.layout),
         createdAt: s.createdAt ?? null, updatedAt: s.updatedAt ?? null,
       });
       (s.fields || []).forEach((f, i) => {
         const def = f as unknown as Record<string, unknown>;
         conn.run(insField, {
-          sectionId: s.id, key: String(def.key), label: String(def.label ?? def.key ?? ''),
+          templateId: s.id, key: String(def.key), label: String(def.label ?? def.key ?? ''),
           type: String(def.type || 'text'),
           fill: ['normal', 'optional', 'avoid'].includes(String(def.fill)) ? String(def.fill) : 'normal',
           hint: String(def.hint ?? ''), sensitive: def.sensitive === true,
@@ -256,12 +269,15 @@ export function writeStore(db: Conn, store: Store, { expectedRev = null }: Write
         });
       });
     }
+    const treeIds = new Set(store.entries.map((e) => e.id));
     for (const e of store.entries) {
       conn.run(insEntry, {
-        id: e.id, sectionId: e.section, title: e.title,
+        id: e.id, templateId: e.template || BLANK_TEMPLATE_ID, title: e.title,
         tags: JSON.stringify(e.tags || []),
         createdAt: e.createdAt ?? null, updatedAt: e.updatedAt ?? null,
       });
+      const parent = e.parent && treeIds.has(e.parent) && e.parent !== e.id ? e.parent : null;
+      conn.run(insFolder, { entryId: e.id, parentId: parent, sort: Number(e.sort) || 0, at });
     }
     for (const [k, v] of Object.entries(store.settings || {})) {
       conn.run(insSetting, { key: k, value: JSON.stringify(v === undefined ? null : v), at });
@@ -273,14 +289,14 @@ export function writeStore(db: Conn, store: Store, { expectedRev = null }: Write
     const insFieldData = `INSERT INTO field_data (id, entry_field_id, value, created_at, updated_at)
       VALUES (:id, :entryFieldId, :value, :createdAt, :updatedAt)`;
     const structures = new Map<string, EntryFieldView[]>();
-    const dictBySection = new Map<string, FieldDef[]>();
-    for (const s of store.sections) dictBySection.set(s.id, (s.fields || []) as unknown as FieldDef[]);
+    const dictByTemplate = new Map<string, FieldDef[]>();
+    for (const s of store.templates) dictByTemplate.set(s.id, (s.fields || []) as unknown as FieldDef[]);
     // 任务 #27：本次写入后的值文本（按结构行 id）——写完与 oldValues diff。
     const newValues = new Map<string, string>();
 
     for (const e of store.entries) {
       const captured = capturedByEntry.get(e.id) || [];
-      const dict = dictBySection.get(e.section) || [];
+      const dict = dictByTemplate.get(e.template) || [];
       const dictByKey = new Map(dict.map((d) => [String((d as unknown as Record<string, unknown>).key), d]));
       const rows: EntryFieldView[] = [];
       const rowIdByKey = new Map<string, string>();
@@ -332,7 +348,7 @@ export function writeStore(db: Conn, store: Store, { expectedRev = null }: Write
         for (const d of dict) {
           const def = d as unknown as Record<string, unknown>;
           const key = String(def.key);
-          putRow(entryFieldId(e.id, key), fieldTargetKey(e.section, key), key,
+          putRow(entryFieldId(e.id, key), fieldTargetKey(e.template, key), key,
             String(def.label ?? key), String(def.type || 'text'), String(def.hint ?? ''),
             JSON.stringify(def), fillMirror(def), '{}');
         }
@@ -346,7 +362,7 @@ export function writeStore(db: Conn, store: Store, { expectedRev = null }: Write
         const d = dictByKey.get(key);
         if (d) {
           const def = d as unknown as Record<string, unknown>;
-          putRow(entryFieldId(e.id, key), fieldTargetKey(e.section, key), key,
+          putRow(entryFieldId(e.id, key), fieldTargetKey(e.template, key), key,
             String(def.label ?? key), String(def.type || 'text'), String(def.hint ?? ''),
             JSON.stringify(def), fillMirror(def), '{}');
         } else {
@@ -439,14 +455,14 @@ export function writeStore(db: Conn, store: Store, { expectedRev = null }: Write
         a: rowId, b: r.attachment_id, c: r.role, d: r.position, e: r.note, f: r.created_at,
       });
     }
-    // 删除钩子：条目/栏目/字段被删 → 指向它的内部指针行软删（UPDATE deleted_at）。
+    // 删除钩子：条目/条目模板/字段被删 → 指向它的内部指针行软删（UPDATE deleted_at）。
     // 判据直接问**刚插好的行**（同一事务里读得到自己的写）。
     // v3：field 指针挂在条目结构行上（target_key = entry_fields.id）。
     for (const p of livePointers) {
       const kind = String(p.kind);
       const target = String(p.target_key);
       let exists = false;
-      if (kind === 'section') exists = !!conn.get('SELECT 1 AS x FROM sections WHERE id = :t', { t: target });
+      if (kind === 'section') exists = !!conn.get('SELECT 1 AS x FROM templates WHERE id = :t', { t: target });
       else if (kind === 'entry') exists = !!conn.get('SELECT 1 AS x FROM entries WHERE id = :t', { t: target });
       else if (kind === 'field') exists = !!conn.get('SELECT 1 AS x FROM entry_fields WHERE id = :t', { t: target });
       if (!exists) {
@@ -465,19 +481,19 @@ export function writeStore(db: Conn, store: Store, { expectedRev = null }: Write
  * 写/修正条目自身结构行（quickAdd 之后由 service 调用）：
  * 占位行（writeStore 建的 type=text）按推断出的 FieldDef 归正——
  * 行存在则 UPDATE label/type/hint/spec/fill（position 不动），不存在则追加到末尾。
- * template_field_id：键在栏目字典里 → 复合串（出身模板），否则 NULL（扩展字段）。
+ * template_field_id：键在条目模板字典里 → 复合串（出身模板），否则 NULL（扩展字段）。
  */
 export function upsertEntryFieldRows(conn: Conn, entryId: string, defs: FieldDef[]): void {
   if (!defs.length) return;
-  const entry = conn.get('SELECT section_id FROM entries WHERE id = :id', { id: entryId });
+  const entry = conn.get('SELECT template_id FROM entries WHERE id = :id', { id: entryId });
   if (!entry) return;
-  const sectionId = String(entry.section_id);
+  const templateId = String(entry.template_id || BLANK_TEMPLATE_ID);
   for (const d of defs) {
     const def = d as unknown as Record<string, unknown>;
     const key = String(def.key);
     const id = entryFieldId(entryId, key);
-    const templateFieldId = conn.get('SELECT 1 AS x FROM fields WHERE section_id = :s AND key = :k', { s: sectionId, k: key })
-      ? fieldTargetKey(sectionId, key)
+    const templateFieldId = conn.get('SELECT 1 AS x FROM template_fields WHERE template_id = :s AND key = :k', { s: templateId, k: key })
+      ? fieldTargetKey(templateId, key)
       : null;
     // node:sqlite 拒绝 SQL 里不存在的命名参数——UPDATE 与 INSERT 各传自己那份。
     const shape = {
@@ -525,7 +541,7 @@ export function setEntryFieldDetached(db: Conn, entryId: string, rowId: string, 
  *
  * 只改这一条的显示名与描述：`label` / `hint` 两个镜像列 + `spec` 里的同名字段
  * （spec 是 FieldDef 的保真源，资源定位与面板读的都是它——不同步就会出现
- * 「块头显示新名、引用浮层显示旧名」）。**不动栏目字典**（写时复制纪律），
+ * 「块头显示新名、引用浮层显示旧名」）。**不动条目模板字典**（写时复制纪律），
  * 值（field_data）也不碰。行不存在返回 false，调用方据此报 NOT_FOUND。
  */
 export function updateEntryFieldDef(
@@ -566,13 +582,13 @@ export function deleteEntryFieldRow(db: Conn, entryId: string, rowId: string): b
 }
 
 /**
- * sync 第二阶段：把栏目字典传播到存量条目的结构行（只增不改）。
+ * sync 第二阶段：把条目模板字典传播到存量条目的结构行（只增不改）。
  * 每个条目缺的模板行补上（position 追加）；**新行**若字典 default_value 非空 → 落默认值
  * （已有行不回刷——用户主动留空的格子不该被 sync 填上）。
  */
-export function propagateSectionTemplate(conn: Conn, sectionId: string): { entries: number; fieldsAdded: number; defaultsFilled: number } {
-  const dict = conn.all('SELECT * FROM fields WHERE section_id = :s ORDER BY sort, rowid', { s: sectionId }) as Row[];
-  const entryRows = conn.all('SELECT * FROM entries WHERE section_id = :s ORDER BY rowid', { s: sectionId }) as Row[];
+export function propagateTemplateFields(conn: Conn, templateId: string): { entries: number; fieldsAdded: number; defaultsFilled: number } {
+  const dict = conn.all('SELECT * FROM template_fields WHERE template_id = :s ORDER BY sort, rowid', { s: templateId }) as Row[];
+  const entryRows = conn.all('SELECT * FROM entries WHERE template_id = :s ORDER BY rowid', { s: templateId }) as Row[];
   const at = nowIso();
   const insRow = `INSERT INTO entry_fields (id, entry_id, template_field_id, key, label, type, hint, spec, fill, position, meta)
     VALUES (:id, :entryId, :templateFieldId, :key, :label, :type, :hint, :spec, :fill, :position, '{}')`;
@@ -593,7 +609,7 @@ export function propagateSectionTemplate(conn: Conn, sectionId: string): { entri
       maxPos += 1;
       const id = entryFieldId(entryId, key);
       conn.run(insRow, {
-        id, entryId, templateFieldId: fieldTargetKey(sectionId, key), key,
+        id, entryId, templateFieldId: fieldTargetKey(templateId, key), key,
         label: String(f.label ?? key), type: String(f.type || 'text'), hint: String(f.hint ?? ''),
         spec: String(f.spec ?? '{}'),
         fill: fillMirror(f),
@@ -612,7 +628,7 @@ export function propagateSectionTemplate(conn: Conn, sectionId: string): { entri
 }
 
 /**
- * 一致性检查：kind ∈ ('section','entry','field') 且 deleted_at IS NULL 且 target
+ * 一致性检查：kind ∈ ('template','entry','field') 且 deleted_at IS NULL 且 target
  * 不存在 → 漂移（删除钩子该软删却没删到的现场，比如有人绕过 facade 直接删行）。
  * @returns 漂移的指针行
  */
@@ -626,7 +642,7 @@ export function findDriftedPointers(db: Conn): Row[] {
     for (const r of rows) {
       const target = String(r.target_key);
       if (kind === 'section') {
-        if (!db.get('SELECT 1 AS x FROM sections WHERE id = :t', { t: target })) out.push(r);
+        if (!db.get('SELECT 1 AS x FROM templates WHERE id = :t', { t: target })) out.push(r);
       } else if (kind === 'entry') {
         if (!db.get('SELECT 1 AS x FROM entries WHERE id = :t', { t: target })) out.push(r);
       } else {

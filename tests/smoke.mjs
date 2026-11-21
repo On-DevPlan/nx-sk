@@ -75,25 +75,25 @@ function rawRequest(base, path, { method = 'GET', headers = {}, body } = {}) {
 process.stdout.write('\n[1] CLI\n');
 
 const boot = await cliJson(['bootstrap']);
-step('bootstrap 给出上下文', boot.app.name === 'nx-sk' && boot.counts.sections >= 1);
-// 播种不再是那一堆场景栏目，而是**一个**「字段样例」栏目（连示例条目一起）：
-// 第一屏是说明书，不是别人的表格。场景栏目要用 `section add --template` 自己建（下面就有）。
-step('播种的是「字段样例」栏目 + 示例条目', boot.sections.length === 1
-  && boot.sections[0].id === 'demo' && boot.sections[0].title === '字段样例',
-  `${boot.sections.length} 个栏目 · ${boot.counts.entries} 条条目`);
+step('bootstrap 给出上下文', boot.app.name === 'nx-sk' && boot.counts.templates >= 1);
+// 播种不再是那一堆场景条目模板，而是**一个**「字段样例」条目模板（连示例条目一起）：
+// 第一屏是说明书，不是别人的表格。场景条目模板要用 `template add --preset` 自己建（下面就有）。
+step('播种的是「字段样例」模板 + 示例条目', boot.templates.filter((s) => !s.blank).length === 1
+  && boot.templates.filter((s) => !s.blank)[0].id === 'demo' && boot.templates.filter((s) => !s.blank)[0].title === '字段样例',
+  `${boot.templates.filter((s) => !s.blank).length} 个模板 · ${boot.counts.entries} 条条目`);
 step('存储落在隔离的临时目录', boot.storePathRaw.startsWith(home), boot.storePath);
 
-// 场景栏目按模板建回来（后面条目 / 传输 / 附件的步骤都作用在它上面）
-await cli(['section', 'add', 'job', '--title', '求职', '--template', 'job']);
-await cli(['section', 'add', 'projects', '--title', '项目经历', '--template', 'projects']);
-await cli(['section', 'add', 'internships', '--title', '实习', '--template', 'internships']);
+// 场景条目模板按模板建回来（后面条目 / 传输 / 附件的步骤都作用在它上面）
+await cli(['template', 'add', 'job', '--title', '求职', '--preset', 'job']);
+await cli(['template', 'add', 'projects', '--title', '项目经历', '--preset', 'projects']);
+await cli(['template', 'add', 'internships', '--title', '实习', '--preset', 'internships']);
 const jobBoot = await cliJson(['bootstrap']);
-step('section add --template 建出场景栏目', ['job', 'projects', 'internships'].every((id) => jobBoot.sections.some((s) => s.id === id)), `${jobBoot.sections.length} 个栏目`);
+step('template add --preset 建出场景条目模板', ['job', 'projects', 'internships'].every((id) => jobBoot.templates.some((s) => s.id === id)), `${jobBoot.templates.length} 个条目模板`);
 
-const tree = await cliJson(['section', 'tree']);
-const demoNode = tree.sections.find((s) => s.id === 'demo');
-step('section tree 给出栏目 + 条目索引', Array.isArray(tree.sections) && demoNode.entryList.length === 1
-  && demoNode.entryList[0].title === '示例条目', `${tree.count} 个栏目`);
+const tree = await cliJson(['template', 'tree']);
+const demoNode = tree.templates.find((s) => s.id === 'demo');
+step('template tree 给出条目模板 + 条目索引', Array.isArray(tree.templates) && demoNode.entryList.length === 1
+  && demoNode.entryList[0].title === '示例条目', `${tree.count} 个条目模板`);
 step('样例表格读出来就有合计（播种的示例数据直接可算）', await (async () => {
   const got = await cliJson(['entry', 'table', '示例条目', '--field', '样例表格']);
   return got.table.count === 2 && got.table.totals.some((x) => x.label === '合计');
@@ -103,29 +103,29 @@ const ver = await cli(['version']);
 step('version 裸输出', /^\d+\.\d+\.\d+$/.test(ver.out), ver.out);
 
 const help = await cli(['help']);
-step('help 由声明生成且含模块分组', help.out.includes('entry') && help.out.includes('栏目'));
+step('help 由声明生成且含模块分组', help.out.includes('entry') && help.out.includes('条目模板'));
 
-const templates = await cliJson(['section', 'templates']);
-step('section templates 列出内置模板',
-  ['job', 'secret', 'projects', 'internships', 'campus', 'deploy'].every((id) => templates.templates.some((t) => t.id === id)),
-  `${templates.templates.length} 个模板`);
+const templates = await cliJson(['template', 'presets']);
+step('template presets 列出内置预置',
+  ['job', 'secret', 'projects', 'internships', 'campus', 'deploy'].every((id) => templates.presets.some((t) => t.id === id)),
+  `${templates.presets.length} 个预置`);
 
-const fields = await cliJson(['entry', 'fields', '--section', 'job']);
-const fieldKeys = new Set(fields.sections[0].fields.map((f) => f.key));
+const fields = await cliJson(['entry', 'fields', '--template', 'job']);
+const fieldKeys = new Set(fields.templates[0].fields.map((f) => f.key));
 step('字段字典含关键字段', ['name', 'phone', 'targetPosition', 'expectCities'].every((k) => fieldKeys.has(k)), `${fieldKeys.size} 个字段`);
-step('字段字典标注了密文字段', fields.sections[0].fields.every((f) => f.sensitive === false));
+step('字段字典标注了密文字段', fields.templates[0].fields.every((f) => f.sensitive === false));
 
-const added = await cliJson(['entry', 'add', '--section', 'job', '--set', '姓名=冒烟测试', '--set', '电话=13800000000', '--set', '期望城市=北京、上海']);
+const added = await cliJson(['entry', 'add', '--template', 'job', '--set', '姓名=冒烟测试', '--set', '电话=13800000000', '--set', '期望城市=北京、上海']);
 step('entry add 自动取名并算完整度', added.created === true && added.title === '冒烟测试', `完整度 ${added.completeness.ratio}%`);
 
 const got = await cliJson(['entry', 'get', '冒烟测试']);
-step('entry get 用名字定位', got.values.name === '冒烟测试' && got.section === 'job');
+step('entry get 用名字定位', got.values.name === '冒烟测试' && got.template === 'job');
 step('tags 字段被强转成数组', Array.isArray(got.values.expectCities) && got.values.expectCities.length === 2);
 
-const dup = await cliError(['entry', 'add', '--section', 'job', '--set', '姓名=冒烟测试']);
+const dup = await cliError(['entry', 'add', '--template', 'job', '--set', '姓名=冒烟测试']);
 step('重复 add 报 CONFLICT（不静默 upsert）', dup.code === 'CONFLICT');
 
-const noArg = await cliError(['entry', 'add', '--section', 'job']);
+const noArg = await cliError(['entry', 'add', '--template', 'job']);
 step('缺参数报错带「用法:」锚点', noArg.code === 'INVALID_INPUT' && noArg.error.includes('用法:'));
 
 const autoField = await cliJson(['entry', 'update', '冒烟测试', '--set', '技术博客=https://example.com', '--set', '是否有offer=否']);
@@ -133,30 +133,31 @@ step('字典里没有的字段**直接写**（自动登记，不再报错）', a
 const afterAuto = await cliJson(['entry', 'get', '冒烟测试']);
 step('自动登记的字段立刻可读', afterAuto.values['技术博客'] === 'https://example.com');
 step('自动登记时推断 bool（是/否 不存成文本）', afterAuto.values['是否有offer'] === false);
-const ledger = await cliJson(['entry', 'fields', '--section', 'job']);
-step('新字段进了台账（已知字段 = 模板建议 + 写过的）', ledger.sections[0].fields.some((f) => f.key === '技术博客'));
-step('中文键直接可用（不必记英文别名）', ledger.sections[0].fields.some((f) => f.key === '是否有offer'));
+const ledger = await cliJson(['entry', 'fields', '--template', 'job']);
+step('新字段进了台账（已知字段 = 模板建议 + 写过的）', ledger.templates[0].fields.some((f) => f.key === '技术博客'));
+step('中文键直接可用（不必记英文别名）', ledger.templates[0].fields.some((f) => f.key === '是否有offer'));
 
-// ─── 栏目 ZIP 导出 / 导入 ─────────────────────────────────────
+// ─── 条目模板 ZIP 导出 / 导入 ─────────────────────────────────────
 const zipPath = join(home, 'job-export.zip');
 const exp = await cliJson(['transfer', 'export', 'job', '--out', zipPath]);
-step('transfer export 打出栏目 ZIP', exp.bytes > 0 && exp.entries >= 1, `${exp.entries} 条目 / ${exp.bytes}B`);
+step('transfer export 打出条目模板 ZIP', exp.bytes > 0 && exp.entries >= 1, `${exp.entries} 条目 / ${exp.bytes}B`);
 
 const zpv = await cliJson(['transfer', 'import', 'jobcopy', '--file', zipPath, '--dry-run']);
-step('transfer import --dry-run 只预览、不建栏目', zpv.status === 'preview' && zpv.section.willCreate === true && zpv.entries.total === exp.entries);
+step('transfer import --dry-run 只预览、不建条目模板', zpv.status === 'preview' && zpv.template.willCreate === true && zpv.entries.total === exp.entries);
 
 const zimp = await cliJson(['transfer', 'import', 'jobcopy', '--file', zipPath]);
-step('transfer import 新建栏目并导入条目', zimp.section.created === true && zimp.entries.added === exp.entries, `新增 ${zimp.entries.added}`);
+step('transfer import 新建条目模板并导入条目', zimp.template.created === true && zimp.entries.added === exp.entries, `新增 ${zimp.entries.added}`);
 
-const zgot = await cliJson(['entry', 'get', '冒烟测试', '--section', 'jobcopy']);
+const zgot = await cliJson(['entry', 'get', '冒烟测试', '--template', 'jobcopy']);
 step('导入后的条目可读（字段与值都在）', zgot.values.name === '冒烟测试' && zgot.values.phone === '13800000000');
 
 const zskip = await cliJson(['transfer', 'import', 'jobcopy', '--file', zipPath, '--on-conflict', 'skip']);
 step('重复导入默认跳过冲突', zskip.entries.skipped === exp.entries && zskip.entries.added === 0);
 
-// 副本栏目里有一条同名条目，会污染后续「按名字定位」的步骤 —— 测完就删
-const zrm = await cliJson(['section', 'remove', 'jobcopy', '--force']);
-step('清理导入测试的副本栏目', zrm.status === 'ok');
+// 副本条目测完就删：0.43 删模板不删条目，留着会污染后续按名字定位
+await cliJson(['entry', 'remove', zgot.id]);
+const zrm = await cliJson(['template', 'remove', 'jobcopy']);
+step('清理导入测试的副本条目模板', zrm.status === 'ok');
 
 // 精确导出 + 零配置导入
 const pickZip = join(home, 'job-pick.zip');
@@ -164,25 +165,27 @@ const pexp = await cliJson(['transfer', 'export', 'job', '--entries', '冒烟测
 step('transfer export --entries 只导出选中条目', pexp.entries === 1, `${pexp.entries}/${pexp.available}`);
 
 const pnew = await cliJson(['transfer', 'import-new', '--file', pickZip]);
-step('零配置导入按包内结构新建栏目', pnew.section.created === true && pnew.section.id !== 'job', pnew.section.id);
-const psec = await cliJson(['section', 'get', pnew.section.id]);
-step('导入的栏目结构完整', psec.fields > 0 && psec.groups > 0, `${psec.fields} 字段`);
-await cliJson(['section', 'remove', pnew.section.id, '--force']);
+step('零配置导入按包内结构新建条目模板', pnew.template.created === true && pnew.template.id !== 'job', pnew.template.id);
+const psec = await cliJson(['template', 'get', pnew.template.id]);
+step('导入的条目模板结构完整', psec.fields > 0 && psec.groups > 0, `${psec.fields} 字段`);
+const pList = await cliJson(['entry', 'list', '--template', pnew.template.id]);
+for (const e of pList.entries) await cliJson(['entry', 'remove', e.id]);
+await cliJson(['template', 'remove', pnew.template.id]);
 
-// 全局多栏目包
+// 全局多条目模板包
 const bzip = join(home, 'bundle.zip');
-const bexp = await cliJson(['transfer', 'bundle-export', '--sections', 'job,projects', '--out', bzip]);
-step('bundle export 打出多栏目包', bexp.sections === 2 && bexp.entries >= 1, `${bexp.sections} 栏目 / ${bexp.entries} 条目`);
+const bexp = await cliJson(['transfer', 'bundle-export', '--templates', 'job,projects', '--out', bzip]);
+step('bundle export 打出多条目模板包', bexp.templates === 2 && bexp.entries >= 1, `${bexp.templates} 条目模板 / ${bexp.entries} 条目`);
 
 const bprev = await cliJson(['transfer', 'bundle-import', '--file', bzip, '--dry-run']);
-step('bundle import --dry-run 汇总栏目数', bprev.status === 'preview' && bprev.totals.sections === 2);
+step('bundle import --dry-run 汇总条目模板数', bprev.status === 'preview' && bprev.totals.templates === 2);
 
 const bimp = await cliJson(['transfer', 'bundle-import', '--file', bzip, '--on-conflict', 'skip']);
 step('bundle import 默认跳过冲突', bimp.totals.skipped >= 1 && bimp.totals.added === 0);
 
 // 口令加密：导出带口令 → 缺口令/错口令被拒 → 对口令才能进
 const encZip = join(home, 'bundle-enc.zip');
-const eexp = await cliJson(['transfer', 'bundle-export', '--sections', 'job', '--out', encZip, '--passphrase', 'S1cau!@#']);
+const eexp = await cliJson(['transfer', 'bundle-export', '--templates', 'job', '--out', encZip, '--passphrase', 'S1cau!@#']);
 step('加密导出标记 encrypted', eexp.encrypted === true);
 const eno = await cli(['transfer', 'bundle-import', '--file', encZip, '--dry-run'], { expectFail: true });
 step('加密包缺口令被拒（exit!=0）', eno.code !== 0, JSON.stringify(eno.json || {}).slice(0, 90));
@@ -206,35 +209,38 @@ step('remove --dry-run 不落盘', dryRemove.status === 'skipped' && dryRemove.d
 const stillThere = await cliJson(['entry', 'get', '冒烟测试']);
 step('试运行后条目还在', stillThere.id === got.id);
 
-// 密钥 = 极简 KV：名称 → 值。走 key 直通命令（= entry 的语法糖，作用在 kvSection 上）
-// 播种不再自带密钥栏目：**第一次 key set** 自动补建（读命令不建——读不到就是读不到）。
+// 密钥 = 普通条目模板里的一个安全 list<kv> 字段：名称列 + 密文值列。
+// 播种不再自带密钥条目模板：**第一次 key set** 自动补建（读命令不建——读不到就是读不到）。
 const kvFirst = await cliJson(['key', 'set', 'KV_PROBE', 'sk-probe']);
-step('没有 KV 栏目时 key set 自动补建（播种不再自带密钥栏目）', kvFirst.createdKv === true
-  && (await cliJson(['bootstrap'])).sections.some((s) => s.id === 'secret' && s.kv === true));
+step('没有密钥条目模板时 key set 自动补建（播种不再自带密钥条目模板）', kvFirst.createdTemplate === true
+  && kvFirst.createdEntry === true
+  && (await cliJson(['bootstrap'])).templates.some((s) => s.id === 'secret' && s.kv === undefined));
 
-const secFields = await cliJson(['entry', 'fields', '--section', 'secret']);
-step('密钥栏目是单字段 KV', secFields.sections[0].fields.length === 1 && secFields.sections[0].titleField === null,
-  `${secFields.sections[0].fields.length} 个字段`);
+const secFields = await cliJson(['entry', 'fields', '--template', 'secret']);
+const keysField = secFields.templates[0].fields.find((f) => f.key === 'keys');
+step('密钥是普通 entrylist 字段：名称明文 + 值加密，不再是单字段模板',
+  keysField?.type === 'entrylist'
+  && keysField.fields.find((f) => f.key === 'value')?.sensitive === true
+  && secFields.templates[0].titleField === null,
+  `${secFields.templates[0].fields.length} 个字段`);
 
-const secList = await cliJson(['section', 'list']);
-step('栏目带 kv 标记（面板据此渲染 KV 表格，不是条目列表）',
-  secList.sections.find((s) => s.id === 'secret')?.kv === true
-  && secList.sections.find((s) => s.id === 'job')?.kv === false);
+const secList = await cliJson(['template', 'list']);
+step('模板列表不再有 kv 特例标记',
+  secList.templates.find((s) => s.id === 'secret')?.kv === undefined
+  && secList.templates.find((s) => s.id === 'job')?.kv === undefined);
 const kvProbe = await cliJson(['key', 'list']);
-step('key list 报出 KV 栏目名', kvProbe.section === 'secret');
-const bySection = await cliJson(['key', 'list', '--section', 'secret']);
-step('key list --section 可指定 KV 栏目', bySection.count === kvProbe.count);
+step('key list 报出承载条目与字段模式', kvProbe.template === 'secret' && kvProbe.mode === 'field' && kvProbe.count === 1);
+const byTemplate = await cliJson(['key', 'list', '--template', 'secret']);
+step('key list --template 可指定密钥条目模板', byTemplate.count === kvProbe.count);
 await cliJson(['key', 'remove', 'KV_PROBE']);
+const afterKvRemove = await cliJson(['key', 'list']);
+step('key remove 只删清单里的一行，不删承载条目',
+  afterKvRemove.count === 0 && afterKvRemove.entry === '密钥');
 
-const kvAddField = await cliError(['entry', 'update', 'KV_SHAPE_PROBE', '--set', '随便一个键=值']);
-step('不存在的键在 KV 栏目里也走 key set 语义（不会变成字段）',
-  kvAddField.code === 'NOT_FOUND');
-await cliJson(['key', 'set', 'KV_SHAPE_PROBE', 'v1']);
-const kvNoField = await cliError(['entry', 'update', 'KV_SHAPE_PROBE', '--set', '089=123']);
-step('KV 栏目拒绝加字段，并指出该用 key set', kvNoField.code === 'INVALID_INPUT' && kvNoField.error.includes('KV 表'));
-const stillOne = await cliJson(['entry', 'fields', '--section', 'secret']);
-step('拒绝之后字段数没变', stillOne.sections[0].fields.length === 1);
-await cliJson(['key', 'remove', 'KV_SHAPE_PROBE']);
+const kvShape = await cliJson(['entry', 'get', '密钥', '--template', 'secret']);
+step('承载条目仍在，只是 keys 字段被清空', kvShape.values.keys === null);
+const stillOne = await cliJson(['entry', 'fields', '--template', 'secret']);
+step('删行没有动字段结构', stillOne.templates[0].fields.length === 4);
 
 const set1 = await cliJson(['key', 'set', 'SMOKE_KEY', 'sk-smoke-1234567890abcdef']);
 step('key set 创建', set1.status === 'ok' && set1.created === true && set1.name === 'SMOKE_KEY');
@@ -243,7 +249,7 @@ const set2 = await cliJson(['key', 'set', 'SMOKE_KEY', 'sk-smoke-1234567890abcde
 step('key set 同值幂等（status=skipped，不重写密文）', set2.status === 'skipped' && set2.unchanged === true);
 
 const set3 = await cliJson(['key', 'set', 'SMOKE_KEY', 'sk-smoke-NEW-0987654321fedcba']);
-step('key set 是覆盖语义（KV 的 SET）', set3.status === 'ok' && set3.created === false && set3.replaced === true);
+step('key set 是覆盖语义（同一行的 SET）', set3.status === 'ok' && set3.created === false && set3.replaced === true);
 
 const shown = await cliJson(['key', 'get', 'SMOKE_KEY']);
 step('key get 默认给原文（本机自己用，不拦自己）', shown.value === 'sk-smoke-NEW-0987654321fedcba');
@@ -284,21 +290,21 @@ await cliJson(['key', 'remove', 'DASH_ONE']);
 const dryKeyRemove = await cliJson(['key', 'remove', 'SMOKE_KEY', '--dry-run']);
 step('key remove --dry-run 不落盘', dryKeyRemove.status === 'skipped' && (await cliJson(['key', 'list'])).count === 1);
 
-const dump = await cliJson(['section', 'dump', 'job']);
-step('section dump 给全量（字段 + 条目 + 未填清单）', dump.fields.length > 50 && dump.entries.length >= 1 && dump.entries[0].missing.length > 0);
+const dump = await cliJson(['template', 'dump', 'job']);
+step('template dump 给全量（字段 + 条目 + 未填清单）', dump.fields.length > 50 && dump.entries.length >= 1 && dump.entries[0].missing.length > 0);
 
 // ── 头部导航分组（settings.navGroups，设置页可配）────────────
 const groupsSet = await cliJson(['setting', 'set', '--set',
-  'navGroups=[{"title":"求职域","sections":["projects","internships"]}]']);
+  'navGroups=[{"title":"求职域","templates":["projects","internships"]}]']);
 step('setting set navGroups 落盘并归一',
-  groupsSet.status === 'ok' && groupsSet.set.navGroups[0].sections.length === 2);
+  groupsSet.status === 'ok' && groupsSet.set.navGroups[0].templates.length === 2);
 const bootGroups = await cliJson(['bootstrap']);
 step('bootstrap 带出导航分组（前端头部据此收拢）', bootGroups.settings.navGroups[0].title === '求职域');
-const badGroup = await cliError(['setting', 'set', '--set', 'navGroups=[{"title":"X","sections":["no_such"]}]']);
-step('navGroups 里的栏目不存在会明确报错', badGroup.code === 'INVALID_INPUT');
+const badGroup = await cliError(['setting', 'set', '--set', 'navGroups=[{"title":"X","templates":["no_such"]}]']);
+step('navGroups 里的条目模板不存在会明确报错', badGroup.code === 'INVALID_INPUT');
 const dupGroup = await cliError(['setting', 'set', '--set',
-  'navGroups=[{"title":"A","sections":["projects"]},{"title":"B","sections":["projects"]}]']);
-step('一个栏目进了两个分组会明确报错', dupGroup.code === 'INVALID_INPUT');
+  'navGroups=[{"title":"A","templates":["projects"]},{"title":"B","templates":["projects"]}]']);
+step('一个条目模板进了两个分组会明确报错', dupGroup.code === 'INVALID_INPUT');
 await cliJson(['setting', 'set', '--set', 'navGroups=[]']);
 step('清空 navGroups = 恢复平铺', (await cliJson(['setting', 'get'])).settings.navGroups.length === 0);
 
@@ -308,16 +314,16 @@ await writeFile(join(home, 'r2.pdf'), 'resume-two');
 const mf1 = await cliJson(['file', 'add', '--path', join(home, 'r1.pdf')]);
 const mf2 = await cliJson(['file', 'add', '--path', join(home, 'r2.pdf')]);
 await cliJson(['entry', 'update', '冒烟测试', '--set', `resumeFile=${mf1.id},${mf2.id}`]);
-const multi = await cliJson(['entry', 'get', '冒烟测试', '--section', 'job']);
+const multi = await cliJson(['entry', 'get', '冒烟测试', '--template', 'job']);
 step('一个字段挂多个附件：值是数组（哪怕单个也存数组）',
   Array.isArray(multi.values.resumeFile) && multi.values.resumeFile.length === 2);
 step('两个附件都解析出名称与路径', multi.files[mf1.id]?.name === 'r1.pdf' && multi.files[mf2.id]?.name === 'r2.pdf');
-const multiHuman = await cli(['entry', 'get', '冒烟测试', '--section', 'job']);
+const multiHuman = await cli(['entry', 'get', '冒烟测试', '--template', 'job']);
 step('CLI 人类模式：多个附件各占一行',
   multiHuman.out.includes('r1.pdf') && multiHuman.out.includes('r2.pdf'));
 const mf2Detail = await cliJson(['file', 'get', mf2.id]);
 step('第二个附件也反查到「被引用」', mf2Detail.usedBy.some((u) => u.fieldKey === 'resumeFile'));
-const bySecond = await cliJson(['entry', 'list', '--section', 'job', '--q', 'r2.pdf']);
+const bySecond = await cliJson(['entry', 'list', '--template', 'job', '--q', 'r2.pdf']);
 step('按第二个附件的名字也能搜到条目', bySecond.entries.some((e) => e.title === '冒烟测试'));
 
 // 可读导出（JSON / Markdown）已删除：备份与它都是「往本机目录留副本」，
@@ -340,8 +346,8 @@ step('transfer 五条命令都还在', ['transfer export', 'transfer import', 't
 // 关键回归：A 机导出的包（secret 已解成明文）在 B 机（换过 vaultkey）导入后，
 // 敏感字段必须用 **B 机** 的 vaultKey 重新加密——否则「密文落盘」这条不变量就漏了。
 const crossZip = join(home, 'cross-machine.zip');
-const xExp = await cliJson(['transfer', 'bundle-export', '--sections', 'secret', '--out', crossZip]);
-step('跨机导出：secret 栏目打进 ZIP', xExp.sections === 1 && xExp.entries >= 1);
+const xExp = await cliJson(['transfer', 'bundle-export', '--templates', 'secret', '--out', crossZip]);
+step('跨机导出：secret 条目模板打进 ZIP', xExp.templates === 1 && xExp.entries >= 1);
 
 const homeB = await mkdtemp(join(tmpdir(), 'nx-sk-smoke-B-'));
 const envB = { ...process.env, NX_SK_HOME: homeB, NX_SK_STORE: join(homeB, 'store.json'), NX_SK_STORE_DB: join(homeB, 'nxsk.db') };
@@ -368,7 +374,7 @@ async function cliJsonB(args) {
 await cliB(['bootstrap']);
 try { await rm(join(homeB, '.vaultkey')); } catch { /* 不存在也行 */ }
 
-// 零配置导入：B 机没有 secret 栏目，按包内结构新建
+// 零配置导入：B 机没有 secret 条目模板，按包内结构新建
 const xImp = await cliJsonB(['transfer', 'import-new', '--file', crossZip]);
 step('B 机零配置导入成功（全局包）', xImp.status === 'ok' && xImp.totals.added >= 1, JSON.stringify(xImp.totals));
 
@@ -386,8 +392,9 @@ try {
   const row = dbB.get(`SELECT fd.value AS v FROM entries e
     JOIN entry_fields ef ON ef.entry_id = e.id
     JOIN field_data fd ON fd.entry_field_id = ef.id
-    WHERE e.section_id = 'secret' AND ef.key = 'value' LIMIT 1`);
-  entryB = row ? JSON.parse(row.v) : null;
+    WHERE e.template_id = 'secret' AND ef.key = 'keys' LIMIT 1`);
+  const parsed = row ? JSON.parse(row.v) : null;
+  entryB = Array.isArray(parsed) ? parsed[0]?.value ?? null : null;
 } finally { dbB.close(); }
 function isCipher(v) { return !!v && typeof v === 'object' && typeof v.ct === 'string' && typeof v.iv === 'string'; }
 step('导入后 secret 落盘仍是密文（已用本机 vaultKey 重新加密）',
@@ -443,8 +450,8 @@ step('routes 与 help 覆盖同一批命令', routes.total === boot.counts.comma
 const backRoute = await cliJson(['routes', '--http', 'POST /api/entries']);
 step('routes 支持反向查找', backRoute.entries.some((e) => e.command === 'nx-sk entry add'));
 
-const drySection = await cliJson(['section', 'add', 'probe', '--template', 'job', '--dry-run']);
-step('section add --dry-run 不落盘', drySection.status === 'skipped' && !(await cliJson(['section', 'list'])).sections.some((s) => s.id === 'probe'));
+const dryTemplate = await cliJson(['template', 'add', 'probe', '--preset', 'job', '--dry-run']);
+step('template add --dry-run 不落盘', dryTemplate.status === 'skipped' && !(await cliJson(['template', 'list'])).templates.some((s) => s.id === 'probe'));
 
 // ── 2. HTTP + 静态 ───────────────────────────────────────────
 process.stdout.write('\n[2] HTTP API 与静态页\n');
@@ -465,14 +472,14 @@ step('serve --json 打出地址', /^http:\/\/127\.0\.0\.1:\d+$/.test(info.url), 
 
 // ── #22：serve 在跑 → CLI 走面板代理（portfile 指路，本进程不碰库） ──
 const PROXY_DEBUG = { NX_SK_CLI_PROXY_DEBUG: '1' };
-const proxied = await cli(['section', 'list', '--json'], { extraEnv: PROXY_DEBUG });
+const proxied = await cli(['template', 'list', '--json'], { extraEnv: PROXY_DEBUG });
 step('serve 在跑：CLI 经面板代理执行（stderr 观测行带真实端口）',
   proxied.err.includes('经面板代理') && proxied.err.includes(`:${info.port}`), proxied.err);
 const proxiedJson = JSON.parse(proxied.out);
-const directRun = await cli(['section', 'list', '--json', '--direct'], { extraEnv: PROXY_DEBUG });
+const directRun = await cli(['template', 'list', '--json', '--direct'], { extraEnv: PROXY_DEBUG });
 step('--direct 跳过代理（本进程直跑）', !directRun.err.includes('经面板代理'));
 step('代理与直跑输出等价（同库同数据）',
-  JSON.stringify(proxiedJson.sections.map((s) => s.id).sort()) === JSON.stringify(JSON.parse(directRun.out).sections.map((s) => s.id).sort()));
+  JSON.stringify(proxiedJson.templates.map((s) => s.id).sort()) === JSON.stringify(JSON.parse(directRun.out).templates.map((s) => s.id).sort()));
 const portfile = JSON.parse(await readFile(join(home, 'serve.json'), 'utf8'));
 step('serve 写了端口档案（port + pid）', portfile.port === info.port && portfile.pid > 0, JSON.stringify(portfile));
 
@@ -490,11 +497,23 @@ const j = async (path, opts = {}) => {
 const apiBoot = await j('/api/bootstrap');
 step('GET /api/bootstrap', apiBoot.status === 200 && apiBoot.body.ok && apiBoot.body.data.app.name === 'nx-sk');
 
-const apiTemplates = await j('/api/sections/templates');
-step('字面量路由不被 :ref 遮蔽（/sections/templates）', apiTemplates.status === 200 && Array.isArray(apiTemplates.body.data.templates));
+const apiTemplates = await j('/api/templates/presets');
+step('字面量路由不被 :ref 遮蔽（/templates/presets）', apiTemplates.status === 200 && Array.isArray(apiTemplates.body.data.presets));
+
+// 拖动排序的落盘入口：整份 ids 一次 POST；GET /api/templates 返回的 order 必须跟着变。
+const apiTplList = await j('/api/templates');
+const apiTplIds = apiTplList.body.data.templates.map((t) => t.id);
+const apiReorderIds = [apiTplIds[1], apiTplIds[0]];
+const apiReorder = await j('/api/templates/reorder', { method: 'POST', body: { ids: apiReorderIds } });
+const apiTplAfter = await j('/api/templates');
+step('POST /api/templates/reorder（拖动排序落盘）',
+  apiReorder.status === 200
+  && apiReorder.body.data.count === apiTplIds.length
+  && apiTplAfter.body.data.templates.slice(0, 2).map((t) => t.id).join(',') === apiReorderIds.join(','),
+  JSON.stringify(apiReorder.body));
 
 const apiFields = await j('/api/entries/fields');
-step('字面量路由不被 :ref 遮蔽（/entries/fields）', apiFields.status === 200 && Array.isArray(apiFields.body.data.sections));
+step('字面量路由不被 :ref 遮蔽（/entries/fields）', apiFields.status === 200 && Array.isArray(apiFields.body.data.templates));
 
 const apiKeyPut = await j('/api/keys/HTTP_KEY', { method: 'PUT', body: { value: 'sk-http-abcdefghijklmn' } });
 step('PUT /api/keys/:name 写入密钥', apiKeyPut.status === 200 && apiKeyPut.body.data.created === true);
@@ -514,49 +533,58 @@ step('DELETE /api/keys/:name', apiKeyDel.status === 200 && apiKeyDel.body.data.r
 const apiKeyMissing = await j('/api/keys/NO_SUCH_KEY_HTTP');
 step('不存在的密钥报 404', apiKeyMissing.status === 404 && apiKeyMissing.body.code === 'NOT_FOUND');
 
-const apiAdd = await j('/api/entries', { method: 'POST', body: { section: 'job', set: { 姓名: 'HTTP造的数据' } } });
+const apiAdd = await j('/api/entries', { method: 'POST', body: { template: 'job', set: { 姓名: 'HTTP造的数据' } } });
 step('POST /api/entries', apiAdd.status === 200 && apiAdd.body.data.created === true);
 
 const apiPatch = await j(`/api/entries/${apiAdd.body.data.id}`, { method: 'PATCH', body: { set: { 目标岗位: '全栈开发' } } });
 step('PATCH /api/entries/:ref（PATCH 语义）', apiPatch.status === 200 && apiPatch.body.data.status === 'ok');
 
-const apiBlocked = await j('/api/sections/job', { method: 'DELETE', body: {} });
-step('栏目非空删除报 409 blocked', apiBlocked.status === 409 && apiBlocked.body.code === 'BLOCKED');
+// 0.43：删条目模板不删条目，不再因为「模板下有条目」拒绝
+await cliJson(['template', 'add', 'api-unbind', '--title', 'API删除', '--preset', 'demo']);
+const apiUnbindEntry = await j('/api/entries', { method: 'POST', body: { template: 'api-unbind', title: '待删除模板条目', set: { name: 'x' } } });
+const apiUnbind = await j('/api/templates/api-unbind', { method: 'DELETE', body: {} });
+step('非空条目模板可删除（条目保留）',
+  apiUnbind.status === 200 && apiUnbind.body.data.unbound === 1,
+  JSON.stringify(apiUnbind.body));
+const apiUnboundEntry = await j(`/api/entries/${apiUnbindEntry.body.data.id}`);
+step('删除后条目还在，并回落到空白模板',
+  apiUnboundEntry.status === 200 && apiUnboundEntry.body.data.template === '__blank__');
+await j(`/api/entries/${apiUnbindEntry.body.data.id}`, { method: 'DELETE', body: {} });
 
-// ── 栏目结构：面板「改分组 / 改字段」走的就是这几个 PATCH ──
+// ── 条目模板结构：面板「改分组 / 改字段」走的就是这几个 PATCH ──
 // 面板过去只能加字段、连分组都建不了；现在结构能自己搭，冒烟必须钉住这条链路，
 // 不然「后端有、面板接口没有」这种错只有点开面板才知道。
-const apiAddGroup = await j('/api/sections/job', { method: 'PATCH', body: { 'add-group': { id: 'smokeg', title: '冒烟分组' } } });
+const apiAddGroup = await j('/api/templates/job', { method: 'PATCH', body: { 'add-group': { id: 'smokeg', title: '冒烟分组' } } });
 step('PATCH 加分组（面板的「＋ 添加分组」）', apiAddGroup.status === 200 && apiAddGroup.body.data.ops[0].includes('新增分组 smokeg'));
-const apiSecGroups = await j('/api/sections/job');
+const apiSecGroups = await j('/api/templates/job');
 step('分组进了 groupList（面板据此渲染结构）', apiSecGroups.body.data.groupList.some((g) => g.id === 'smokeg'));
-const apiRmBusy = await j('/api/sections/job', { method: 'PATCH', body: { 'remove-group': 'contact' } });
+const apiRmBusy = await j('/api/templates/job', { method: 'PATCH', body: { 'remove-group': 'contact' } });
 step('非空分组不给删（409 BLOCKED，并报出是哪个字段）', apiRmBusy.status === 409 && apiRmBusy.body.code === 'BLOCKED' && apiRmBusy.body.error.includes('phone'), apiRmBusy.body?.error);
-const apiRmGroup = await j('/api/sections/job', { method: 'PATCH', body: { 'remove-group': 'smokeg' } });
+const apiRmGroup = await j('/api/templates/job', { method: 'PATCH', body: { 'remove-group': 'smokeg' } });
 step('空分组可删', apiRmGroup.status === 200 && apiRmGroup.body.data.ops[0].includes('删除分组 smokeg'));
-const apiSetField = await j('/api/sections/job', { method: 'PATCH', body: { 'set-field': { key: 'phone', label: '手机号(改)' } } });
+const apiSetField = await j('/api/templates/job', { method: 'PATCH', body: { 'set-field': { key: 'phone', label: '手机号(改)' } } });
 step('改字段标签（key 不动，已填的值不丢）', apiSetField.status === 200 && apiSetField.body.data.ops[0].includes('手机号(改)'));
-const apiFieldBack = await j('/api/sections/job');
+const apiFieldBack = await j('/api/templates/job');
 step('改的是 label，key 仍是 phone', apiFieldBack.body.data.fieldList.some((f) => f.key === 'phone' && f.label === '手机号(改)'));
 
 // ── 正文版式（块布局）：面板拖完块回写的就是这条 PATCH ──
-// 版式与字段字典**分开存**（section.layout），字段增删后要能自愈。这条链路最容易
+// 版式与字段字典**分开存**（template.layout），字段增删后要能自愈。这条链路最容易
 // 「后端存进去了、面板读不回来」，所以 HTTP 与 CLI 两头都钉一下。
-const layoutPatch = await j('/api/sections/job', {
+const layoutPatch = await j('/api/templates/job', {
   method: 'PATCH',
   body: { layout: { mode: 'grid', panels: ['basic'], groups: { basic: { layouts: { lg: [{ i: 'name', x: 0, y: 0, w: 8, h: 2 }] } } } } },
 });
 step('PATCH 写版式（面板拖块后回写的就是它）', layoutPatch.status === 200 && layoutPatch.body.data.changed.includes('layout'));
-const layoutDump = await j('/api/sections/job/dump');
+const layoutDump = await j('/api/templates/job/dump');
 const lgItems = layoutDump.body.data.layout.groups.basic.layouts.lg;
 step('dump 带出版式，并按当前字段补齐了块', lgItems.length > 1 && lgItems[0].i === 'name' && lgItems[0].w === 8);
-const layoutCli = await cliJson(['section', 'get', 'job']);
+const layoutCli = await cliJson(['template', 'get', 'job']);
 step('CLI 读到的版式与面板同源', layoutCli.layout.mode === 'grid' && layoutCli.layout.groups.basic.layouts.lg[0].w === 8);
-const apiRmLayoutField = await j('/api/sections/job', { method: 'PATCH', body: { 'remove-field': 'qq' } });
-const layoutAfterRm = (await j('/api/sections/job/dump')).body.data.layout.groups.contact.layouts.lg;
+const apiRmLayoutField = await j('/api/templates/job', { method: 'PATCH', body: { 'remove-field': 'qq' } });
+const layoutAfterRm = (await j('/api/templates/job/dump')).body.data.layout.groups.contact.layouts.lg;
 step('删字段后版式自愈（不留孤儿块）', apiRmLayoutField.status === 200 && !layoutAfterRm.some((x) => x.i === 'qq'));
-const cliClearLayout = await cliJson(['section', 'update', 'job', '--clear-layout']);
-const layoutCleared = (await cliJson(['section', 'get', 'job'])).layout.groups.basic.layouts.lg;
+const cliClearLayout = await cliJson(['template', 'update', 'job', '--clear-layout']);
+const layoutCleared = (await cliJson(['template', 'get', 'job'])).layout.groups.basic.layouts.lg;
 step('CLI --clear-layout 回到默认编排', cliClearLayout.changed.includes('layout') && layoutCleared[0].w === 6 && layoutCleared[0].y === 0);
 
 const apiNotFound = await j('/api/entries/不存在的东西');
@@ -568,7 +596,7 @@ step('未知接口报 404', apiUnknown.status === 404 && apiUnknown.body.ok === 
 const apiBadOrigin = await rawRequest(info.url, '/api/entries', {
   method: 'POST',
   headers: { 'content-type': 'application/json', origin: 'http://evil.example' },
-  body: JSON.stringify({ section: 'job', set: { name: 'x' } }),
+  body: JSON.stringify({ template: 'job', set: { name: 'x' } }),
 });
 step('跨站 Origin 的写操作被拒', apiBadOrigin.status === 403, `HTTP ${apiBadOrigin.status}`);
 
@@ -578,7 +606,7 @@ step('跨站 Origin 的读操作仍放行', readOrigin.status === 200);
 const localOrigin = await rawRequest(info.url, '/api/entries', {
   method: 'POST',
   headers: { 'content-type': 'application/json', origin: 'http://127.0.0.1:7866' },
-  body: JSON.stringify({ section: 'job', set: { 姓名: '本机面板造的' } }),
+  body: JSON.stringify({ template: 'job', set: { 姓名: '本机面板造的' } }),
 });
 step('本机 Origin 的写操作放行', localOrigin.status === 200);
 
@@ -597,9 +625,9 @@ serve.kill('SIGTERM');
 await new Promise((r) => setTimeout(r, 300));
 
 // #22 反向路径：面板没了（Windows 硬杀留下的陈旧 portfile 由 pid 校验兜底）→ CLI 直跑
-const afterKill = await cli(['section', 'list', '--json'], { extraEnv: PROXY_DEBUG });
+const afterKill = await cli(['template', 'list', '--json'], { extraEnv: PROXY_DEBUG });
 step('serve 不在跑：CLI 直跑（无代理观测行，结果照常）',
-  !afterKill.err.includes('经面板代理') && JSON.parse(afterKill.out).sections.length > 0);
+  !afterKill.err.includes('经面板代理') && JSON.parse(afterKill.out).templates.length > 0);
 
 // ── 3. 收尾：真删（只删测试自己造的那条） ───────────────────
 process.stdout.write('\n[3] 真删\n');
@@ -610,7 +638,7 @@ step('entry remove 不再返回快照（本地备份已移除）', removed.snaps
 const gone = await cliError(['entry', 'get', '冒烟测试']);
 step('删除后 get 报 NOT_FOUND', gone.code === 'NOT_FOUND');
 
-const finalList = await cliJson(['entry', 'list', '--section', 'job']);
+const finalList = await cliJson(['entry', 'list', '--template', 'job']);
 const titles = finalList.entries.map((e) => e.title).sort();
 step('CLI 与 HTTP 写进的是同一份数据', finalList.count === 2 && titles.join('|') === 'HTTP造的数据|本机面板造的', titles.join(' / '));
 

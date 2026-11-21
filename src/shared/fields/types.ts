@@ -12,7 +12,7 @@
 export const FIELD_TYPES = [
   'text', 'textarea', 'number', 'date', 'month', 'bool', 'select', 'tags',
   'entrylist', 'table', 'source', 'secret', 'file', 'md', 'shortcut', 'debug',
-  'group',
+  'grill', 'group',
 ] as const;
 
 export type FieldType = (typeof FIELD_TYPES)[number];
@@ -40,6 +40,7 @@ export const FIELD_TYPE_LABELS: Record<FieldType, string> = {
   file: '附件',
   md: '图文（可贴图）',
   debug: '资源引用（可检索）',
+  grill: 'Grill & Ack（对齐确认单）',
   group: '分组（容器，引用其他字段）',
 };
 
@@ -143,8 +144,8 @@ interface FieldDefBase {
   label: string;
   type: FieldType;
   // 0.42：字段不再带 `group`——「组」本身就是一个字段（type='group'），
-  // 通过 GroupFieldDef.keys 引用同栏目里的其他字段。层级这条信息只住在字段之间，
-  // 不再有「栏目上的 groups 数组」这第二份结构（见 shared/fields/structure.ts）。
+  // 通过 GroupFieldDef.keys 引用同条目模板里的其他字段。层级这条信息只住在字段之间，
+  // 不再有「条目模板上的 groups 数组」这第二份结构（见 shared/fields/structure.ts）。
   hint?: string;
   sensitive?: boolean;
   fill?: FillPolicy;
@@ -161,14 +162,11 @@ interface FieldDefBase {
 export interface ScalarFieldDef extends FieldDefBase {
   type: 'text' | 'textarea' | 'number' | 'date' | 'month' | 'bool' | 'select' | 'tags' | 'source' | 'shortcut' | 'secret' | 'file' | 'md';
   options?: string[];
-  /** file 字段的附件类别提示（doc / image …）。 */
-  kind?: string;
 }
 
 export interface EntryListFieldDef extends FieldDefBase {
   type: 'entrylist';
   fields: SubFieldDef[];
-  maxRows?: number;
 }
 
 export interface TableFieldDef extends FieldDefBase {
@@ -181,7 +179,7 @@ export interface TableFieldDef extends FieldDefBase {
 
 /**
  * debug（资源引用）：值 = 内部资源定位符（locator）数组，见 shared/locator.ts。
- * 引用型字段——格子指向栏目/条目/字段/附件，悬浮可预览被引用内容。
+ * 引用型字段——格子指向条目模板/条目/字段/附件，悬浮可预览被引用内容。
  * 引用本身不敏感（sensitive=false），被引用的内容才可能敏感。
  */
 export interface DebugFieldDef extends FieldDefBase {
@@ -196,12 +194,72 @@ export interface RefDoc {
   warnings?: string[];
 }
 
+// ---------------------------------------------------------------------------
+// grill（Grill & Ack）
+//
+// AI 写问题、用户逐条回答，再把 ack 写回同一份 JSON。字段值不是另一张表，
+// 因此问题、答案、备注、确认状态不会在条目和字段之间两处漂移。
+// ---------------------------------------------------------------------------
+
+/** 一个问题可以怎么答。 */
+export type GrillQuestionKind = 'single' | 'multi' | 'text' | 'confirm';
+
+/** 单选/多选的候选项；recommended 只是 AI 的建议，不代替用户选择。 */
+export interface GrillOption {
+  value: string;
+  label: string;
+  detail?: string;
+  recommended?: boolean;
+}
+
+export type GrillAnswer = string | string[] | boolean | null;
+
+/** 一条待确认问题。 */
+export interface GrillQuestion {
+  id: string;
+  kind: GrillQuestionKind;
+  title: string;
+  detail?: string;
+  required: boolean;
+  options: GrillOption[];
+  placeholder?: string;
+  answer: GrillAnswer;
+  /** 用户对这条的补充说明 / 否定理由；比单纯不选更有信息。 */
+  note: string;
+}
+
+/** 用户确认后的回执；回答问题本身不会自动生成它。 */
+export interface GrillAck {
+  status: 'pending' | 'acknowledged';
+  at?: string;
+  by?: string;
+  answered?: number;
+  total?: number;
+}
+
+/** grill 字段的完整值。 */
+export interface GrillDoc {
+  v: 1;
+  schema: 'nx-sk/grill@1';
+  title: string;
+  intro: string;
+  /** AI 引用的用户原话；让用户在表单里看得到自己在确认什么。 */
+  prompt: string;
+  questions: GrillQuestion[];
+  freeform: string;
+  ack: GrillAck;
+}
+
+export interface GrillFieldDef extends FieldDefBase {
+  type: 'grill';
+}
+
 /**
- * group（分组容器）：值没有意义（`{}`/空），它引用**同栏目里的其他字段 key**。
+ * group（分组容器）：值没有意义（`{}`/空），它引用**同条目模板里的其他字段 key**。
  *
  * 设计取舍：成员本身仍然是一条独立的字段（值按 key 存、可以单独参与完整度/序列化），
  * 组只是「这条字段属于哪一块面板、跟谁排在一起」的声明——所以底层只有 field 这一种结构，
- * 层级是字段之间的引用关系，不是栏目上的第二份数组。
+ * 层级是字段之间的引用关系，不是条目模板上的第二份数组。
  * `keys` 可嵌套（组里再放组）；每个非 group 字段**必须**恰好归属一个组，
  * 由 `normalizeStructure()` 在归一化里收口（见 shared/fields/structure.ts）。
  */
@@ -210,7 +268,7 @@ export interface GroupFieldDef extends FieldDefBase {
   keys: string[];
 }
 
-export type FieldDef = ScalarFieldDef | EntryListFieldDef | TableFieldDef | DebugFieldDef | GroupFieldDef;
+export type FieldDef = ScalarFieldDef | EntryListFieldDef | TableFieldDef | DebugFieldDef | GrillFieldDef | GroupFieldDef;
 
 /** 字段值的宽松联合：历史数据与导入包可能带各种形态，读取侧必须照单全收。 */
 export type FieldValue =
@@ -223,6 +281,7 @@ export type FieldValue =
   | Record<string, unknown>[]
   | TableDoc
   | RefDoc
+  | GrillDoc
   | ShortcutGroup[]
   | SourceItem[];
 
@@ -249,10 +308,10 @@ export interface RefsOptions {
  * 写入时把敏感值封装成密文的上下文。
  *
  * 这个钩子**必须碰 vault 密钥**，所以类型放 `shared`、实现只放 `core/fields/seal/`。
- * `section / def / raw / current` 都是历史数据的宽松形态（JSON），实现内部自行收窄。
+ * `template / def / raw / current` 都是历史数据的宽松形态（JSON），实现内部自行收窄。
  */
 export interface SealContext {
-  section: any;
+  template: any;
   def: any;
   raw: any;
   current: any;
@@ -270,7 +329,7 @@ export type SealHook = (ctx: SealContext) => Promise<unknown>;
 export interface FieldBehavior {
   /** 能否作为表格列类型（`TABLE_CELL_TYPES` 的成员判据）。 */
   readonly cell: boolean;
-  /** 字段定义校验/规范化：就地补 `def`，非法定义直接抛（sections 写入路径）。 */
+  /** 字段定义校验/规范化：就地补 `def`，非法定义直接抛（templates 写入路径）。 */
   normalizeDef(raw: any, def: any): void;
   /** 写入归一：CLI/面板传进来的原始值 → 落盘形状。 */
   coerce(def: any, raw: any): unknown;

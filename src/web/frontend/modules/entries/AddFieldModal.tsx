@@ -6,7 +6,7 @@ import type { FieldType } from '../../../../shared/fields/types.ts';
 export default function AddFieldModal({
   af,
   afBusy,
-  sectionTitle,
+  templateTitle,
   groups,
   fieldTypes,
   fieldTypeLabels,
@@ -17,7 +17,7 @@ export default function AddFieldModal({
 }: {
   af: { key: string; label: string; type: string; group: string; value: string } | null;
   afBusy: boolean;
-  sectionTitle: string;
+  templateTitle: string;
   groups: BoardGroup[];
   fieldTypes: FieldType[] | undefined;
   fieldTypeLabels: Record<FieldType, string> | undefined;
@@ -30,7 +30,7 @@ export default function AddFieldModal({
     <>
       {af ? (
         <Modal
-          title={`添加扩展字段 · ${sectionTitle}`}
+          title={`添加扩展字段 · ${templateTitle}`}
           onClose={onClose}
           footer={(
             <>
@@ -42,7 +42,7 @@ export default function AddFieldModal({
           )}
         >
           <div className="stack">
-            <div className="hint">字段只加在<b>这一条条目</b>上（写时复制，不动栏目模板）；凭据样的键（密码 / 令牌 / 密钥）落盘即密文。</div>
+            <div className="hint">字段只加在<b>这一条条目</b>上（写时复制，不动条目模板定义）；凭据样的键（密码 / 令牌 / 密钥）落盘即密文。</div>
             <div className="grid">
               <div className="field">
                 <div className="flabel"><span>key</span><span className="fkey">英文字母开头</span></div>

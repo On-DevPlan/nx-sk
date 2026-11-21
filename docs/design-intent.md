@@ -14,7 +14,7 @@
 
 **类型是数据，行为是注册表。**
 
-栏目、字段定义、条目值全部是 JSON 数据；所有「按类型分叉」的逻辑集中在注册表里，调用方不认识类型，只调用能力。
+条目模板、字段定义、条目值全部是 JSON 数据；所有「按类型分叉」的逻辑集中在注册表里，调用方不认识类型，只调用能力。
 加一种字段类型 = 加一个行为体 + 加一个控件；其余出口自动跟随。加一个模块 = 加一个元数据条目 + 一个 action 清单。
 
 ---
@@ -36,9 +36,9 @@
 
 ### 1.2 明确拒绝的做法
 
-- **富血值对象**（`TableValue` 类实例）：值必须能无损进出 JSON、能在加密边界上原样回传、能被 `section dump` 直读。类实例三个都破坏。
+- **富血值对象**（`TableValue` 类实例）：值必须能无损进出 JSON、能在加密边界上原样回传、能被 `template dump` 直读。类实例三个都破坏。
 - **动态 `registerField()` 插件 API**：字段类型是封闭集合（15 种），静态对象字面量可被静态分析、可被编译期穷举、不依赖 import 顺序。
-- **为内部消费 codegen JSON Schema**：`validateFieldDef` 已是权威校验，`section dump` 已是 agent 可读结构；再生成一份只会产生第二个真相。
+- **为内部消费 codegen JSON Schema**：`validateFieldDef` 已是权威校验，`template dump` 已是 agent 可读结构；再生成一份只会产生第二个真相。
 
 ---
 
@@ -49,7 +49,7 @@
 | I1 | 每种 `FieldType` 在 `FIELD_BEHAVIOR` 中恰好有一项，且 8 个钩子齐全 | TS `Record<FieldType, FieldBehavior>` + `assertFieldRegistry()` |
 | I2 | 每种 `FieldType` 在前端 `FIELD_CONTROLS` 中恰好有一个控件 | TS `Record<FieldType, Control>` |
 | I3 | 每种 `FieldType` 在 `FIELD_SEAL` 中有确定项（可显式 `null`，`null` 表示「没有类型级封装逻辑」） | TS `Record<FieldType, SealHook \| null>`（P2-B 已落地） |
-| I4 | `section.fields` 的每个 key 在 `serializeEntry` 输出里恰好出现一次 | 契约测试：键集相等 |
+| I4 | `template.fields` 的每个 key 在 `serializeEntry` 输出里恰好出现一次 | 契约测试：键集相等 |
 | I5 | 对每种类型跑 `coerce → seal → reveal → dump` 不抛异常 | 契约测试：类型遍历往返 |
 | I6 | 后端注册的模块目录集合 = `MODULES` 声明集合 = 前端 `VIEWS` 目录集合 | 启动断言 + `consistency.test.mjs` |
 | I7 | 任何模块不得自行判断字段类型（`x.type === '...'`） | eslint `no-restricted-syntax` |
@@ -223,7 +223,7 @@ src/web/frontend/registry.ts  # VIEWS：视图侧声明（与后端模块是否�
 | 有人图快写 `if (def.type === ...)` | eslint + 源码扫描测试 |
 | 前端手抄一份类型清单 | 类型从 `shared` 的 `const` 派生；测试断言 bootstrap 的 `fieldTypes` 与常量深相等 |
 | 契约（响应结构）漂移 | `tests/unit/contract.test.ts` 钉住面板依赖的键 |
-| 文档过时 | 文档只写「意图 + 清单」，命令/字段细节由代码与 `section dump` 提供；测试禁止 skill 文档出现 HTTP 路由 |
+| 文档过时 | 文档只写「意图 + 清单」，命令/字段细节由代码与 `template dump` 提供；测试禁止 skill 文档出现 HTTP 路由 |
 
 **每次加类型/模块，先问：这次改动让上面哪一条防线变弱了？** 如果答案是「没有」，就可以合。
 

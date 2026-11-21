@@ -25,7 +25,7 @@ async function copyDb(src, dst) {
   }
 }
 
-test('版本落后升级：真 v2 库一路升到当前版（v5），migrate/ 里先留 pre-v2-to-v5 快照，数据完好', async () => {
+test('版本落后升级：真 v2 库一路升到当前版，migrate/ 里先留升级前快照，数据完好', async () => {
   const { CURRENT_SCHEMA_VERSION } = await import('../../src/core/db/version.ts');
   // v3 起 entries 没有 values 列、边表挂 entry_field_id——「把 v3 库的版本号改回 0」
   // 不再等于「模拟旧版库」（v3.sql 的 ALTER/CREATE 会在已升级的库上炸）。
@@ -45,8 +45,7 @@ test('版本落后升级：真 v2 库一路升到当前版（v5），migrate/ �
       ['s', 'S', '', 50, 0, '名称', '{}', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z']);
     db.run("INSERT INTO fields (section_id, key, label, type, sort, spec) VALUES ('s', 'a', 'A', 'text', 0, '{\"key\":\"a\",\"label\":\"A\",\"type\":\"text\"}')");
     db.run("INSERT INTO fields (section_id, key, label, type, sort, spec) VALUES ('s', 'b', 'B', 'text', 1, '{\"key\":\"b\",\"label\":\"B\",\"type\":\"text\"}')");
-    db.run(`INSERT INTO entries (id, section_id, title, tags, "values", created_at, updated_at)
-      VALUES ('e1', 's', 'T', '[]', '{"a":"1","ghost":"2"}', '2026-02-01T00:00:00.000Z', '2026-02-02T00:00:00.000Z')`);
+    db.run(`INSERT INTO entries (id, section_id, title, tags, "values", created_at, updated_at)      VALUES ('e1', 's', 'T', '[]', '{"a":"1","ghost":"2"}', '2026-02-01T00:00:00.000Z', '2026-02-02T00:00:00.000Z')`);
     db.close();
   }
   process.env.NX_SK_HOME = homeB;
@@ -55,9 +54,10 @@ test('版本落后升级：真 v2 库一路升到当前版（v5），migrate/ �
 
   // 打开：v2 < CURRENT → 必须先快照再升级；升级后数据原样（含字典外的 ghost 键）
   const s2 = await loadStore();
-  assert.equal(s2.sections.length, 1, '升级后数据仍在');
-  assert.equal(s2.entries[0].values.a, '1');
-  assert.equal(s2.entries[0].values.ghost, '2', '不在字典的键要落成扩展行并原样读回');
+  assert.equal(s2.templates.filter((x) => !x.blank).length, 1, '升级后数据仍在');
+  const e1 = s2.entries.find((e) => e.id === 'e1');
+  assert.equal(e1.values.a, '1');
+  assert.equal(e1.values.ghost, '2', '不在字典的键要落成扩展行并原样读回');
   const snaps = (await fsp.readdir(join(homeB, 'migrate'))).filter((f) => new RegExp(`-pre-v2-to-v${CURRENT_SCHEMA_VERSION}\\.db$`).test(f));
   assert.equal(snaps.length, 1, `migrate/ 应有一份升级前快照：${snaps.join(', ')}`);
 
@@ -84,12 +84,12 @@ test('既有库补导入（崩溃恢复窗口）：导入前同样先留 pre-imp
   await copyDb(join(homeA, 'nxsk.db'), join(homeC, 'nxsk.db'));
   const legacy = {
     version: 3,
-    settings: { defaultSection: 'imp', navGroups: [] },
-    sections: [{ id: 'imp', title: '补导入', description: '', order: 10, template: null, kv: false,
+    settings: { defaultTemplate: 'imp', navGroups: [] },
+    templates: [{ id: 'imp', title: '补导入', description: '', order: 10, template: null,
       titleField: null, titleLabel: '名称',
       groups: [{ id: 'g1', title: '基本' }],
       fields: [{ key: 'a', label: 'A', type: 'text', group: 'g1' }] }],
-    entries: [{ id: 'e_imp', section: 'imp', title: 'T', tags: [], values: { a: '1' } }],
+    entries: [{ id: 'e_imp', template: 'imp', title: 'T', tags: [], values: { a: '1' } }],
     files: [],
   };
   await fsp.writeFile(join(homeC, 'store.json'), JSON.stringify(legacy), 'utf8');
@@ -99,11 +99,11 @@ test('既有库补导入（崩溃恢复窗口）：导入前同样先留 pre-imp
 
   // ③ 打开：情况 D 触发导入 → 先快照
   const s = await loadStore();
-  assert.ok(s.sections.some((x) => x.id === 'imp'), 'json 数据应被导入');
+  assert.ok(s.templates.some((x) => x.id === 'imp'), 'json 数据应被导入');
   const snaps = (await fsp.readdir(join(homeC, 'migrate'))).filter((f) => /-pre-import-json\.db$/.test(f));
   assert.equal(snaps.length, 1, `导入前应有库快照：${snaps.join(', ')}`);
   const probe = new DatabaseSync(join(homeC, 'migrate', snaps[0]), { readOnly: true });
-  assert.equal(probe.prepare("SELECT COUNT(*) c FROM sections WHERE id='imp'").get().c, 0, '快照里还没有 json 数据（是导入前的状态）');
+  assert.equal(probe.prepare("SELECT COUNT(*) c FROM templates WHERE id='imp'").get().c, 0, '快照里还没有 json 数据（是导入前的状态）');
   probe.close();
 });
 

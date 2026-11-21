@@ -116,6 +116,7 @@ export const tableBehavior: FieldBehavior = {
       }
     }
     if (raw.summary === false) def.summary = false;
+    if (raw.maxRows === null) return;
     if (raw.maxRows !== undefined) {
       const n = Number(raw.maxRows);
       if (!Number.isFinite(n) || n <= 0) throw badInput(`字段 ${def.key} 的 maxRows 要是正数`);

@@ -1,6 +1,7 @@
 import { badInput } from '../../errors.ts';
 import { assertFieldKey } from '../../paths.ts';
 import { isBlank, isPlainRow } from '../../values.ts';
+import { isCipherBlob } from '../../crypto.ts';
 import type { FieldBehavior, SubFieldDef } from '../../../shared/fields/types.ts';
 import { displayRow, identityRemap, isSensitiveDef } from './common.ts';
 
@@ -19,21 +20,27 @@ export function normalizeRows(def: any, list: any[]): any {
     if (keys.length) def.fields = keys.map((k) => ({ key: k, label: k }));
   }
   const subs = def.fields || [];
-  const rows: Record<string, string>[] = [];
+  const rows: Record<string, unknown>[] = [];
   for (const item of list) {
     if (!isPlainRow(item)) {
       throw badInput(`字段「${def.label}」的每行都要是对象（{"子字段": "值"}），收到 ${JSON.stringify(item).slice(0, 80)}`);
     }
-    const row: Record<string, string> = {};
+    const row: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(item)) {
       // 列名**key 与 label 都认**（与顶层 `--set 字段=值` 同一口径）：
       // 人写的是「密码」，清单声明的是 pass —— 不该让人先背一遍英文 key。
       const sub = subs.find((s: any) => s.key === k) || subs.find((s: any) => s.label === k);
       if (!sub) {
         throw badInput(`字段「${def.label}」没有子字段「${k}」（清单列: ${subs.map((s: any) => s.label).join('、') || '无'}）。`
-          + `清单列在字段定义里，要改用 section update <栏目> --fields '<整份字段数组>'`);
+          + `清单列在字段定义里，要改用 template update <条目模板> --fields '<整份字段数组>'`);
       }
       const text = String(v ?? '').trim();
+      // 敏感子列已经是密文对象时原样保留：`key set` 这类「读出旧行再写回」的路径
+      // 会把旧值一起带回来，String() 会把它变成 "[object Object]" 并把密文写坏。
+      if (isCipherBlob(v) && sub.sensitive === true) {
+        row[sub.key] = v;
+        continue;
+      }
       // 一律归到列的 **key** 下：密文判定、面板渲染都按 key 走
       if (text !== '') row[sub.key] = text;
     }

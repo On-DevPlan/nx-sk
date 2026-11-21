@@ -78,8 +78,8 @@ interface SourceDrawerProps {
   onChange: (value: any) => void;
   onClose: () => void;
   title?: string;
-  sectionTitle?: string;
-  sectionId?: string;
+  templateTitle?: string;
+  templateId?: string;
   entryId?: string;
 }
 
@@ -87,7 +87,7 @@ interface SourceDrawerProps {
  * 抽屉本体。单独一个组件：它有自己的焦点生命周期（打开聚焦、关闭归还），
  * 混在字段控件里会让两件事互相干扰。
  */
-function SourceDrawer({ items, onChange, onClose, title, sectionTitle, sectionId, entryId }: SourceDrawerProps) {  const { toast, guard } = useStore() as any;
+function SourceDrawer({ items, onChange, onClose, title, templateTitle, templateId, entryId }: SourceDrawerProps) {  const { toast, guard } = useStore() as any;
   const [selId, setSelId] = useState(items[0]?.id || null);
   const [dragOver, setDragOver] = useState(false);
   const [editorOver, setEditorOver] = useState(false);
@@ -342,13 +342,13 @@ function SourceDrawer({ items, onChange, onClose, title, sectionTitle, sectionId
       <Peek
         ariaLabel="原始资料（侧边栏）"
         title="原始资料"
-        subtitle={`${sectionTitle ? `${sectionTitle} · ` : ''}${title || ''}`}
+        subtitle={`${templateTitle ? `${templateTitle} · ` : ''}${title || ''}`}
         meta={<span className="tag">{items.length} 条</span>}
         mode={mode}
         onMode={setMode}
         onClose={onClose}
         className="source-drawer"
-        newTabHref={sectionId && entryId ? `#/${encodeURIComponent(sectionId)}?entry=${encodeURIComponent(entryId)}` : undefined}
+        newTabHref={templateId && entryId ? `#/${encodeURIComponent(templateId)}?entry=${encodeURIComponent(entryId)}` : undefined}
         persistKey="source"
         defaultMode="side"
       >
@@ -627,8 +627,8 @@ function SourceFieldControl({ def, value, onChange }: SourceFieldControlProps) {
           onChange={onChange}
           onClose={close}
           title={def.entryTitle}
-          sectionTitle={def.sectionTitle}
-          sectionId={def.sectionId}
+          templateTitle={def.templateTitle}
+          templateId={def.templateId}
           entryId={def.entryId}
         />
       ) : null}
@@ -637,7 +637,7 @@ function SourceFieldControl({ def, value, onChange }: SourceFieldControlProps) {
 }
 
 /**
- * 注册表入口：把表格给的一层上下文（sectionTitle / entryTitle）合进 def，
+ * 注册表入口：把表格给的一层上下文（templateTitle / entryTitle）合进 def，
  * 与 P2-B 包装层的合并方式完全相同（后者只做转发，已随之删除）。
  */
 export function SourceControl({ def, value, onChange, ctx }: ControlProps) {

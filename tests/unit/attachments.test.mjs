@@ -1,5 +1,5 @@
 // 附件库测试：本机路径移动/复制导入、去重、Web 上传、改分类、还原（可逆）、
-// 以及简历（job）栏目的 file 字段读写 + 附件中心「由栏目驱动」的分组。
+// 以及简历（job）条目模板的 file 字段读写 + 附件中心「由条目模板驱动」的分组。
 import assert from 'node:assert/strict';
 import fsp from 'node:fs/promises';
 import { join } from 'node:path';
@@ -12,10 +12,10 @@ const svc = await import('../../src/modules/files/service.ts');
 const core = await import('../../src/core/attachments.ts');
 const { filesDir } = await import('../../src/core/paths.ts');
 const entries = await import('../../src/modules/entries/service.ts');
-const sections = await import('../../src/modules/sections/service.ts');
+const templates = await import('../../src/modules/templates/service.ts');
 
 // 播种不再自带 job：这里按模板建回来（同时顺带覆盖了「模板实例化」这条路径）
-await sections.addSection({ id: 'job', title: '求职', template: 'job' });
+await templates.addTemplate({ id: 'job', title: '求职', preset: 'job' });
 
 async function makeSource(dir, name, content) {
   await fsp.mkdir(join(home, dir), { recursive: true });
@@ -139,26 +139,26 @@ test('dry-run 不移动、不写台账', async () => {
 });
 
 test('简历（job）的 file 字段：值=附件 id，在条目的字段里选/传即建立链接', async () => {
-  // 在附件库里准备一个原件（等价于在栏目 file 字段里「上传」后拿到的 id）
+  // 在附件库里准备一个原件（等价于在条目模板 file 字段里「上传」后拿到的 id）
   const src = await makeSource('incoming6', '求职简历.pdf', 'job-resume');
   const added = await svc.addFile({ path: src, category: 'resume' });
 
   const created = await entries.addEntry({
-    section: 'job', title: '张三',
+    template: 'job', title: '张三',
     set: { name: '张三', resumeFile: added.id },
   });
   assert.equal(created.status, 'ok');
 
-  const got = await entries.getEntry('张三', { section: 'job' });
+  const got = await entries.getEntry('张三', { template: 'job' });
   // 新写入统一存**数组**（哪怕只有一个附件）——形状一致，下游不必判「是串还是表」
   assert.deepEqual(got.values.resumeFile, [added.id]);
   assert.equal(got.files[added.id].name, '求职简历.pdf');
   assert.equal(got.files[added.id].url, `/api/files/${added.id}/content`);
 
-  // 反查：附件知道被哪个栏目的哪个条目哪个字段引用
+  // 反查：附件知道被哪个条目模板的哪个条目哪个字段引用
   const detail = await svc.getFile(added.id);
   assert.equal(
-    detail.usedBy.some((u) => u.sectionId === 'job' && u.entryId === created.id && u.fieldKey === 'resumeFile'),
+    detail.usedBy.some((u) => u.templateId === 'job' && u.entryId === created.id && u.fieldKey === 'resumeFile'),
     true,
   );
 
@@ -167,9 +167,9 @@ test('简历（job）的 file 字段：值=附件 id，在条目的字段里选/
   assert.equal(searched.entries.some((e) => e.id === created.id), true);
 
   // 清空字段 → 条目不再引用，附件变成「未被引用」
-  const updated = await entries.updateEntry('张三', { section: 'job', unset: ['resumeFile'] });
+  const updated = await entries.updateEntry('张三', { template: 'job', unset: ['resumeFile'] });
   assert.equal(updated.status, 'ok');
-  const after = await entries.getEntry('张三', { section: 'job' });
+  const after = await entries.getEntry('张三', { template: 'job' });
   assert.equal(after.values.resumeFile, null);
   assert.equal((await svc.getFile(added.id)).usedBy.length, 0);
 });
@@ -184,26 +184,26 @@ test('同一份原件可被多条条目引用（去重后同 id，各条目互�
   assert.equal(again.duplicated, true);
   assert.equal(again.id, added.id);
 
-  await entries.addEntry({ section: 'job', title: '甲', set: { name: '甲', avatar: added.id } });
-  await entries.addEntry({ section: 'job', title: '乙', set: { name: '乙', avatar: added.id } });
+  await entries.addEntry({ template: 'job', title: '甲', set: { name: '甲', avatar: added.id } });
+  await entries.addEntry({ template: 'job', title: '乙', set: { name: '乙', avatar: added.id } });
 
   const detail = await svc.getFile(added.id);
   assert.equal(detail.usedBy.length, 2);
 });
 
-test('listFiles 由栏目驱动：sections 汇总 + unlinked 计数 + 按栏目/未引用过滤', async () => {
+test('listFiles 由条目模板驱动：templates 汇总 + unlinked 计数 + 按条目模板/未引用过滤', async () => {
   const d = await svc.listFiles({});
-  assert.ok(Array.isArray(d.sections));
-  const job = d.sections.find((s) => s.id === 'job');
-  assert.ok(job, '带 file 字段的栏目应出现在分组里');
+  assert.ok(Array.isArray(d.templates));
+  const job = d.templates.find((s) => s.id === 'job');
+  assert.ok(job, '带 file 字段的条目模板应出现在分组里');
   assert.ok(job.count >= 1);
   assert.equal(typeof d.unlinked, 'number');
 
-  const onlyJob = await svc.listFiles({ section: 'job' });
+  const onlyJob = await svc.listFiles({ template: 'job' });
   assert.ok(onlyJob.files.length >= 1);
-  assert.equal(onlyJob.files.every((f) => f.usedBy.some((u) => u.sectionId === 'job')), true);
+  assert.equal(onlyJob.files.every((f) => f.usedBy.some((u) => u.templateId === 'job')), true);
 
-  const unlinked = await svc.listFiles({ section: 'none' });
+  const unlinked = await svc.listFiles({ template: 'none' });
   assert.equal(unlinked.files.every((f) => !f.usedBy.length), true);
 });
 
@@ -237,10 +237,10 @@ test('一个 file 字段挂多个附件：值 = 数组，反查/搜索/渲染都
 
   // 逗号分隔的写法也认（CLI 手感）；存下来仍是数组
   await entries.addEntry({
-    section: 'job', title: '多附件条目',
+    template: 'job', title: '多附件条目',
     set: { name: '多附件条目', resumeFile: `${a.id},${b.id}` },
   });
-  const got = await entries.getEntry('多附件条目', { section: 'job' });
+  const got = await entries.getEntry('多附件条目', { template: 'job' });
   assert.deepEqual(got.values.resumeFile, [a.id, b.id]);
   assert.equal(got.files[a.id].name, '简历-前端.pdf');
   assert.equal(got.files[b.id].name, '简历-后端.pdf');
@@ -260,62 +260,62 @@ test('一个 file 字段挂多个附件：值 = 数组，反查/搜索/渲染都
   assert.equal(searched.entries.some((e) => e.id === got.id), true);
 
   // 数组去重：同一 id 写两遍只留一个
-  await entries.updateEntry('多附件条目', { section: 'job', set: { resumeFile: [a.id, a.id, b.id] } });
-  const after = await entries.getEntry('多附件条目', { section: 'job' });
+  await entries.updateEntry('多附件条目', { template: 'job', set: { resumeFile: [a.id, a.id, b.id] } });
+  const after = await entries.getEntry('多附件条目', { template: 'job' });
   assert.deepEqual(after.values.resumeFile, [a.id, b.id]);
 });
 
 test('file 字段超 maxItems 报 INVALID_INPUT（与 tags 同一口径）', async () => {
-  const sections = await import('../../src/modules/sections/service.ts');
-  await sections.addSection({
+  const templates = await import('../../src/modules/templates/service.ts');
+  await templates.addTemplate({
     id: 'cv_files', title: '附件测试', fields: [
       { key: 'docs', label: '资料', type: 'file', group: 'main', maxItems: 2 },
     ],
   });
   await assert.rejects(
-    entries.addEntry({ section: 'cv_files', title: '超限', set: { docs: 'f_a,f_b,f_c' } }),
+    entries.addEntry({ template: 'cv_files', title: '超限', set: { docs: 'f_a,f_b,f_c' } }),
     (e) => e.code === 'INVALID_INPUT' && /最多 2 项，收到 3 项/.test(e.message),
   );
   // 上限之内正常写入
-  const ok = await entries.addEntry({ section: 'cv_files', title: '未超限', set: { docs: 'f_a,f_b' } });
+  const ok = await entries.addEntry({ template: 'cv_files', title: '未超限', set: { docs: 'f_a,f_b' } });
   assert.equal(ok.status, 'ok');
-  assert.deepEqual((await entries.getEntry('未超限', { section: 'cv_files' })).values.docs, ['f_a', 'f_b']);
+  assert.deepEqual((await entries.getEntry('未超限', { template: 'cv_files' })).values.docs, ['f_a', 'f_b']);
 });
 
 test('兼容历史单值：字符串仍是单元素列表（读命令不炸、反查/搜索照常）', async () => {
   const c = await svc.addFile({ path: await makeSource('legacy', '老简历.pdf', 'legacy-bytes') });
   const { loadStore, mutateStore } = await import('../../src/core/store.ts');
   // 直接写一个「老形态」的字符串单值（模拟 0.7.x 及更早存下来的数据）
-  const created = await entries.addEntry({ section: 'job', title: '老数据', set: { name: '老数据' } });
+  const created = await entries.addEntry({ template: 'job', title: '老数据', set: { name: '老数据' } });
   await mutateStore((s) => {
     const e = s.entries.find((x) => x.id === created.id);
     e.values.resumeFile = c.id;
   });
 
-  const got = await entries.getEntry('老数据', { section: 'job' });
+  const got = await entries.getEntry('老数据', { template: 'job' });
   assert.equal(got.values.resumeFile, c.id, '老值原样读出来，不做迁移');
   assert.equal(got.files[c.id].name, '老简历.pdf', '单值同样能解析出附件名');
   assert.equal((await svc.getFile(c.id)).usedBy.some((u) => u.entryId === created.id), true);
 
   // 渲染成一行、不炸
-  const dumped = await entries.getEntry('老数据', { section: 'job' });
+  const dumped = await entries.getEntry('老数据', { template: 'job' });
   assert.ok(dumped.values.resumeFile);
   assert.ok((await loadStore()).entries.some((x) => x.id === created.id));
 });
 
 test('未知键写 f_ 形态的值 → 落条目自身的附件扩展行（v3：字典不被污染）', async () => {
   const a = await svc.addFile({ path: await makeSource('infer', '推断.pdf', 'infer-bytes') });
-  const r = await entries.updateEntry('多附件条目', { section: 'job', set: { 备用附件: `${a.id}` } });
+  const r = await entries.updateEntry('多附件条目', { template: 'job', set: { 备用附件: `${a.id}` } });
   assert.equal(r.status, 'ok');
   const store = await loadStoreSafe();
-  const job = store.sections.find((s) => s.id === 'job');
+  const job = store.templates.find((s) => s.id === 'job');
   assert.equal(job.fields.some((f) => f.key === '备用附件'), false, 'quickAdd 不再登记进字典');
   const { entryStructures } = await import('../../src/core/store.ts');
   const row = (entryStructures(store).get(r.id) || []).find((x) => x.key === '备用附件');
   assert.ok(row, '条目应有自己的扩展行');
   assert.equal(row.templateFieldId, null, '扩展行出身 NULL');
   assert.equal(row.spec.type, 'file', '按 f_ 前缀推断成附件字段');
-  const got = await entries.getEntry('多附件条目', { section: 'job' });
+  const got = await entries.getEntry('多附件条目', { template: 'job' });
   assert.deepEqual(got.values['备用附件'], [a.id]);
 });
 
@@ -368,38 +368,38 @@ test('listFiles 分页：limit/offset 只切过滤后的列表，默认仍全量
 // 于是「未引用」筛选会把它捞出来，用户以为附件是孤儿。正文里的 `![…](f_xxx)`
 // 和 file 字段是一回事，必须同样反查到。
 test('md 正文里的图片算已引用（不再显示未引用）', async () => {
-  const sections = await import('../../src/modules/sections/service.ts');
+  const templates = await import('../../src/modules/templates/service.ts');
   const store = await import('../../src/core/store.ts');
   const src = await makeSource('md-src', '正文图片.png', `md-body-image-${Date.now()}-${Math.random()}`);
   const pic = await svc.addFile({ path: src, copy: true });
 
   const sid = 'mdsect';
-  await sections.addSection({ id: sid, title: '图文栏目', fields: [{ key: 'sop', label: '正文', type: 'md' }] });
-  const e = await entries.addEntry({ section: sid, title: '带图的条目', set: { sop: `步骤一\n\n![截图](${pic.id})\n\n步骤二` } });
+  await templates.addTemplate({ id: sid, title: '图文条目模板', fields: [{ key: 'sop', label: '正文', type: 'md' }] });
+  const e = await entries.addEntry({ template: sid, title: '带图的条目', set: { sop: `步骤一\n\n![截图](${pic.id})\n\n步骤二` } });
 
   const rec = (await svc.listFiles({ q: '正文图片' })).files[0];
   const refs = core.fileReferences(await store.loadStore(), rec);
   const hit = refs.find((r) => r.entryId === e.id);
   assert.ok(hit, 'md 正文里的图片应能反查到');
   assert.equal(hit.fieldKey, 'sop');
-  assert.equal(hit.sectionId, sid);
+  assert.equal(hit.templateId, sid);
 
   // 更重要的一层：不然它就会进「未引用」筛选，用户以为附件是孤儿
-  const orphan = await svc.listFiles({ section: 'none' });
+  const orphan = await svc.listFiles({ template: 'none' });
   assert.equal(orphan.files.some((f) => f.id === pic.id), false, 'md 引用过的图片不应出现在未引用列表');
 });
 
 test('外链图片不算引用（本来就不在附件库里）', async () => {
-  const sections = await import('../../src/modules/sections/service.ts');
+  const templates = await import('../../src/modules/templates/service.ts');
   // 内容必须与上一个用例不同：附件按 sha256 去重，写一样会复用同一个 id，测的就不是这个了
   const src = await makeSource('md-src', '纯外链.png', `md-external-only-${Date.now()}-${Math.random()}`);
   const pic = await svc.addFile({ path: src, copy: true });
 
   const sid = 'mdsect2';
-  await sections.addSection({ id: sid, title: '外链栏目', fields: [{ key: 'sop', label: '正文', type: 'md' }] });
-  await entries.addEntry({ section: sid, title: '只有外链', set: { sop: '![网图](https://example.com/a.png)' } });
+  await templates.addTemplate({ id: sid, title: '外链条目模板', fields: [{ key: 'sop', label: '正文', type: 'md' }] });
+  await entries.addEntry({ template: sid, title: '只有外链', set: { sop: '![网图](https://example.com/a.png)' } });
 
-  const orphan = await svc.listFiles({ section: 'none' });
+  const orphan = await svc.listFiles({ template: 'none' });
   assert.equal(orphan.files.some((f) => f.id === pic.id), true, '没被真正引用就该留在未引用列表');
 });
 
@@ -408,14 +408,14 @@ test('外链图片不算引用（本来就不在附件库里）', async () => {
 // 「清理未引用」一键就会把原件物理删掉——溯源链条当场断掉，且不可撤销。
 // 与 md 正文图片那次修复同一形状：只要正式引用方式还有一种没被反查到，就会误删。
 test('资料袋里的文件算已引用（cleanup 不删、usedBy 反查得到）', async () => {
-  const sections = await import('../../src/modules/sections/service.ts');
+  const templates = await import('../../src/modules/templates/service.ts');
   const src = await makeSource('source-bag', '袋里的原件.pdf', `source-bag-${Date.now()}-${Math.random()}`);
   const doc = await svc.addFile({ path: src, copy: true });
 
   const sid = 'bagsrc';
-  await sections.addSection({ id: sid, title: '袋栏目', template: 'projects' });
-  const e = await entries.addEntry({ section: sid, title: '带原件的条目', set: { name: '带原件的条目' } });
-  await entries.addSourceItem(e.id, { section: sid, file: src, name: '发来的 PDF 原件' });
+  await templates.addTemplate({ id: sid, title: '袋模板', preset: 'projects' });
+  const e = await entries.addEntry({ template: sid, title: '带原件的条目', set: { name: '带原件的条目' } });
+  await entries.addSourceItem(e.id, { template: sid, file: src, name: '发来的 PDF 原件' });
 
   const st = await import('../../src/core/store.ts');
   const rec = (await svc.listFiles({ q: '袋里的原件' })).files[0];
@@ -423,35 +423,35 @@ test('资料袋里的文件算已引用（cleanup 不删、usedBy 反查得到�
   const hit = refs.find((r) => r.entryId === e.id);
   assert.ok(hit, '袋里的 fileId 应能反查到');
   assert.equal(hit.fieldKey, 'source');
-  assert.equal(hit.sectionId, sid);
+  assert.equal(hit.templateId, sid);
 
   // 未引用筛选与 cleanup 必须同一套判据：袋里的原件两边都算「已引用」
-  const orphan = await svc.listFiles({ section: 'none' });
+  const orphan = await svc.listFiles({ template: 'none' });
   assert.equal(orphan.files.some((f) => f.id === doc.id), false, '袋里的原件不应出现在未引用列表');
   const dry = await svc.cleanupUnreferenced({ 'dry-run': true });
   assert.ok(!dry.wouldRemove.some((r) => r.id === doc.id), 'cleanup 不能把袋里的原件删掉');
 });
 
-test('collectFileSections 把只有 md 字段的栏目也算进去', async () => {
+test('collectFileTemplates 把只有 md 字段的条目模板也算进去', async () => {
   const store = await import('../../src/core/store.ts');
-  const ids = core.collectFileSections(await store.loadStore()).map((s) => s.id);
-  assert.ok(ids.includes('mdsect'), '只有 md 字段的栏目也该出现在附件中心的栏目筛选里');
+  const ids = core.collectFileTemplates(await store.loadStore()).map((s) => s.id);
+  assert.ok(ids.includes('mdsect'), '只有 md 字段的条目模板也该出现在附件中心的条目模板筛选里');
   assert.ok(ids.includes('mdsect2'));
-  assert.ok(ids.includes('bagsrc'), '每个非 KV 栏目自带 source 袋，都该出现在筛选里');
+  assert.ok(ids.includes('bagsrc'), '每个条目模板自带 source 袋，都该出现在筛选里');
 });
 
 test('fileReferences 传加工过的副本也能命中（不靠对象引用比较）', async () => {
   // 真实坑：早先的判定是 `findFileRecord(store, id) === rec`（对象引用相等）。
   // 而调用方拿到的通常是 listFiles 加工过的**副本**，引用不同 → 静默判成「未引用」。
   // 这里显式传一份结构相同的新对象，必须照样反查到。
-  const sections = await import('../../src/modules/sections/service.ts');
+  const templates = await import('../../src/modules/templates/service.ts');
   const store = await import('../../src/core/store.ts');
   const src = await makeSource('md-src', '副本传参.png', `copy-semantics-${Math.random()}`);
   const pic = await svc.addFile({ path: src, copy: true });
 
   const sid = 'copysect';
-  await sections.addSection({ id: sid, title: '副本栏目', fields: [{ key: 'docs', label: '资料', type: 'file' }] });
-  const e = await entries.addEntry({ section: sid, title: '被引用条目', set: { docs: pic.id } });
+  await templates.addTemplate({ id: sid, title: '副本条目模板', fields: [{ key: 'docs', label: '资料', type: 'file' }] });
+  const e = await entries.addEntry({ template: sid, title: '被引用条目', set: { docs: pic.id } });
 
   const st = await store.loadStore();
   const copy = { ...st.files.find((f) => f.id === pic.id) }; // 全新对象，不是 store 里那个
@@ -469,14 +469,14 @@ test('fileReferences 传加工过的副本也能命中（不靠对象引用比�
  * 两套判据会出现「筛选片里看不到、清理却删了」这种吓人的不一致。
  */
 test('file cleanup：只删未被引用的附件，被引用的原样留下', async () => {
-  const sections = await import('../../src/modules/sections/service.ts');
+  const templates = await import('../../src/modules/templates/service.ts');
   const srcUsed = await makeSource('cleanup-in', '被引用的.pdf', `used-${Math.random()}`);
   const srcFree = await makeSource('cleanup-in', '没人用的.pdf', `free-${Math.random()}`);
   const used = await svc.addFile({ path: srcUsed });
   const free = await svc.addFile({ path: srcFree });
 
-  await sections.addSection({ id: 'clsec', title: '清理栏目', fields: [{ key: 'docs', label: '资料', type: 'file' }] });
-  await entries.addEntry({ section: 'clsec', title: '引用者', set: { docs: used.id } });
+  await templates.addTemplate({ id: 'clsec', title: '清理条目模板', fields: [{ key: 'docs', label: '资料', type: 'file' }] });
+  await entries.addEntry({ template: 'clsec', title: '引用者', set: { docs: used.id } });
 
   // 试运行：只列出会删谁，什么都不动
   const dry = await svc.cleanupUnreferenced({ 'dry-run': true });

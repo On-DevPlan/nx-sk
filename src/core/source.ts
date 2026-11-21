@@ -22,7 +22,7 @@
 //   3. **冲突以新的为准，但旧的留痕**——同名即冲突（同一件事有了新版本）：
 //      时间新的那条是「当前版本」，旧的被标 `superseded` 但**仍留在袋里**。
 import { newId, nowIso } from './ids.ts';
-import { mdImageIds, parseMdImages } from './mdimages.ts';
+import { mdImageIds } from './mdimages.ts';
 import type { SourceItem } from '../shared/fields/types.ts';
 
 export const SOURCE_KINDS = ['text', 'file', 'url'];
@@ -202,11 +202,6 @@ export function normalizeSourceItems(raw: unknown): SourceItem[] | null {
   return resolveSourceConflicts(out);
 }
 
-/** 当前版本（没被取代的）——面板默认只显示这些，旧的留痕但可展开看。 */
-export function currentSourceItems(items: SourceItem[] | null | undefined): SourceItem[] {
-  return (items || []).filter((x) => !x.superseded);
-}
-
 /**
  * 一条 item 的人读摘要（CLI 一行一条、面板清单副标题都用它）。
  *
@@ -234,11 +229,6 @@ export function sourceImageIds(items: SourceItem[] | null | undefined): string[]
     }
   }
   return out;
-}
-
-/** 正文里的 `![alt](f_xxx)` 引用（保序，含外链）。面板解析图片、CLI 渲染都用它。 */
-export function sourceItemImages(text: unknown) {
-  return parseMdImages(text);
 }
 
 /** 人读时间：优先资料自身的时间（at），否则入袋时间。 */

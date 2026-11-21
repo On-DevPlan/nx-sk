@@ -1,37 +1,37 @@
 // 内部资源定位符（locator）的**唯一** parse / format / 等价写法规则。
 //
 // 为什么要有这个文件：nx-sk 里「指向一个内部资源」的文本写法以前散在好几处——
-// 条目结构行的复合串 `<section>:<key>`（core/db/identity.ts）、面板的条目定位文本
+// 条目结构行的复合串 `<template>:<key>`（core/db/identity.ts）、面板的条目定位文本
 // （web/frontend/entryRef.ts）、将来的引用型字段值……各写一份迟早分叉。
 // 这里收成一处：**语法只定义一次**，前后端共用（本文件保持零运行时依赖，
 // 与 shared/fields/types.ts 同一条打包纪律）。
 //
 // 语法（文本形态，可粘给 agent、可进剪贴板）：
-//   nx-sk://section/<sectionId>          栏目
+//   nx-sk://template/<templateId>          条目模板
 //   nx-sk://entry/<entryId>              条目
-//   nx-sk://field/<entryId>/<key>        字段（条目自身结构行；模板字段用 <sectionId> 段，见下）
+//   nx-sk://field/<entryId>/<key>        字段（条目自身结构行；模板字段用 <templateId> 段，见下）
 //   nx-sk://file/<fileId>                附件
 //
 // 旧写法（磁盘上已存的字符串，**格式一字不改**，locator 只做解析/构造层）：
-//   `<sectionId>:<key>`   复合串 = 模板字段（identity.fieldTargetKey / entry_fields.template_field_id
+//   `<templateId>:<key>`   复合串 = 模板字段（identity.fieldTargetKey / entry_fields.template_field_id
 //                         / v1 时代 attachments.target_key 同一口径）——等价于
-//                         `nx-sk://field/<sectionId>/<key>`。
+//                         `nx-sk://field/<templateId>/<key>`。
 //   裸 id（`demo` / `e_1` / `f_1`）  各命令的参数本来就是裸 id，locator 不替换它们。
 //
 // 稳定性红线：parse 对**任意脏输入**返回 null，绝不抛。
 
 /** 定位符指向的资源种类（与 attachments 的内部指针 kind 同一词汇）。 */
-export type LocatorKind = 'section' | 'entry' | 'field' | 'file';
+export type LocatorKind = 'template' | 'entry' | 'field' | 'file';
 
 export const LOCATOR_SCHEME = 'nx-sk://';
 
 /** kind 清单（顺序 = 文档/帮助里的展示顺序）。 */
-export const LOCATOR_KINDS = ['section', 'entry', 'field', 'file'] as const;
+export const LOCATOR_KINDS = ['template', 'entry', 'field', 'file'] as const;
 
-/** 解析结果：按 kind 只填对应的段（field 可能是 entryId 段或 sectionId 段，见文件头）。 */
+/** 解析结果：按 kind 只填对应的段（field 可能是 entryId 段或 templateId 段，见文件头）。 */
 export interface LocatorParts {
   kind: LocatorKind;
-  sectionId?: string;
+  templateId?: string;
   entryId?: string;
   key?: string;
   fileId?: string;
@@ -50,7 +50,7 @@ function isSegment(s: string): boolean {
 
 /**
  * 复合串要挡的「协议样前缀」：`javascript:alert(1)`、`mailto:x@y` 这类文本
- * 语法上恰好长得像 `section:key`，但它们几乎不可能是我们的栏目 id——
+ * 语法上恰好长得像 `template:key`，但它们几乎不可能是我们的条目模板 id——
  * 与其让 resolve 报 NOT_FOUND，不如在解析层就不认它是 locator。
  * （规范形态 `nx-sk://…` 不受影响：scheme 是固定的，kind 段自己把关。）
  */
@@ -59,7 +59,7 @@ const SCHEME_LIKE = new Set([
   'file', 'data', 'mailto', 'javascript', 'about', 'chrome', 'edge', 'vscode',
 ]);
 
-/** 复合串 `<sectionId>:<key>`：恰好一个冒号、两段都合法、不含 `//`（排除 URL scheme）。 */
+/** 复合串 `<templateId>:<key>`：恰好一个冒号、两段都合法、不含 `//`（排除 URL scheme）。 */
 function parseComposite(s: string): LocatorParts | null {
   if (s.includes('://') || s.includes('/')) return null;
   const cut = s.indexOf(':');
@@ -68,7 +68,7 @@ function parseComposite(s: string): LocatorParts | null {
   const b = s.slice(cut + 1);
   if (SCHEME_LIKE.has(a.toLowerCase())) return null;
   if (!isSegment(a) || !isSegment(b)) return null;
-  return { kind: 'field', sectionId: a, key: b };
+  return { kind: 'field', templateId: a, key: b };
 }
 
 /**
@@ -89,12 +89,12 @@ export function parseLocator(s: unknown): LocatorParts | null {
   const segs = tail.split('/');
   if (!segs.every(isSegment)) return null;
   switch (kind) {
-    case 'section':
-      return segs.length === 1 ? { kind, sectionId: segs[0] } : null;
+    case 'template':
+      return segs.length === 1 ? { kind, templateId: segs[0] } : null;
     case 'entry':
       return segs.length === 1 ? { kind, entryId: segs[0] } : null;
     case 'field':
-      // 两段：规范语义是 <entryId>/<key>；<sectionId>/<key> 是模板字段的等价写法
+      // 两段：规范语义是 <entryId>/<key>；<templateId>/<key> 是模板字段的等价写法
       // （由 locatorAliases 与复合串互转），resolve 侧按「先条目行、再字典」消歧。
       return segs.length === 2 ? { kind, entryId: segs[0], key: segs[1] } : null;
     case 'file':
@@ -123,16 +123,16 @@ export function formatLocator(parts: LocatorParts | null | undefined): string {
   if (!parts || typeof parts !== 'object') throw new Error('locator parts 无效');
   const { kind } = parts;
   switch (kind) {
-    case 'section':
-      if (!isSegment(String(parts.sectionId ?? ''))) throw new Error('locator sectionId 无效');
-      return `${LOCATOR_SCHEME}section/${parts.sectionId}`;
+    case 'template':
+      if (!isSegment(String(parts.templateId ?? ''))) throw new Error('locator templateId 无效');
+      return `${LOCATOR_SCHEME}template/${parts.templateId}`;
     case 'entry':
       if (!isSegment(String(parts.entryId ?? ''))) throw new Error('locator entryId 无效');
       return `${LOCATOR_SCHEME}entry/${parts.entryId}`;
     case 'field': {
       const key = String(parts.key ?? '');
       if (!isSegment(key)) throw new Error('locator field key 无效');
-      const head = String(parts.entryId ?? parts.sectionId ?? '');
+      const head = String(parts.entryId ?? parts.templateId ?? '');
       if (!isSegment(head)) throw new Error('locator field 定位段无效');
       return `${LOCATOR_SCHEME}field/${head}/${key}`;
     }
@@ -145,11 +145,11 @@ export function formatLocator(parts: LocatorParts | null | undefined): string {
 }
 
 /**
- * 模板字段复合串 `<sectionId>:<key>` 的**唯一构造规则**
+ * 模板字段复合串 `<templateId>:<key>` 的**唯一构造规则**
  * （identity.fieldTargetKey 与 v3 template_field_id 都走这里，不可能分叉）。
  */
-export function formatFieldComposite(sectionId: unknown, key: unknown): string {
-  return `${String(sectionId)}:${String(key)}`;
+export function formatFieldComposite(templateId: unknown, key: unknown): string {
+  return `${String(templateId)}:${String(key)}`;
 }
 
 /**
@@ -161,9 +161,9 @@ export function locatorAliases(loc: unknown): string[] {
   const parts = typeof loc === 'string' ? parseLocator(loc) : (loc as LocatorParts | null);
   if (!parts) return [];
   switch (parts.kind) {
-    case 'section':
-      // 旧写法就是裸 id（sections 表主键、命令参数同一形态）
-      return parts.sectionId ? [parts.sectionId] : [];
+    case 'template':
+      // 旧写法就是裸 id（templates 表主键、命令参数同一形态）
+      return parts.templateId ? [parts.templateId] : [];
     case 'entry':
       return parts.entryId ? [parts.entryId] : [];
     case 'file':
@@ -172,10 +172,10 @@ export function locatorAliases(loc: unknown): string[] {
       const key = parts.key ?? '';
       if (!key) return [];
       // 复合串 ↔ nx-sk://field/<head>/<key> 互转：head 是 entryId 段时没有旧写法，
-      // 是 sectionId 段（模板字段）时旧写法就是复合串。
-      if (parts.sectionId) {
-        const composite = formatFieldComposite(parts.sectionId, key);
-        const canonical = `${LOCATOR_SCHEME}field/${parts.sectionId}/${key}`;
+      // 是 templateId 段（模板字段）时旧写法就是复合串。
+      if (parts.templateId) {
+        const composite = formatFieldComposite(parts.templateId, key);
+        const canonical = `${LOCATOR_SCHEME}field/${parts.templateId}/${key}`;
         return [composite, canonical];
       }
       return [`${LOCATOR_SCHEME}field/${parts.entryId}/${key}`];

@@ -3,22 +3,23 @@ import type { BlockLayout } from '../../../../shared/blockLayout.ts';
 import type { FieldDef } from '../../../../shared/fields/types.ts';
 import type { SerializedEntry } from '../../../../shared/model.ts';
 
-/** `/api/sections/:id/dump` 的栏目摘要。 */
-export interface SectionDumpInfo {
+/** `/api/templates/:id/dump` 的条目模板摘要。 */
+export interface TemplateDumpInfo {
   id: string;
   title: string;
   description: string;
   order: number;
   template: string | null;
-  kv: boolean;
+  blank?: boolean;
   titleField: string | null;
   titleLabel: string;
+  tags: string[];
   fields: number;
 }
 
-/** `/api/sections/:id/dump` 的响应（外部 JSON 边界）。 */
-export interface SectionDump {
-  section: SectionDumpInfo;
+/** `/api/templates/:id/dump` 的响应（外部 JSON 边界）。 */
+export interface TemplateDump {
+  template: TemplateDumpInfo;
   groups: Array<{ id: string; title: string }>;
   layout: BlockLayout | null;
   fields: FieldDef[];
@@ -33,7 +34,7 @@ export interface Draft {
   values: Record<string, unknown>;
 }
 
-/** 单栏目导入预览里的一条冲突。 */
+/** 单条目模板导入预览里的一条冲突。 */
 export interface PreviewConflict {
   id: string;
   title: string;
@@ -43,14 +44,14 @@ export interface PreviewConflict {
   copyTitle?: string;
 }
 
-/** `/api/sections/:id/import.zip?dry-run=1` 的预览（外部 JSON 边界）。 */
+/** `/api/templates/:id/import.zip?dry-run=1` 的预览（外部 JSON 边界）。 */
 export interface ImportPreview {
   status: string;
   fileName?: string;
   encrypted: boolean;
   exportedAt?: string;
   withSecrets: boolean;
-  section: {
+  template: {
     source: { id: string; title: string };
     targetId: string;
     exists: boolean;
@@ -69,8 +70,8 @@ export interface ImportPreview {
 export interface ZipState { fileName: string; buffer: ArrayBuffer; preview: ImportPreview; passphrase: string }
 export interface AskState { fileName: string; buffer: ArrayBuffer }
 
-/** `/api/sections/:id/import.zip` 的落地结果（面板只读 entries 四个数）。 */
-export interface ApplySectionResult {
+/** `/api/templates/:id/import.zip` 的落地结果（面板只读 entries 四个数）。 */
+export interface ApplyTemplateResult {
   entries: { added: number; copied: number; overwritten: number; skipped: number };
 }
 
@@ -84,14 +85,14 @@ export const norm = (x: unknown) => (x === null || x === undefined ? '' : (typeo
 
 /**
  * 选中条目后把 `?entry=<id>` 同步进地址栏，让当前地址本身就能分享/新开标签。
- * 只在地址栏已经指向这个栏目时替换——兜底选出来的栏目仍然不补 hash（见 App.tsx）。
+ * 只在地址栏已经指向这个条目模板时替换——兜底选出来的条目模板仍然不补 hash（见 App.tsx）。
  */
-export function syncEntryHash(sectionId: string, entryId: string): void {
-  if (!sectionId) return;
-  const base = `#/${encodeURIComponent(sectionId)}`;
+export function syncEntryHash(templateId: string, entryId: string): void {
+  if (!templateId) return;
+  const base = `#/${encodeURIComponent(templateId)}`;
   const hash = window.location.hash || '';
   if (hash !== base && !hash.startsWith(`${base}?`)) return;
-  // entryId 为空 = 回到栏目本身（删掉当前条目后地址栏不该还挂着它）。
+  // entryId 为空 = 回到条目模板本身（删掉当前条目后地址栏不该还挂着它）。
   const next = entryId ? `${base}?entry=${encodeURIComponent(entryId)}` : base;
   if (hash !== next) window.history.replaceState(null, '', next);
 }

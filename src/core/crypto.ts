@@ -1,4 +1,4 @@
-// 密文原语：AES-256-GCM。只做算法，不认识 store、不认识栏目。
+// 密文原语：AES-256-GCM。只做算法，不认识 store、不认识条目模板。
 import { createCipheriv, createDecipheriv, createHash, randomBytes, scryptSync } from 'node:crypto';
 import { blocked, badInput } from './errors.ts';
 

@@ -1,0 +1,424 @@
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import { useTempHome } from '../helpers.mjs';
+
+await useTempHome();
+
+const service = await import('../../src/modules/templates/service.ts');
+const { mergeTemplate } = await import('../../src/core/fields.ts');
+const { boardGroupsOf, groupKeysOf } = await import('../../src/shared/fields/structure.ts');
+const { renderTemplateChange } = await service;
+
+// 回归：`removed` 在两条路径上**形状不同**——removeTemplate 给的是对象
+// `{id,title,entries}`，updateTemplate 给的是**被删字段 key 的数组**。
+// 数组恒为真值，所以早先的 `if (d.removed)` 会让 `template update` 永远走删除分支，
+// 打印出「已删除条目模板 undefined」，而且 `.entries` 还会取到 `Array.prototype.entries`，
+// 把 `function entries() { [native code] }` 打进人类可读输出。
+test('update 的 removed 是数组时，不能走「已删除条目模板」分支', () => {
+  const out = renderTemplateChange({
+    status: 'ok', id: 'job', changed: ['fields'], added: ['skills'], removed: [], snapshot: 'S',
+  });
+  assert.match(out, /已更新条目模板 job/);
+  assert.match(out, /新增字段 skills/);
+  assert.ok(!out.includes('已删除条目模板'), `不该出现「已删除条目模板」，实际: ${out}`);
+  assert.ok(!out.includes('[native code]'), `不该把 Array.prototype.entries 打进输出，实际: ${out}`);
+});
+
+test('没有字段增删时也不误报删除', () => {
+  const out = renderTemplateChange({
+    status: 'ok', id: 'job', changed: ['order'], added: [], removed: [], snapshot: 'S',
+  });
+  assert.match(out, /已更新条目模板 job：order/);
+  assert.ok(!out.includes('已删除条目模板'));
+});
+
+test('真删字段时报「删除字段」，仍不是「已删除条目模板」', () => {
+  const out = renderTemplateChange({
+    status: 'ok', id: 'job', changed: ['fields'], added: [], removed: ['skills'], snapshot: 'S',
+  });
+  assert.match(out, /删除字段 skills/);
+  assert.ok(!out.includes('已删除条目模板'));
+});
+
+test('remove 的对象形状仍走删除分支（别把修复改过头）', () => {
+  const out = renderTemplateChange({
+    status: 'ok', removed: { id: 'job', title: '求职', entries: 3 }, snapshot: 'S',
+  });
+  assert.match(out, /已删除条目模板 job（3 条条目落到空白模板，内容未动）/);
+});
+
+test('reorderTemplates：按 ids 重排并写成 10/20/30，未列出的排在后面', async () => {
+  await service.addTemplate({ id: 'ord-a', title: '排序A', preset: 'demo' });
+  await service.addTemplate({ id: 'ord-b', title: '排序B', preset: 'demo' });
+  await service.addTemplate({ id: 'ord-c', title: '排序C', preset: 'demo' });
+
+  const r = await service.reorderTemplates(['ord-c', 'ord-a']);
+  assert.equal(r.status, 'ok');
+  assert.equal(r.ids[0], 'ord-c');
+  assert.equal(r.ids[1], 'ord-a');
+  assert.ok(r.ids.includes('ord-b'), '没列出的不能丢');
+  const after = await service.listTemplates();
+  const order = after.templates.map((t) => t.id);
+  assert.deepEqual(order.slice(0, 2), ['ord-c', 'ord-a']);
+  assert.equal(after.templates.find((t) => t.id === 'ord-c').order, 10);
+  assert.equal(after.templates.find((t) => t.id === 'ord-a').order, 20);
+
+  // 再拖一次：原位不动也要能落盘成稳定顺序
+  await service.reorderTemplates(['ord-c', 'ord-a', 'ord-b']);
+  const again = await service.listTemplates();
+  assert.deepEqual(again.templates.slice(0, 3).map((t) => t.id), ['ord-c', 'ord-a', 'ord-b']);
+
+  await assert.rejects(service.reorderTemplates(['__blank__']), /空白条目模板/);
+  await assert.rejects(service.reorderTemplates(['no-such']), /找不到条目模板/);
+});
+
+test('addTemplate：没给 order 时自动排到末尾（表单不再让用户填数字）', async () => {
+  await service.addTemplate({ id: 'append-a', title: '追加A', preset: 'demo' });
+  await service.addTemplate({ id: 'append-b', title: '追加B', preset: 'demo' });
+  const list = await service.listTemplates();
+  const a = list.templates.find((t) => t.id === 'append-a').order;
+  const b = list.templates.find((t) => t.id === 'append-b').order;
+  assert.ok(b > a, `新模板应排在已有之后：${a} → ${b}`);
+});
+
+// —— 模板增量合并 / template sync ——
+// 背景：条目模板字段字典是持久化数据，模板演进（例如给求职加 `file` 类型的「附件资料」组）
+// **不会回溯**到已建条目模板，老条目模板里看不到上传入口。template sync 用来补这个缺口。
+
+test('mergeTemplate 只增不改：补进缺失字段、保留已有定义与自定义字段', () => {
+  // 0.42：组是字段（type='group' + keys），条目模板侧与预置模板侧都只有 fields。
+  const entryTemplate = {
+    fields: [
+      { key: 'a', label: '自定义标题A', type: 'group', keys: ['f1'] },
+      { key: 'f1', label: '我自己改过的标签', type: 'text' },
+      { key: 'z', label: '自定义组', type: 'group', keys: ['custom'] },
+      { key: 'custom', label: '自定义字段', type: 'text' },
+    ],
+  };
+  const preset = {
+    groups: [{ id: 'a', title: '模板里的A' }, { id: 'b', title: '模板里的B' }],
+    fields: [
+      { key: 'f1', label: '模板标签', type: 'text', group: 'a' },
+      { key: 'f2', label: '新字段', type: 'text', group: 'b' },
+    ],
+  };
+  const r = mergeTemplate(entryTemplate, preset);
+  // 已有字段的定义（label）与位置不动
+  const leaves = r.fields.filter((f) => f.type !== 'group');
+  assert.equal(leaves[0].key, 'f1');
+  assert.equal(leaves[0].label, '我自己改过的标签');
+  // 自定义字段保留
+  assert.ok(r.fields.some((f) => f.key === 'custom'));
+  // 新字段被补进来（组也是字段，所以新增组 b 自己也在 addedFields 里）
+  assert.deepEqual(r.addedFields, ['b', 'f2']);
+  assert.deepEqual(r.addedGroups, ['b']);
+  // 分组：模板顺序优先（a、b），条目模板已有的沿用自身标题，自定义分组 z 附在后面
+  assert.deepEqual(boardGroupsOf(r.fields).map((g) => g.id), ['a', 'b', 'z']);
+  assert.equal(boardGroupsOf(r.fields)[0].title, '自定义标题A');
+});
+
+test('mergeTemplate 字段插到「模板序前驱」之后，不会被甩到末尾', () => {
+  const entryTemplate = {
+    fields: [
+      { key: 'g', label: 'g', type: 'group', keys: ['x1', 'x3'] },
+      { key: 'x1', type: 'text' },
+      { key: 'x3', type: 'text' },
+    ],
+  };
+  const preset = {
+    groups: [{ id: 'g', title: 'g' }],
+    fields: [
+      { key: 'x1', type: 'text', group: 'g' },
+      { key: 'x2', type: 'text', group: 'g' }, // 缺失，应插在 x1 与 x3 之间
+      { key: 'x3', type: 'text', group: 'g' },
+    ],
+  };
+  const r = mergeTemplate(entryTemplate, preset);
+  // 字典顺序：组字段在前，成员按合并后的 keys 顺序（新增的 x2 被并进 g 的 keys）
+  assert.deepEqual(r.fields.map((f) => f.key), ['g', 'x1', 'x2', 'x3']);
+  assert.deepEqual(groupKeysOf(r.fields.find((f) => f.key === 'g')), ['x1', 'x2', 'x3']);
+});
+
+test('template sync 把模板新增的 file 字段/分组补给老条目模板，且可重复执行', async () => {
+  // 造一个「老条目模板」：从 job 模板建，然后删掉文件字段与 files 分组（模拟模板演进前建的条目模板）
+  await service.addTemplate({ id: 'jobsync', title: '求职(旧)', preset: 'job' });
+  await service.updateTemplate('jobsync', {
+    fields: [
+      { key: 'name', label: '姓名', type: 'text', group: 'basic' },
+    ],
+    groups: [{ id: 'basic', title: '基本信息' }],
+  });
+
+  const before = await service.getTemplate('jobsync');
+  assert.ok(!before.fieldList.some((f) => f.type === 'file'), '造数据：不该还有 file 字段');
+
+  const r = await service.syncTemplate('jobsync');
+  assert.equal(r.status, 'ok');
+  assert.ok(r.addedFields.includes('resumeFile'));
+  assert.ok(r.addedFields.includes('avatar'));
+  assert.ok(r.addedGroups.includes('files'));
+
+  const after = await service.getTemplate('jobsync');
+  assert.ok(after.fieldList.some((f) => f.key === 'resumeFile' && f.type === 'file'));
+  assert.ok(after.fieldList.some((f) => f.key === 'avatar' && f.type === 'file'));
+  assert.ok(after.groupList.some((g) => g.id === 'files'));
+  // 原有字段没被动
+  assert.equal(after.fieldList.find((f) => f.key === 'name').label, '姓名');
+
+  // 幂等：再跑一次没有可补的
+  const again = await service.syncTemplate('jobsync');
+  assert.equal(again.upToDate, true);
+  assert.deepEqual(again.addedFields, []);
+});
+
+// v3：sync 对非模板条目模板不再报错——阶段 1 跳过、阶段 2 照做（字典 → 存量条目结构行）。
+// 「add-field 之后跑 sync 把新行补进条目」正是这条命令在写时复制下的主要用途。
+test('template sync 非模板条目模板：把字典里条目缺的行补进存量条目（只增不改）', async () => {
+  const entries = await import('../../src/modules/entries/service.ts');
+  await service.addTemplate({ id: 'customsec', title: '自定义', fields: [{ key: 'a', label: 'A', type: 'text' }] });
+  const e = await entries.addEntry({ template: 'customsec', title: '一条', set: { a: '1' } });
+  assert.equal(e.status, 'ok');
+
+  // 字典加字段：条目**不会自动**长出新行（模板只初始化）
+  await service.updateTemplate('customsec', { 'add-field': { key: 'b', label: 'B', type: 'text' } });
+  let got = await entries.getEntry('一条', { template: 'customsec' });
+  assert.equal('b' in got.values, false, 'add-field 之后存量条目不该立刻看到 b');
+
+  // sync 第二阶段：把缺的行补进去
+  const r = await service.syncTemplate('customsec');
+  assert.equal(r.status, 'ok');
+  assert.equal(r.upToDate, false);
+  assert.ok(r.fieldsAdded >= 1, JSON.stringify(r));
+
+  got = await entries.getEntry('一条', { template: 'customsec' });
+  assert.equal(got.values.b, null, 'sync 之后条目长出 b 行（值为空）');
+  assert.ok(got.missing.some((m) => m.key === 'b'), 'b 进入未填清单');
+
+  // 幂等：再跑一次没有可补的
+  const again = await service.syncTemplate('customsec');
+  assert.equal(again.upToDate, true);
+});
+
+test('renderTemplateChange 覆盖 sync / upToDate 分支', () => {
+  const synced = renderTemplateChange({ status: 'ok', id: 'job', addedGroups: ['files'], addedFields: ['resumeFile'], snapshot: 'S' });
+  assert.match(synced, /已同步条目模板 job/);
+  assert.match(synced, /新增字段 resumeFile/);
+  const up = renderTemplateChange({ status: 'ok', upToDate: true, id: 'job' });
+  assert.match(up, /已是最新/);
+});
+
+// —— 模板漂移（只报告，不自动改）——
+// 「只增不改」的代价是：模板改了默认 label/hint 时**完全无声**，
+// 用户会以为「同步过了 = 跟模板一致」。这里钉住两件事：
+// 1) 差异要算出来并明说不会自动改；2) 等价定义不能被误报成差异（否则噪音淹没真差异）。
+
+test('mergeTemplate 报告漂移：同名字段定义不同就列出来，但条目模板侧定义不动', () => {
+  const entryTemplate = {
+    fields: [
+      { key: 'a', label: 'A', type: 'group', keys: ['f1'] },
+      { key: 'f1', label: '我改过的', type: 'text' },
+    ],
+  };
+  const preset = {
+    groups: [{ id: 'a', title: 'A' }],
+    fields: [{ key: 'f1', label: '模板标签', type: 'text', group: 'a', hint: '模板提示' }],
+  };
+  const r = mergeTemplate(entryTemplate, preset);
+  assert.deepEqual(r.addedFields, []);
+  assert.equal(r.changedFields.length, 1);
+  assert.equal(r.changedFields[0].key, 'f1');
+  assert.ok(r.changedFields[0].diff.includes('label'), JSON.stringify(r.changedFields[0]));
+  assert.ok(r.changedFields[0].diff.includes('hint'), JSON.stringify(r.changedFields[0]));
+  // 条目模板侧原样保留（同步绝不覆盖用户改过的定义）
+  assert.equal(r.fields.find((f) => f.key === 'f1').label, '我改过的');
+});
+
+test('mergeTemplate：等价定义不算漂移（fill 缺省 = normal、options 缺失 = 空）', () => {
+  const entryTemplate = { fields: [{ key: 'g', type: 'group', keys: ['x'], label: 'g' }, { key: 'x', label: 'X', type: 'text' }] };
+  const preset = { groups: [], fields: [{ key: 'x', label: 'X', type: 'text', group: 'g', fill: 'normal', options: [] }] };
+  assert.deepEqual(mergeTemplate(entryTemplate, preset).changedFields, []);
+});
+
+test('renderTemplateChange：漂移单独提示，并写明「只增不改」怎么跟进', () => {
+  const out = renderTemplateChange({
+    status: 'ok', upToDate: true, id: 'job',
+    addedFields: [], addedGroups: [],
+    changedFields: [{ key: 'phone', diff: ['label'] }],
+  });
+  assert.match(out, /已是最新/);
+  assert.match(out, /1 个字段的预置定义已变/);
+  assert.match(out, /phone: label/);
+  assert.match(out, /只增不改/);
+  assert.match(out, /--fields/, '要告诉用户怎么才能真正跟进模板');
+});
+
+test('renderTemplateChange：没有漂移就不打印提示（老形状也不炸）', () => {
+  const out = renderTemplateChange({ status: 'ok', upToDate: true, id: 'job' });
+  assert.ok(!out.includes('模板定义已变'), out);
+});
+
+test('bootstrap 下发 fieldTypes：面板的类型下拉框据此渲染，不再各抄一份', async () => {
+  const { bootstrapInfo } = await import('../../src/modules/system/service.ts');
+  const { FIELD_TYPES } = await import('../../src/core/fields.ts');
+  const boot = await bootstrapInfo();
+  assert.deepEqual(boot.fieldTypes, FIELD_TYPES);
+  assert.ok(boot.fieldTypes.includes('file'), 'file 类型必须在列表里');
+});
+
+// —— deploy 模板：Docker / K8s 规范资源 ——
+// 一个条目 = 一份可复用的配置文件。光存正文不够：还要「放哪」「哪些值要替换」
+// 「什么场景用」—— 缺了后三项，正文只是一段没有上下文的 YAML，下次没法照着用。
+
+test('deploy 模板：正文是 textarea，kind 是带候选的 select', async () => {
+  const { getTemplate } = await import('../../src/core/fields.ts');
+  const t = getTemplate('deploy');
+  assert.ok(t, 'deploy 模板应存在');
+  const byKey = new Map(t.fields.map((x) => [x.key, x]));
+  assert.equal(byKey.get('content').type, 'textarea', '正文必须是多行文本');
+  assert.equal(byKey.get('kind').type, 'select');
+  assert.ok(byKey.get('kind').options.includes('Dockerfile'));
+  assert.ok(byKey.get('kind').options.includes('k8s-deployment'));
+  assert.ok(byKey.has('path'), '要有「建议落盘路径」');
+  assert.ok(byKey.has('vars'), '要有「需替换的变量」');
+  assert.equal(t.titleField, 'name');
+});
+
+test('deploy 条目模板：YAML 正文写入后原样读回（换行与缩进不能被改写）', async () => {
+  const entries = await import('../../src/modules/entries/service.ts');
+  await service.addTemplate({ id: 'deploytest', title: '部署配置', preset: 'deploy' });
+  const yaml = 'apiVersion: apps/v1\nkind: Deployment\nspec:/n  replicas: 1';
+  await entries.addEntry({
+    template: 'deploytest',
+    title: 'node-web 部署',
+    set: { kind: 'k8s-deployment', content: yaml },
+  });
+  const got = await entries.getEntry('node-web 部署', { template: 'deploytest' });
+  assert.equal(got.values.content, yaml);
+});
+
+// —— 条目模板结构（分组 + 字段）在面板里可增删改序 ——
+// 背景：面板过去只能「加字段」，分组连建都建不了，结构实际上只有 CLI 能改。
+// 这批操作是面板与 CLI 共用的同一份规则，钉住三条：**id 唯一**、**非空分组不给删**、
+// **字段 key 不可改**（值按 key 存）。
+
+test('add-group：建分组；重复 id 冲突而不是覆盖', async () => {
+  await service.addTemplate({ id: 'structsec', title: '结构', fields: [{ key: 'a', label: 'A', type: 'text', group: 'g1' }], groups: [{ id: 'g1', title: '一组' }] });
+  const r = await service.updateTemplate('structsec', { 'add-group': { id: 'g2', title: '二组' } });
+  assert.equal(r.status, 'ok');
+  const s = await service.getTemplate('structsec');
+  assert.deepEqual(s.groupList.map((g) => g.id), ['g1', 'g2', 'sourceGroup']);
+  assert.equal(s.groupList.find((g) => g.id === 'g2').title, '二组');
+  await assert.rejects(
+    service.updateTemplate('structsec', { 'add-group': { id: 'g2', title: '又来' } }),
+    /分组已存在/,
+  );
+});
+
+test('rename-group：改名字；换 id 时组里字段的引用跟着改', async () => {
+  await service.updateTemplate('structsec', { 'add-field': { key: 'b', label: 'B', type: 'text', group: 'g2' } });
+  await service.updateTemplate('structsec', { 'rename-group': { id: 'g2', title: '第二组' } });
+  let s = await service.getTemplate('structsec');
+  assert.equal(s.groupList.find((g) => g.id === 'g2').title, '第二组');
+
+  await service.updateTemplate('structsec', { 'rename-group': { id: 'g2', title: '联系方式', newId: 'reach' } });
+  s = await service.getTemplate('structsec');
+  assert.ok(s.groupList.some((g) => g.id === 'reach' && g.title === '联系方式'), JSON.stringify(s.groupList));
+  assert.ok(!s.groupList.some((g) => g.id === 'g2'), '旧 id 不该留着');
+  // 字段跟着改组：不然整组字段会从表单里消失
+  assert.equal(s.fieldList.find((f) => f.key === 'b').group, 'reach');
+});
+
+test('rename-group：分组不存在 / 空名字都报错', async () => {
+  await assert.rejects(service.updateTemplate('structsec', { 'rename-group': { id: 'nope', title: 'X' } }), /分组不存在/);
+  await assert.rejects(service.updateTemplate('structsec', { 'rename-group': { id: 'reach', title: '  ' } }), /新名字不能为空/);
+});
+
+test('move-group：换顺序；已在头尾时报清楚', async () => {
+  const r = await service.updateTemplate('structsec', { 'move-group': { id: 'reach', dir: 'up' } });
+  assert.ok(r.ops[0].includes('上移'), JSON.stringify(r.ops));
+  const s = await service.getTemplate('structsec');
+  assert.equal(s.groupList[0].id, 'reach');
+  await assert.rejects(service.updateTemplate('structsec', { 'move-group': { id: 'reach', dir: 'up' } }), /已经是第一个/);
+  await assert.rejects(service.updateTemplate('structsec', { 'move-group': { id: 'nope', dir: 'down' } }), /分组不存在/);
+});
+
+test('remove-group：非空分组拦下来并报出字段；内置「原始资料」不给删；空组可删', async () => {
+  await assert.rejects(
+    service.updateTemplate('structsec', { 'remove-group': 'reach' }),
+    /分组 reach 里还有 1 个字段：b/,
+  );
+  await assert.rejects(service.updateTemplate('structsec', { 'remove-group': 'sourceGroup' }), /内置分组/);
+  await assert.rejects(service.updateTemplate('structsec', { 'remove-group': 'nope' }), /分组不存在/);
+
+  // 搬走字段后就能删了
+  await service.updateTemplate('structsec', { 'set-field': { key: 'b', group: 'g1' } });
+  const r = await service.updateTemplate('structsec', { 'remove-group': 'reach' });
+  assert.ok(r.ops.some((x) => x.includes('删除分组 reach')), JSON.stringify(r.ops));
+  const s = await service.getTemplate('structsec');
+  assert.ok(!s.groupList.some((g) => g.id === 'reach'));
+});
+
+test('set-field：改标签 / 类型 / 分组 / 提示都能落盘，并在 ops 里报出新旧值', async () => {
+  const r = await service.updateTemplate('structsec', { 'set-field': { key: 'a', label: 'A改', hint: '提示', group: 'g1' } });
+  assert.ok(r.ops[0].includes('标签 A → A改'), JSON.stringify(r.ops));
+  const s = await service.getTemplate('structsec');
+  const f = s.fieldList.find((x) => x.key === 'a');
+  assert.equal(f.label, 'A改');
+  assert.equal(f.hint, '提示');
+});
+
+test('set-field：key 不能改 —— 值按 key 存，只有「新增字段再搬值」这一条路', async () => {
+  // 传一个不存在的 key = 找不到字段，而不是「改名为新 key」
+  await assert.rejects(service.updateTemplate('structsec', { 'set-field': { key: 'zz', label: 'A' } }), /字段不存在/);
+  const s = await service.getTemplate('structsec');
+  assert.ok(s.fieldList.some((f) => f.key === 'a'), '原 key 必须还在');
+  assert.ok(!s.fieldList.some((f) => f.key === 'zz'), '不该凭空多出 zz');
+});
+
+test('move-field：在自己的分组内换位置；到头报错', async () => {
+  await service.updateTemplate('structsec', { 'add-field': { key: 'c', label: 'C', type: 'text', group: 'g1' } });
+  const before = (await service.getTemplate('structsec')).fieldList.filter((f) => f.group === 'g1').map((f) => f.key);
+  assert.ok(before.includes('a') && before.includes('c'));
+  await service.updateTemplate('structsec', { 'move-field': { key: 'c', dir: 'up' } });
+  const after = (await service.getTemplate('structsec')).fieldList.filter((f) => f.group === 'g1').map((f) => f.key);
+  assert.ok(after.indexOf('c') < before.indexOf('c'), `${before} → ${after}`);
+  await assert.rejects(service.updateTemplate('structsec', { 'move-field': { key: 'nope', dir: 'up' } }), /字段不存在/);
+  await assert.rejects(service.updateTemplate('structsec', { 'move-field': { key: 'c', dir: 'sideways' } }), /dir 只能是 up \/ down/);
+});
+
+test('renderTemplateChange：结构改动按条打印，而不是只说「fields, groups」', () => {
+  const out = renderTemplateChange({
+    status: 'ok', id: 'demo', changed: ['groups'], added: [], removed: [], fillChanged: [],
+    ops: ['新增分组 contact（联系信息）', '字段 phone：分组 contact → reach'],
+  });
+  assert.match(out, /新增分组 contact/);
+  assert.match(out, /字段 phone：分组 contact → reach/);
+});
+
+test('bootstrap 下发 builtin：面板据此把「原始资料」标成不可删', async () => {
+  const { bootstrapInfo } = await import('../../src/modules/system/service.ts');
+  const boot = await bootstrapInfo();
+  assert.equal(boot.builtin.group, 'sourceGroup');
+  assert.equal(boot.builtin.field, 'source');
+});
+
+test('entry get 把多行正文按行拆开（否则整段从第 0 列掉出去）', async () => {
+  const entries = await import('../../src/modules/entries/service.ts');
+  const out = entries.renderEntryGet({
+    id: 'e1',
+    title: 'node-web 部署',
+    template: 'deploy',
+    mask: false,
+    completeness: { filled: 1, total: 1, ratio: 100 },
+    values: { content: 'line1\nline2' },
+    missing: [],
+    excluded: [],
+  });
+  const lines = out.split('\n');
+  const i = lines.findIndex((l) => l.includes('line1'));
+  assert.ok(i >= 0, out);
+  assert.ok(lines[i + 1].trim() === 'line2', out);
+  assert.ok(lines[i + 1].startsWith(' '), `续行要缩进到内容列，实际: ${JSON.stringify(lines[i + 1])}`);
+});
+
+

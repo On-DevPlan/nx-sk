@@ -7,24 +7,24 @@ import { useTempHome } from '../helpers.mjs';
 await useTempHome('nx-sk-res-');
 
 const store = await import('../../src/core/store.ts');
-const sections = await import('../../src/modules/sections/service.ts');
+const templates = await import('../../src/modules/templates/service.ts');
 const entries = await import('../../src/modules/entries/service.ts');
 const res = await import('../../src/modules/resources/service.ts');
 
 await store.saveStore(await store.loadStore());
 
-await sections.addSection({
-  id: 'ressec', title: '资源栏目',
+await templates.addTemplate({
+  id: 'ressec', title: '资源条目模板',
   fields: [
     { key: 'title2', label: '标题', type: 'text', group: 'g' },
     { key: 'pw', label: '口令', type: 'secret', group: 'g' },
   ],
   groups: [{ id: 'g', title: 'G' }],
 });
-const e1 = await entries.addEntry({ section: 'ressec', title: '甲条目', set: { title2: '甲条目', pw: 's3cret-口令' } });
-await entries.addEntry({ section: 'ressec', title: '乙条目', set: { title2: '乙条目' } });
+const e1 = await entries.addEntry({ template: 'ressec', title: '甲条目', set: { title2: '甲条目', pw: 's3cret-口令' } });
+await entries.addEntry({ template: 'ressec', title: '乙条目', set: { title2: '乙条目' } });
 // 扩展字段（不在字典的行）
-await entries.addEntryField(e1.id, { section: 'ressec', key: 'extra', label: '扩展键', type: 'text', group: 'g' });
+await entries.addEntryField(e1.id, { template: 'ressec', key: 'extra', label: '扩展键', type: 'text', group: 'g' });
 // 附件记录（没有物理文件也要能 resolve 出「记录在、文件丢」）
 await store.mutateStore((s) => {
   s.files.push({ id: 'f_res', category: 'document', name: 'res.pdf', rel: 'document/res.pdf',
@@ -47,33 +47,33 @@ test('search：四类都能命中，locator 可再被 parse 回去', async () =>
   const byKind = await res.searchResources({ kind: 'file' });
   assert.ok(byKind.items.every((x) => x.kind === 'file') && byKind.items.some((x) => x.title === 'res.pdf'));
 
-  const bySection = await res.searchResources({ section: 'ressec', kind: 'field' });
-  const keys = bySection.items.map((x) => x.key);
+  const byTemplate = await res.searchResources({ template: 'ressec', kind: 'field' });
+  const keys = byTemplate.items.map((x) => x.key);
   assert.ok(keys.includes('title2') && keys.includes('pw'), `字典字段要能搜到：${keys}`);
   assert.ok(keys.includes('extra'), '条目扩展行也要能搜到');
-  assert.ok(bySection.items.every((x) => x.sectionId === 'ressec'), '--section 限定生效');
+  assert.ok(byTemplate.items.every((x) => x.templateId === 'ressec'), '--template 限定生效');
 
-  const notFoundSec = await res.searchResources({ section: 'nope' }).catch((e) => e);
+  const notFoundSec = await res.searchResources({ template: 'nope' }).catch((e) => e);
   assert.equal(notFoundSec.code, 'NOT_FOUND');
 });
 
-test('resolve：section / entry / file 的摘要与存在性', async () => {
-  const sec = await res.resolveLocator('nx-sk://section/ressec');
-  assert.equal(sec.kind, 'section');
+test('resolve：template / entry / file 的摘要与存在性', async () => {
+  const sec = await res.resolveLocator('nx-sk://template/ressec');
+  assert.equal(sec.kind, 'template');
   assert.equal(sec.exists, true);
   assert.equal(sec.entryCount, 2);
   assert.deepEqual(sec.aliases, ['ressec']);
 
   const ent = await res.resolveLocator(`nx-sk://entry/${e1.id}`);
   assert.equal(ent.title, '甲条目');
-  assert.equal(ent.sectionTitle, '资源栏目');
+  assert.equal(ent.templateTitle, '资源条目模板');
   assert.ok(ent.completeness && typeof ent.completeness.ratio === 'number');
 
   const file = await res.resolveLocator('nx-sk://file/f_res');
   assert.equal(file.name, 'res.pdf');
   assert.equal(file.physicalExists, false, '台账在、物理文件不在要如实报告');
 
-  await assert.rejects(res.resolveLocator('nx-sk://section/ghost'), (e) => e.code === 'NOT_FOUND');
+  await assert.rejects(res.resolveLocator('nx-sk://template/ghost'), (e) => e.code === 'NOT_FOUND');
   await assert.rejects(res.resolveLocator('nx-sk://entry/e_ghost'), (e) => e.code === 'NOT_FOUND');
   await assert.rejects(res.resolveLocator('乱七八糟'), (e) => e.code === 'INVALID_INPUT');
 });
@@ -109,7 +109,7 @@ test('resolve：field 三类形态——条目行值（密文默认打码）、�
 test('search scope=debug（#21 面板口径）：只出数据位置，字段命中带 entryId；默认口径不回归', async () => {
   const dbg = await res.searchResources({ q: '口令', scope: 'debug' });
   assert.ok(dbg.count >= 1, '条目上的「口令」字段行要能搜到');
-  assert.ok(dbg.items.every((x) => x.kind !== 'section'), '栏目命中不出现');
+  assert.ok(dbg.items.every((x) => x.kind !== 'template'), '条目模板命中不出现');
   assert.ok(dbg.items.every((x) => !(x.kind === 'field' && !x.entryId)), '模板字段（结构）命中不出现');
   const pwHit = dbg.items.find((x) => x.kind === 'field' && x.key === 'pw');
   assert.equal(pwHit.entryId, e1.id, '字段命中 = 条目-字段位置');
@@ -120,14 +120,14 @@ test('search scope=debug（#21 面板口径）：只出数据位置，字段命�
   const plain = await res.searchResources({ q: '口令' });
   assert.ok(plain.items.some((x) => x.kind === 'field' && !x.entryId), '默认口径仍出模板字段（侧栏三类检索不回归）');
   const all = await res.searchResources({ scope: 'debug' });
-  assert.ok(all.items.every((x) => x.kind !== 'section'), '无关键字时同样只出数据位置');
+  assert.ok(all.items.every((x) => x.kind !== 'template'), '无关键字时同样只出数据位置');
 });
 
 test('resolve-batch：一次拿回全部，坏链不抛（每项自带 ok/error），空项跳过，值一律打码口径', async () => {
   const d = await res.resolveBatch({ refs: [
     `nx-sk://field/${e1.id}/pw`,
     'nx-sk://entry/e_ghost',
-    'nx-sk://section/ressec',
+    'nx-sk://template/ressec',
     '',
   ] });
   assert.equal(d.count, 3, '空项跳过');
@@ -142,7 +142,7 @@ test('resolve-batch：一次拿回全部，坏链不抛（每项自带 ok/error�
 
   const empty = await res.resolveBatch({});
   assert.equal(empty.count, 0);
-  const notArray = await res.resolveBatch({ refs: 'nx-sk://section/ressec' });
+  const notArray = await res.resolveBatch({ refs: 'nx-sk://template/ressec' });
   assert.equal(notArray.count, 0, 'refs 不是数组就按空处理');
 });
 
@@ -150,7 +150,7 @@ test('CLI 渲染不炸且带 locator', async () => {
   const s = await res.searchResources({ q: '甲' });
   const text = res.renderResourceSearch(s);
   assert.ok(text.includes('nx-sk://entry/'), text);
-  const r = await res.resolveLocator('nx-sk://section/ressec');
-  assert.ok(res.renderResourceResolve(r).includes('资源栏目'));
+  const r = await res.resolveLocator('nx-sk://template/ressec');
+  assert.ok(res.renderResourceResolve(r).includes('资源条目模板'));
 });
 

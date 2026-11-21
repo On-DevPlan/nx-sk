@@ -4,7 +4,7 @@
 // 为什么需要它：字段字典只说「有哪些字段、属于哪个分组」，说的是**内容**；
 // 「这些块在面板里怎么摆」（顺序 / 跨列 / 高度 / 在窄屏上怎么折）是**显示关系**，
 // 是另一件事。两件事混在一份数据里，任何一次拖拽都会变成对字段字典的写入，
-// 于是「改版式」和「改结构」再也分不开。所以版式单独存成 `section.layout`：
+// 于是「改版式」和「改结构」再也分不开。所以版式单独存成 `template.layout`：
 //
 //   { v: 1, mode: 'grid' | 'flow', panels: [分组id…], groups: { 分组id: { collapsed, layouts } } }
 //
@@ -16,7 +16,7 @@
 // 三方共用同一套「默认怎么摆」「字段增删后怎么自愈」的规则——这类规则一旦有
 // 两份实现，必然漂移成「面板上好好的，CLI 读出另一套」。
 //
-// 0.42：分组不再是栏目上的数组，而是字段字典里 type='group' 的字段；
+// 0.42：分组不再是条目模板上的数组，而是字段字典里 type='group' 的字段；
 // 本文件只从 fields 推导（boardGroupsOf），不认第二种结构。
 import { boardGroupsOf } from './fields/structure.ts';
 
@@ -38,7 +38,7 @@ export interface GroupLayout {
   layouts: Record<string, GridItem[]>;
 }
 
-/** 栏目版式 JSON。 */
+/** 条目模板版式 JSON。 */
 export interface BlockLayout {
   v: number;
   mode: string;
@@ -69,12 +69,6 @@ export const MAX_BLOCKS = 400;
 export function rowsForPx(px: unknown): number {
   const v = Math.max(0, Number(px) || 0);
   return Math.max(MIN_H, Math.ceil((v + MARGIN[1]) / (ROW_HEIGHT + MARGIN[1])));
-}
-
-/** 行数 → 显示高度（px），与网格引擎的算法一致。 */
-export function blockHeightPx(rows: unknown): number {
-  const h = Math.max(1, Math.round(Number(rows) || 1));
-  return h * ROW_HEIGHT + (h - 1) * MARGIN[1];
 }
 
 /**
@@ -153,7 +147,7 @@ export function defaultLayouts(fields: unknown): Record<string, GridItem[]> {
   return out;
 }
 
-/** 空布局（也用来清空某个栏目）。 */
+/** 空布局（也用来清空某个条目模板）。 */
 export function emptyLayout(mode: unknown = 'grid'): BlockLayout {
   return { v: LAYOUT_VERSION, mode: LAYOUT_MODES.includes(mode as string) ? (mode as string) : 'grid', panels: [], groups: {} };
 }
@@ -221,7 +215,7 @@ export function sanitizeLayout(raw: unknown): BlockLayout | null {
 /**
  * 内容驱动高度：把量到的内容高度套到版式上（只对当前断点）。
  * 高度 = max(存储的最小高, 内容需要的行数)：内容长就长，内容删掉就缩回最小高。
- * 视图期算出来的高度**不落盘**——它是「这一条内容有多高」，不是「这个栏目该怎么排」。
+ * 视图期算出来的高度**不落盘**——它是「这一条内容有多高」，不是「这个条目模板该怎么排」。
  */
 export function growHeights(items: GridItem[] | null | undefined, measured: Record<string, number> | null | undefined): GridItem[] {
   return (Array.isArray(items) ? items : []).map((it) => {
@@ -270,12 +264,12 @@ export function repackBlocks(items: Array<Partial<GridItem> & { i: string }> | n
  * 字段字典 → 版式只关心「哪些分组、每组有哪些字段」。
  *
  * 0.42：分组由字段字典推导（组是 type='group' 的字段，见 shared/fields/structure.ts），
- * 不再读 `section.groups`——版式与结构之间只剩这一条依赖。
+ * 不再读 `template.groups`——版式与结构之间只剩这一条依赖。
  */
 export function groupsForLayout(
-  section: { fields?: unknown } | null | undefined,
+  template: { fields?: unknown } | null | undefined,
 ): Array<{ id: string; title: unknown; fields: unknown[] }> {
-  const fields = Array.isArray(section?.fields) ? section.fields : [];
+  const fields = Array.isArray(template?.fields) ? template.fields : [];
   return boardGroupsOf(fields as Array<{ key: string; type?: string; keys?: unknown; label?: string }>)
     .map((g) => ({ id: g.id, title: g.title, fields: g.fields as unknown[] }))
     // 空分组在面板上不出现（没有块可摆），版式里也不该占位

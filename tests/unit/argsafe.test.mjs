@@ -130,9 +130,9 @@ test('CLI 解析层：key set 的 --data 多键仍然报错（KV 只有一个值
 test('CLI 解析层：entry add 的 --data 可以是多键对象（整份值）', () => {
   const { action } = ctxOf(['entry', 'add']);
   assert.ok(action, 'entry add 必须可解析');
-  const ctx = parseArgs(action, ['--section', 'memo', '--title', '甲', '--data', '{"a":"1","b":"2"}']);
+  const ctx = parseArgs(action, ['--template', 'memo', '--title', '甲', '--data', '{"a":"1","b":"2"}']);
   assert.deepEqual(ctx.data, { a: '1', b: '2' }, '多键对象必须原样进 ctx，不能被 KV 逻辑拦下');
-  assert.equal(ctx.section, 'memo');
+  assert.equal(ctx.template, 'memo');
   assert.equal(ctx.title, '甲');
 });
 
@@ -140,7 +140,7 @@ test('CLI 解析层：entry add 的 --data @文件 多键原样通过', () => {
   const p = join(dir, 'item-multi.json');
   writeFileSync(p, JSON.stringify({ name: '甲', kind: '待办', due: '2026-10-19', body: 'x', source: 'y' }));
   const { action } = ctxOf(['entry', 'add']);
-  const ctx = parseArgs(action, ['--section', 'memo', '--title', '甲', '--data', '@' + p]);
+  const ctx = parseArgs(action, ['--template', 'memo', '--title', '甲', '--data', '@' + p]);
   assert.equal(Object.keys(ctx.data).length, 5);
   assert.equal(ctx.data.name, '甲');
 });

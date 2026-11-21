@@ -9,10 +9,6 @@ export async function pathExists(p: string): Promise<boolean> {
   try { await fsp.access(p); return true; } catch { return false; }
 }
 
-export async function isDir(p: string): Promise<boolean> {
-  try { return (await fsp.stat(p)).isDirectory(); } catch { return false; }
-}
-
 export async function ensureDir(p: string): Promise<void> {
   await fsp.mkdir(p, { recursive: true });
 }
@@ -23,10 +19,6 @@ export async function writeAtomic(p: string, content: string | Uint8Array): Prom
   const tmp = `${p}.${process.pid}.tmp`;
   await fsp.writeFile(tmp, content);
   await fsp.rename(tmp, p);
-}
-
-export async function writeJsonAtomic(p: string, data: unknown): Promise<void> {
-  await writeAtomic(p, JSON.stringify(data, null, 2) + '\n');
 }
 
 export async function readFileText(p: string): Promise<string> {

@@ -24,7 +24,7 @@ const withDb = (fn) => {
 test('身份规则：url 大小写不敏感、内部指针 id 确定性、前缀与长度形状', () => {
   assert.match(identity.attIdForUrl('https://x.dev/a'), /^att_url_[0-9a-f]{16}$/);
   assert.equal(identity.attIdForUrl('HTTPS://X.dev/a'), identity.attIdForUrl('https://x.dev/a'), '小写归一');
-  assert.equal(identity.attIdForSection('demo'), identity.attIdForSection('demo'));
+  assert.equal(identity.attIdForTemplate('demo'), identity.attIdForTemplate('demo'));
   assert.match(identity.attIdForEntry('e_1'), /^att_entry_[0-9a-f]{16}$/);
   // v3：条目结构行 / 值行都是确定性派生；field 指针挂在结构行 id 上
   assert.match(identity.entryFieldId('e_1', 'att'), /^ef_[0-9a-f]{16}$/);
@@ -58,12 +58,12 @@ test('v1.sql 的 type CHECK 钉住 v1 时代清单（历史快照永不改）；
 });
 
 test('v4：未知类型不再被 DB 拒绝，但运行时 validateFieldDef 在写入点当场报错', async () => {
-  const { validateFieldDef } = await import('../../src/modules/sections/service.ts');
+  const { validateFieldDef } = await import('../../src/modules/templates/service.ts');
   // DB 层：v4 起 fields/entry_fields 没有 type CHECK，裸 SQL 写未知类型能落进去
   //（这正是「加类型不改库」的含义；清理掉，别毒化后面的用例）
   withDb((db) => {
-    db.run("INSERT INTO fields (section_id, key, type, spec) VALUES ('demo', 'bad', 'no_such_type', '{}')");
-    db.run("DELETE FROM fields WHERE section_id = 'demo' AND key = 'bad'");
+    db.run("INSERT INTO template_fields (template_id, key, type, spec) VALUES ('demo', 'bad', 'no_such_type', '{}')");
+    db.run("DELETE FROM template_fields WHERE template_id = 'demo' AND key = 'bad'");
   });
   // 运行时层：唯一清单 FIELD_TYPES 仍是关卡——未知类型在写入点报错，不静默
   assert.throws(() => validateFieldDef({ key: 'bad', type: 'no_such_type' }), /type 非法/);
@@ -72,14 +72,14 @@ test('v4：未知类型不再被 DB 拒绝，但运行时 validateFieldDef 在�
   assert.equal(def.type, 'debug');
 });
 
-test('删除钩子：删栏目/条目后，指向它们的内部指针行被软删（deleted_at），行还在', async () => {
+test('删除钩子：删条目模板/条目后，指向它们的内部指针行被软删（deleted_at），行还在', async () => {
   await store.mutateStore((s) => {
-    s.sections.push({ id: 'tmpsec', title: '临时', description: '', order: 90, template: null, kv: false,
+    s.templates.push({ id: 'tmpsec', title: '临时', description: '', order: 90, template: null,
       titleField: null, titleLabel: '名称', groups: [], fields: [], layout: null, createdAt: null, updatedAt: null });
-    s.entries.push({ id: 'tmpentry', section: 'tmpsec', title: 'T', tags: [], values: {}, createdAt: null, updatedAt: null });
+    s.entries.push({ id: 'tmpentry', template: 'tmpsec', title: 'T', tags: [], values: {}, createdAt: null, updatedAt: null });
   });
   // 手工登记两个内部指针（未来的显式挂载命令会做同样的事）
-  const secPtr = identity.attIdForSection('tmpsec');
+  const secPtr = identity.attIdForTemplate('tmpsec');
   const entPtr = identity.attIdForEntry('tmpentry');
   withDb((db) => {
     for (const [id, kind, target] of [[secPtr, 'section', 'tmpsec'], [entPtr, 'entry', 'tmpentry']]) {
@@ -90,8 +90,8 @@ test('删除钩子：删栏目/条目后，指向它们的内部指针行被软�
   });
 
   await store.mutateStore((s) => {
-    s.sections = s.sections.filter((x) => x.id !== 'tmpsec');
-    s.entries = s.entries.filter((e) => e.section !== 'tmpsec');
+    s.templates = s.templates.filter((x) => x.id !== 'tmpsec');
+    s.entries = s.entries.filter((e) => e.template !== 'tmpsec');
   });
 
   const rows = withDb((db) => db.all('SELECT id, deleted_at FROM attachments WHERE id IN (:a, :b)', { a: secPtr, b: entPtr }));
@@ -101,14 +101,14 @@ test('删除钩子：删栏目/条目后，指向它们的内部指针行被软�
 });
 
 test('一致性检查：绕过 facade 直接删行 → findDriftedPointers 报漂移', async () => {
-  const ptr = identity.attIdForSection('ghostsec');
+  const ptr = identity.attIdForTemplate('ghostsec');
   withDb((db) => {
     db.run(`INSERT INTO attachments (id, kind, target_kind, target_key, created_at, updated_at)
             VALUES (:id, 'section', 'section', 'ghostsec', :at, :at)`,
       { id: ptr, at: new Date().toISOString() });
   });
   const drift = withDb((db) => findDriftedPointers(db));
-  assert.ok(drift.some((r) => r.id === ptr), '指向不存在栏目的活指针必须被报出来');
+  assert.ok(drift.some((r) => r.id === ptr), '指向不存在条目模板的活指针必须被报出来');
   // 清理：软删掉，别毒化后续用例
   withDb((db) => db.run('UPDATE attachments SET deleted_at = :at WHERE id = :id', { id: ptr, at: new Date().toISOString() }));
   assert.deepEqual(withDb((db) => findDriftedPointers(db)), []);

@@ -40,7 +40,7 @@ function pastedName(file: any, index = 0) {
   return `粘贴截图-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}${index ? `-${index + 1}` : ''}${ext}`;
 }
 
-export function MdControl({ def, value, onChange }: ControlProps) {
+export function MdControl({ value, onChange }: ControlProps) {
   // store 目前还是 JSX（P5 才迁 TS），`createContext(null)` 让 TS 把它推成 never。
   const { toast, guard } = useStore() as any;
   const [lib, setLib] = useState<any[]>([]);
@@ -292,7 +292,6 @@ export function MdControl({ def, value, onChange }: ControlProps) {
         </div>
       ) : null}
 
-      {def.hint ? <span className="hint">{def.hint}</span> : null}
       {zoom ? <Lightbox item={zoom} onClose={() => setZoom(null)} /> : null}
     </div>
   );
