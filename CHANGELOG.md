@@ -2,6 +2,19 @@
 
 本文件格式参考 [Keep a Changelog](https://keepachangelog.com/)，中文正文。
 
+## [Unreleased]（任务 #2 · 前端优化）
+
+### Changed
+
+- **前端目录重组**（`src/web/frontend/`，57 个文件搬移、156 处 import 同步改写）：
+  - 页面：`modules/<域>/view.tsx` → `pages/<域>/index.tsx`（entries / templates / export / files / settings）；
+  - 组件：`components/<组件>.tsx` → `components/<组件>/index.tsx`，字段控件同样目录化（`components/fields/<名>/index.tsx`）；
+  - 路由：`registry.ts`（VIEWS 登记）与 `activeView.ts` 收进 `route/`；
+  - 工具：`listSort / mdInline / mdSmart / mdSource / entryRef` 收进 `util/`；
+  - 单测与 consistency 断言（VIEWS ↔ pages 对账、字面量 import 检查）同步更新；React 侧零行为变化。
+- **文案减负（以操作优先）**：块板常驻操作提示行删除（说明收进「⋯」悬浮）、清单/附件/侧栏空态与说明缩短、
+  md / source / secret / grill 的长占位符压缩为短操作语；完整帮助仍以 `title` 悬浮提供，零功能变化。
+
 ## [0.44.0] - 2026-11-21（任务 #46 / #51 / #52 / #54）
 
 **密钥归一为普通字段：安全 list&lt;kv&gt; 进入 field + entry 模型。**

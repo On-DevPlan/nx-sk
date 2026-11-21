@@ -16,7 +16,7 @@ const { ACTIONS, MODULES, SELF_CHECK, selfCheckActions } = await import('../../s
 const { ALL_COMMANDS, helpEntries, resolveCommand } = await import('../../src/runtime/cli.ts');
 const { ROUTES, routeTable, matchRoute } = await import('../../src/runtime/api.ts');
 const { cliPathsOf, compileRoute } = await import('../../src/runtime/spec.ts');
-const { VIEWS } = await import('../../src/web/frontend/registry.ts');
+const { VIEWS } = await import('../../src/web/frontend/route/registry.ts');
 
 const listDirs = async (rel) => (await readdir(join(ROOT, rel), { withFileTypes: true })).filter((d) => d.isDirectory()).map((d) => d.name).sort();
 
@@ -30,13 +30,13 @@ test('模块目录 ↔ 后端注册表对账（双向）', async () => {
   assert.deepEqual(dirs, registered, `src/modules 下的目录与 registry.ts 的 MODULES 必须一一对应`);
 });
 
-const VIEW_DIR = 'src/web/frontend/modules';
+const VIEW_DIR = 'src/web/frontend/pages';
 
 test('视图目录 ↔ 前端 VIEWS 一一对应，后端模块不声明视图', async () => {
   // 后端只描述 action。一旦某个模块重新长出 view / tab 这类视图字段，
   // 面板就又变成「两份声明」，本条断言负责在提交前拦住。
   for (const m of MODULES) {
-    assert.equal(m.view, undefined, `模块 ${m.id} 不得声明 view——视图只在 src/web/frontend/registry.ts 登记`);
+    assert.equal(m.view, undefined, `模块 ${m.id} 不得声明 view——视图只在 src/web/frontend/route/registry.ts 登记`);
     assert.equal(m.tab, undefined, `模块 ${m.id} 不得声明 tab——那是面板导航的属性，不是对外接口`);
   }
 
@@ -46,13 +46,13 @@ test('视图目录 ↔ 前端 VIEWS 一一对应，后端模块不声明视图',
   assert.deepEqual(registered, dirs, `${VIEW_DIR} 下的目录与 VIEWS 必须一一对应`);
 
   // 登记必须用字面量 import()，否则 Vite 静态分析不了、失去代码分割
-  const regSrc = await readFile(join(ROOT, 'src/web/frontend/registry.ts'), 'utf8');
+  const regSrc = await readFile(join(ROOT, 'src/web/frontend/route/registry.ts'), 'utf8');
   for (const v of VIEWS) {
-    const p = join(ROOT, VIEW_DIR, v.id, 'view.tsx');
-    assert.ok(await readIfExists(p), `VIEWS 登记了 ${v.id} 却没有 ${VIEW_DIR}/${v.id}/view.tsx`);
+    const p = join(ROOT, VIEW_DIR, v.id, 'index.tsx');
+    assert.ok(await readIfExists(p), `VIEWS 登记了 ${v.id} 却没有 ${VIEW_DIR}/${v.id}/index.tsx`);
     assert.ok(
-      regSrc.includes(`import('./modules/${v.id}/view.tsx')`),
-      `VIEWS 里 ${v.id} 的 component 必须写成字面量 import('./modules/${v.id}/view.tsx')`,
+      regSrc.includes(`import('../pages/${v.id}/index.tsx')`),
+      `VIEWS 里 ${v.id} 的 component 必须写成字面量 import('../pages/${v.id}/index.tsx')`,
     );
   }
 });
@@ -578,7 +578,7 @@ test('视图写请求的 body 键必须声明过（applySpec 会静默丢掉未�
 
   const files = [];
   for (const id of await listDirs(VIEW_DIR)) {
-    const p = join(ROOT, VIEW_DIR, id, 'view.tsx');
+    const p = join(ROOT, VIEW_DIR, id, 'index.tsx');
     if (await readIfExists(p)) files.push({ id, path: p });
   }
   const problems = [];

@@ -9,24 +9,24 @@
 // 收成一张表之后，加类型只需要「加控件文件 + 加一行」。
 import type { FieldType } from '../../../../shared/fields/types.ts';
 import type { Control } from './types.ts';
-import { TextControl } from './text.tsx';
-import { TextareaControl } from './textarea.tsx';
-import { NumberControl } from './number.tsx';
-import { DateControl } from './date.tsx';
-import { MonthControl } from './month.tsx';
-import { BoolControl } from './bool.tsx';
-import { SelectControl } from './select.tsx';
-import { TagsControl } from './tags.tsx';
-import { EntryListControl } from './entrylist.tsx';
-import { TableControl } from './table.tsx';
-import { SourceControl } from './source.tsx';
-import { ShortcutControl } from './shortcut.tsx';
-import { SecretControl } from './secret.tsx';
-import { FileControl } from './file.tsx';
-import { MdControl } from './md.tsx';
-import { GroupControl } from './group.tsx';
-import { DebugControl } from './debug.tsx';
-import { GrillControl } from './grill.tsx';
+import { TextControl } from './text/index.tsx';
+import { TextareaControl } from './textarea/index.tsx';
+import { NumberControl } from './number/index.tsx';
+import { DateControl } from './date/index.tsx';
+import { MonthControl } from './month/index.tsx';
+import { BoolControl } from './bool/index.tsx';
+import { SelectControl } from './select/index.tsx';
+import { TagsControl } from './tags/index.tsx';
+import { EntryListControl } from './entrylist/index.tsx';
+import { TableControl } from './table/index.tsx';
+import { SourceControl } from './source/index.tsx';
+import { ShortcutControl } from './shortcut/index.tsx';
+import { SecretControl } from './secret/index.tsx';
+import { FileControl } from './file/index.tsx';
+import { MdControl } from './md/index.tsx';
+import { GroupControl } from './group/index.tsx';
+import { DebugControl } from './debug/index.tsx';
+import { GrillControl } from './grill/index.tsx';
 
 export const FIELD_CONTROLS: Record<FieldType, Control> = {
   text: TextControl,

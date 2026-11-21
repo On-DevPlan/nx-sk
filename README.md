@@ -615,7 +615,7 @@ pnpm test        # = lint + build + 冒烟 + 单测
 | `src/core/` | 零业务语义：paths / errors / store / fsx / crypto / vault / fields / attachments / render / ids / open |
 | `src/modules/<域>/` | `index.js`(action 声明) + `service.js`(业务)。**不声明视图** |
 | `src/runtime/` | registry / spec / cli / api / server —— 装配层，不写业务 |
-| `src/web/frontend/` | React 壳 + 组件 + `modules/<域>/view.jsx` + 视图注册表（视图只住这里） |
+| `src/web/frontend/` | `pages/<域>/index.tsx`（页面）+ `components/<组件>/index.tsx` + `route/`（视图登记与解析）+ `api/`（客户端）+ `util/`（纯函数工具） |
 | `assets/nx-sk/` | 随包分发的 skill（SKILL.md + references/） |
 | `tests/unit/` · `tests/smoke.mjs` | 一致性断言 + 端到端冒烟 |
 

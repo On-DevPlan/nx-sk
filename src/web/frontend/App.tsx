@@ -4,15 +4,15 @@ import { ConfigProvider } from 'antd';
 import type { ThemeConfig } from 'antd';
 import { Breadcrumb } from 'antd';
 import { MenuUnfoldOutlined, ReloadOutlined } from '@ant-design/icons';
-import { SECTION_VIEW, VIEWS } from './registry.ts';
-import type { ViewProps } from './registry.ts';
-import { ErrorBoundary, Toasts, DialogHost } from './components/ui.tsx';
+import { SECTION_VIEW, VIEWS } from './route/registry.ts';
+import type { ViewProps } from './route/registry.ts';
+import { ErrorBoundary, Toasts, DialogHost } from './components/ui/index.tsx';
 import { useStore, REFRESH_EVENT } from './store.tsx';
 import { api } from './api/client.ts';
-import { normalizeViewId, resolveActiveView } from './activeView.ts';
-import AppSidebar from './components/appSidebar.tsx';
-import NewEntryModal from './components/NewEntryModal.tsx';
-import type { NewEntryForm } from './components/NewEntryModal.tsx';
+import { normalizeViewId, resolveActiveView } from './route/activeView.ts';
+import AppSidebar from './components/appSidebar/index.tsx';
+import NewEntryModal from './components/NewEntryModal/index.tsx';
+import type { NewEntryForm } from './components/NewEntryModal/index.tsx';
 import { BLANK_TEMPLATE_ID } from '../../shared/tree.ts';
 
 /**

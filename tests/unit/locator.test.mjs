@@ -89,7 +89,7 @@ test('kind 清单封闭：LOCATOR_KINDS 与 parse 认的段一致', () => {
 });
 
 test('B4 entryRefText：条目是唯一存储单元，命令只带条目 id，不再要求 --template', async () => {
-  const { entryRefText } = await import('../../src/web/frontend/entryRef.ts');
+  const { entryRefText } = await import('../../src/web/frontend/util/entryRef.ts');
   const lines = entryRefText({ id: 'e_1', title: '示例条目' }).split('\n');
   assert.equal(lines.length, 4);
   assert.equal(lines[0], 'nx-sk 条目「示例条目」(e_1)');
