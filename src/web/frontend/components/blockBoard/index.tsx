@@ -17,11 +17,9 @@
 //      填字段仍然走「N 处改动 → 保存」。否则拖一下版式会把没填完的值一起提交。
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { DragEvent as ReactDragEvent, HTMLAttributes } from 'react';
-import { createPortal } from 'react-dom';
-import { Dropdown } from 'antd';
-import { MoreOutlined } from '@ant-design/icons';
 import { Responsive } from 'react-grid-layout';
 import 'react-grid-layout/css/styles.css';
+import { MoreMenu } from '../menu/index.tsx';
 import {
   BP_COLS, BREAKPOINTS, MARGIN, ROW_HEIGHT,
   defaultLayouts, growHeights, keepMinHeights, repackBlocks, snapItems,
@@ -74,70 +72,29 @@ interface BlockProps {
 }
 
 /**
- * 块头右上角的「⋯」菜单。
+ * 块头右上角的「⋯」菜单 —— 全站统一 MoreMenu 的块头薄壳（任务 #9）。
  *
- * 不用 `<details>`（条目模板「更多」那套）：块的根节点是 `overflow: hidden`（高度由网格锁着），
- * 绝对定位的下拉会被裁掉。所以浮层 portal 到 body、fixed 定位，位置按按钮实测。
- * 打开期间：点任意处 / Esc / 滚动 / 改窗口尺寸都关——菜单不该在页面上「漂着」。
+ * 只传 items：按钮（icon-btn + dots）、portal/fixed 定位、关闭口径（点任意处 / Esc /
+ * 滚动 / 改窗口尺寸）全部在 components/menu 里，与其他更多菜单同一副面孔。
+ * `buttonClass="blk-menu-btn"` 保留块头的 hover 浮现节奏（静止态不抢正文注意力）。
  */
 function BlockMenu({ def, actions }: { def: FieldDef; actions: FieldActions }) {
-  const btnRef = useRef<HTMLButtonElement>(null);
-  const [at, setAt] = useState<{ x: number; y: number } | null>(null);
-
-  useEffect(() => {
-    if (!at) return undefined;
-    const close = () => setAt(null);
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
-    window.addEventListener('scroll', close, true);
-    window.addEventListener('resize', close);
-    window.addEventListener('keydown', onKey);
-    document.addEventListener('click', close);
-    return () => {
-      window.removeEventListener('scroll', close, true);
-      window.removeEventListener('resize', close);
-      window.removeEventListener('keydown', onKey);
-      document.removeEventListener('click', close);
-    };
-  }, [at]);
-
-  const toggle = () => {
-    if (at) { setAt(null); return; }
-    const b = btnRef.current?.getBoundingClientRect();
-    if (!b) return;
-    // 菜单宽 168：右缘对齐按钮；下方放不下就翻到按钮上方
-    const left = Math.max(8, Math.min(b.right - 168, window.innerWidth - 176));
-    const top = b.bottom + 160 > window.innerHeight ? Math.max(8, b.top - 152) : b.bottom + 4;
-    setAt({ x: left, y: top });
-  };
-
-  const pick = (fn: () => void) => { setAt(null); fn(); };
-
   return (
-    <>
-      <button
-        ref={btnRef}
-        type="button"
-        className="blk-menu-btn"
-        title="字段操作：查看 / 历史 / 编辑 / 删除"
-        aria-label={`字段操作 ${def.label}`}
-        aria-haspopup="menu"
-        onClick={(e) => { e.stopPropagation(); toggle(); }}
-      >⋯</button>
-      {at ? createPortal(
-        <div className="blk-menu" style={{ left: at.x, top: at.y }} role="menu" aria-label={`字段操作 ${def.label}`}>
-          <button type="button" role="menuitem" onClick={() => pick(() => actions.view(def.key, def))}>查看字段</button>
-          <button type="button" role="menuitem" onClick={() => pick(() => actions.history(def.key, def))}>变化历史…</button>
-          <button type="button" role="menuitem" onClick={() => pick(() => actions.edit(def.key, def))}>编辑字段属性…</button>
-          <button
-            type="button"
-            role="menuitem"
-            className="danger-item"
-            onClick={() => pick(() => actions.remove(def.key, def))}
-          >{def.template === false ? '删除扩展字段' : '从本条目移除'}</button>
-        </div>,
-        document.body,
-      ) : null}
-    </>
+    <MoreMenu
+      label={`字段操作 ${def.label}`}
+      buttonClass="blk-menu-btn"
+      items={[
+        { key: 'view', icon: 'eye', label: '查看字段', onClick: () => actions.view(def.key, def) },
+        { key: 'history', icon: 'history', label: '变化历史…', onClick: () => actions.history(def.key, def) },
+        { key: 'edit', icon: 'pencil', label: '编辑字段属性…', onClick: () => actions.edit(def.key, def) },
+        'divider',
+        {
+          key: 'remove', icon: 'x', danger: true,
+          label: def.template === false ? '删除扩展字段' : '从本条目移除',
+          onClick: () => actions.remove(def.key, def),
+        },
+      ]}
+    />
   );
 }
 
@@ -498,24 +455,14 @@ export default function BlockBoard({
       {/* 提示不常驻：正文优先——操作说明收进「⋯」按钮的悬浮提示，不在页面上占一行 */}
       <div className="board-bar">
         <span className="right rowgap">
-          <Dropdown
-            trigger={['click']}
-            placement="bottomRight"
-            menu={{
-              items: [
-                ...(mode === 'grid' ? [{ key: 'reset', label: '重置版式（不影响字段值）' }] : []),
-                { key: 'mode', label: mode === 'grid' ? '切换为表单视图' : '切换为块布局' },
-              ],
-              onClick: ({ key }) => {
-                if (key === 'reset') resetAll();
-                else if (key === 'mode') toggleMode();
-              },
-            }}
-          >
-            <button type="button" className="btn small ghost icon-btn" aria-label="更多版式操作" title="拖块头换序（插到块上/下缘）· 拖左右边缘改宽 · 拖面板标题行换面板顺序；版式自动保存，不影响字段值。重置 / 切换块布局与表单视图在这里">
-              <MoreOutlined />
-            </button>
-          </Dropdown>
+          <MoreMenu
+            label="更多版式操作"
+            title="拖块头换序（插到块上/下缘）· 拖左右边缘改宽 · 拖面板标题行换面板顺序；版式自动保存，不影响字段值。重置 / 切换块布局与表单视图在这里"
+            items={[
+              ...(mode === 'grid' ? [{ key: 'reset', label: '重置版式（不影响字段值）', onClick: resetAll }] : []),
+              { key: 'mode', label: mode === 'grid' ? '切换为表单视图' : '切换为块布局', onClick: toggleMode },
+            ]}
+          />
         </span>
       </div>
 

@@ -1,8 +1,6 @@
-import { Dropdown } from 'antd';
-import {
-  CopyOutlined, DeleteOutlined, HistoryOutlined, MoreOutlined, SaveOutlined, TagsOutlined,
-} from '@ant-design/icons';
+import { TagsOutlined } from '@ant-design/icons';
 import { Empty, Tag } from '../../components/ui/index.tsx';
+import { MoreMenu } from '../../components/menu/index.tsx';
 import BlockBoard from '../../components/blockBoard/index.tsx';
 import type { BoardGroup, FieldActions } from '../../components/blockBoard/index.tsx';
 import type { BlockLayout } from '../../../../shared/blockLayout.ts';
@@ -85,26 +83,18 @@ export default function EntryDetailColumn({
                 <button type="button" className="btn small ghost" onClick={onDiscard} title="丢弃未保存的改动">放弃改动</button>
               </>
             ) : null}
-            {/* 低频动作收进「更多」：顶栏只留保存/放弃与一个图标按钮，长条目读数不被按钮墙打断。 */}
-            <Dropdown
-              trigger={['click']}
-              menu={{
-                items: [
-                  {
-                    key: 'copy', icon: <CopyOutlined />, label: '复制条目定位',
-                    onClick: () => onCopyRef(current || draft),
-                  },
-                  { key: 'history', icon: <HistoryOutlined />, label: '变化历史', onClick: onOpenHistory },
-                  { key: 'template', icon: <SaveOutlined />, label: '存为模板', onClick: onSaveAsTemplate },
-                  { type: 'divider' },
-                  { key: 'remove', danger: true, icon: <DeleteOutlined />, label: '删除条目', onClick: onRemoveEntry },
-                ],
-              }}
-            >
-              <button type="button" className="btn small ghost icon-btn" aria-label="更多条目操作" title="更多条目操作">
-                <MoreOutlined />
-              </button>
-            </Dropdown>
+            {/* 低频动作收进「更多」：顶栏只留保存/放弃与一个图标按钮，长条目读数不被按钮墙打断。
+                任务 #9：更多按钮 + 下拉面板全站统一为 components/menu 的 MoreMenu。 */}
+            <MoreMenu
+              label="更多条目操作"
+              items={[
+                { key: 'copy', icon: 'copy', label: '复制条目定位', onClick: () => onCopyRef(current || draft) },
+                { key: 'history', icon: 'history', label: '变化历史', onClick: onOpenHistory },
+                { key: 'template', icon: 'save', label: '存为模板', onClick: onSaveAsTemplate },
+                'divider',
+                { key: 'remove', icon: 'x', label: '删除条目', danger: true, onClick: onRemoveEntry },
+              ]}
+            />
           </div>
 
           {/* 条目名是「这一页的标题」，不是第一个字段：给它一点标题的语气，

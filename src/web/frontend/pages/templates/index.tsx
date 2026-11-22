@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { DragEvent as ReactDragEvent, ReactNode } from 'react';
-import { Dropdown } from 'antd';
-import { ImportOutlined, MoreOutlined, ReloadOutlined } from '@ant-design/icons';
+import { MoreMenu } from '../../components/menu/index.tsx';
 import { api } from '../../api/client.ts';
 import { useStore } from '../../store.tsx';
 import { Empty, Modal, Tag } from '../../components/ui/index.tsx';
@@ -468,29 +467,17 @@ export default function TemplatesView() {
           value={q}
           onChange={(e) => setQ(e.target.value)}
         />
-        <Dropdown
-          trigger={['click']}
-          menu={{
-            items: [
-              { key: 'expand', label: '展开全部' },
-              { key: 'collapse', label: '收起全部' },
-              { key: 'reload', label: '刷新', icon: <ReloadOutlined /> },
-              { key: 'import', label: '导入 ZIP', icon: <ImportOutlined /> },
-              { type: 'divider' }, { key: 'batch', label: batch ? '退出批量删除' : '批量删除…', danger: !batch },
-            ],
-            onClick: ({ key }) => {
-              if (key === 'expand') allOpen(true);
-              if (key === 'collapse') allOpen(false);
-              if (key === 'reload') load();
-              if (key === 'import') zipInput.current?.click();
-              if (key === 'batch') { setSel(new Set()); setBatch(!batch); }
-            },
-          }}
-        >
-          <button type="button" className="btn small ghost icon-btn" aria-label="更多条目模板操作" title="更多条目模板操作">
-            <MoreOutlined />
-          </button>
-        </Dropdown>
+        <MoreMenu
+          label="更多条目模板操作"
+          items={[
+            { key: 'expand', label: '展开全部', onClick: () => allOpen(true) },
+            { key: 'collapse', label: '收起全部', onClick: () => allOpen(false) },
+            { key: 'reload', icon: 'reload', label: '刷新', onClick: () => load() },
+            { key: 'import', icon: 'upload', label: '导入 ZIP', onClick: () => zipInput.current?.click() },
+            'divider',
+            { key: 'batch', label: batch ? '退出批量删除' : '批量删除…', danger: !batch, onClick: () => { setSel(new Set()); setBatch(!batch); } },
+          ]}
+        />
         <input
           ref={zipInput}
           type="file"
@@ -707,24 +694,16 @@ function TreeTemplate({
           {s.fields} 字段 · {s.entries} 条目
         </span>
         <span className="tree-acts">
-          <Dropdown trigger={['click']} placement="bottomRight" menu={{
-            items: [
-              { key: 'rename', label: '改名' },
-              { key: 'edit', label: '编辑字段与结构' },
-              { key: 'dump', label: '信息' },
-              { type: 'divider' },
-              { key: 'remove', label: '删除条目模板', danger: true },
-            ],
-            onClick: ({ key, domEvent }) => {
-              domEvent.stopPropagation();
-              if (key === 'rename') onRename();
-              else if (key === 'edit') onEdit();
-              else if (key === 'dump') onDump();
-              else if (key === 'remove') onRemove();
-            },
-          }}>
-            <button type="button" className="btn small ghost icon-btn" aria-label={`更多操作：${s.title}`} title="更多操作"><MoreOutlined /></button>
-          </Dropdown>
+          <MoreMenu
+            label={`更多操作：${s.title}`}
+            items={[
+              { key: 'rename', label: '改名', onClick: onRename },
+              { key: 'edit', label: '编辑字段与结构', onClick: onEdit },
+              { key: 'dump', icon: 'eye', label: '信息', onClick: onDump },
+              'divider',
+              { key: 'remove', icon: 'x', label: '删除条目模板', danger: true, onClick: onRemove },
+            ]}
+          />
         </span>
       </div>
 

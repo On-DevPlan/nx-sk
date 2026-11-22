@@ -251,51 +251,51 @@ main.body { flex: 1; min-height: 0; overflow: auto; }
 .blk-hint { max-width: 42%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; color: var(--soft-2); font-style: italic; }
 .blk-key { margin-left: auto; font-size: 10px; color: var(--soft-2); opacity: 0; transition: opacity .12s; }
 .blk-head:hover .blk-key { opacity: 1; }
-/* 任务 #20/#24：块头字段操作入口（⋯ 更多菜单）——Notion 无边框风，
-   hover 块头才现形（与 .blk-key 同一节奏），静止态不抢正文的注意力 */
-.blk-menu-btn {
-  margin-left: 2px;
-  width: 18px;
-  height: 18px;
-  padding: 0;
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  background: transparent;
-  color: var(--mid);
-  font-size: 12px;
-  line-height: 1;
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity .12s, background .12s;
-}
+/* 任务 #20/#24 + 任务 #9：块头字段操作入口（更多菜单触发钮）。
+   按钮本体已统一为 .icon-btn 基座（components/menu 的 MoreMenu），
+   这里只留块头的 hover 浮现节奏（与 .blk-key 同一套，静止态不抢正文注意力） */
+.blk-menu-btn { opacity: 0; transition: opacity .12s; }
 .blk-head:hover .blk-menu-btn,
 .blk-menu-btn:focus-visible { opacity: 1; }
-.blk-menu-btn:hover { background: var(--hover); color: var(--ink); }
-/* 块根是 overflow:hidden（高度由网格锁着），下拉必须 portal 到 body + fixed */
-.blk-menu {
+
+/* ═ 全站统一的「更多」下拉面板（components/menu 的 MoreMenu，任务 #9）═══
+   条目头 / 块板 / 条目模板 / 附件页共用这一份：按钮一律 .btn.small.ghost.icon-btn
+   + dots 图标；面板 portal 到 body + fixed（块根 overflow:hidden 会裁 antd 弹层）。 */
+.more-menu {
   position: fixed;
   z-index: 1200;
-  width: 168px;
+  width: 176px;
   padding: 4px;
   display: flex;
   flex-direction: column;
   background: var(--paper);
   border: var(--border);
   border-radius: var(--radius-btn);
-  box-shadow: 0 6px 20px rgba(20, 22, 26, .12);
+  box-shadow: var(--shadow-float);
 }
-.blk-menu button {
-  padding: 7px 10px;
+.more-menu button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  padding: 5px 8px;
   border: 0;
   border-radius: 6px;
   background: transparent;
   color: var(--ink);
   font: inherit;
+  font-size: var(--fs-core);
   text-align: left;
   cursor: pointer;
 }
-.blk-menu button:hover { background: var(--hover); }
-.blk-menu button.danger-item { color: var(--danger); }
+.more-menu button:hover { background: var(--hover); }
+.more-menu button svg { flex-shrink: 0; color: var(--mid); }
+.more-menu button.danger-item { color: var(--danger); }
+.more-menu button.danger-item svg { color: var(--danger); }
+.more-menu button.danger-item:hover { background: var(--danger-soft); }
+.more-menu button:disabled { color: var(--mid); opacity: .5; cursor: default; }
+.more-menu button:disabled:hover { background: transparent; }
+.more-menu-divider { height: 1px; margin: 4px 6px; background: var(--line); }
 /* 字段详情弹窗：定义行 + 只读值预览 */
 .fldinfo { border: var(--border); border-radius: 6px; overflow: hidden; }
 .fldinfo-row { display: flex; gap: 12px; padding: 6px 10px; font-size: 12px; border-top: var(--border); }

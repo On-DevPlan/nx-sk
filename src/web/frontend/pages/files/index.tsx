@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { DragEvent as ReactDragEvent } from 'react';
-import { Dropdown } from 'antd';
-import type { MenuProps } from 'antd';
-import { MoreOutlined } from '@ant-design/icons';
 import { api } from '../../api/client.ts';
 import { fileToDataUrl, refreshAttachments } from '../../api/files.ts';
 import { useStore } from '../../store.tsx';
+import { MoreMenu } from '../../components/menu/index.tsx';
+import type { MoreMenuEntry } from '../../components/menu/index.tsx';
 import { Copyable, Empty, Modal, Tag, copyText } from '../../components/ui/index.tsx';
 import type { Attachment } from '../../../../shared/model.ts';
 
@@ -233,27 +232,16 @@ export default function FilesView() {
   };
 
   // 卡片只留「下载」一个主操作；导出副本 / 还原 / 编辑 / 复制路径与链接 / 删除都收进 More。
-  const fileMenu = (file: FileRow): MenuProps => ({
-    items: [
-      { key: 'edit', label: '编辑名称 / 备注' },
-      { key: 'export', label: '导出副本' },
-      { key: 'restore', label: '还原到导入位置' },
-      { type: 'divider' },
-      { key: 'path', label: '复制物理路径' },
-      { key: 'link', label: '复制链接' },
-      { type: 'divider' },
-      { key: 'remove', label: '删除', danger: true },
-    ],
-    onClick: ({ key, domEvent }) => {
-      domEvent.stopPropagation();
-      if (key === 'edit') openEdit(file);
-      else if (key === 'export') exportCopy(file);
-      else if (key === 'restore') restore(file);
-      else if (key === 'path') void copyOne(file.path, '物理路径');
-      else if (key === 'link') void copyOne(file.url, '链接');
-      else if (key === 'remove') remove(file);
-    },
-  });
+  const fileItems = (file: FileRow): MoreMenuEntry[] => [
+    { key: 'edit', icon: 'pencil', label: '编辑名称 / 备注', onClick: () => openEdit(file) },
+    { key: 'export', icon: 'download', label: '导出副本', onClick: () => exportCopy(file) },
+    { key: 'restore', label: '还原到导入位置', onClick: () => restore(file) },
+    'divider',
+    { key: 'path', icon: 'copy', label: '复制物理路径', onClick: () => void copyOne(file.path, '物理路径') },
+    { key: 'link', icon: 'copy', label: '复制链接', onClick: () => void copyOne(file.url, '链接') },
+    'divider',
+    { key: 'remove', icon: 'x', label: '删除', danger: true, onClick: () => remove(file) },
+  ];
 
   /**
    * 一键清理**未引用**的附件（孤儿附件）。
@@ -279,17 +267,10 @@ export default function FilesView() {
     await reload();
   });
 
-  const toolMenu: MenuProps = {
-    items: [
-      { key: 'path', label: '本机路径导入' },
-      { key: 'cleanup', label: data?.unlinked ? `清理未引用（${data.unlinked}）` : '清理未引用', danger: true, disabled: !data?.unlinked },
-    ],
-    onClick: ({ key, domEvent }) => {
-      domEvent.stopPropagation();
-      if (key === 'path') openPathImport();
-      else if (key === 'cleanup') cleanup();
-    },
-  };
+  const toolItems: MoreMenuEntry[] = [
+    { key: 'path', icon: 'upload', label: '本机路径导入', onClick: () => openPathImport() },
+    { key: 'cleanup', icon: 'x', label: data?.unlinked ? `清理未引用（${data.unlinked}）` : '清理未引用', danger: true, disabled: !data?.unlinked, onClick: () => cleanup() },
+  ];
 
   if (err) {
     return <div className="pad stack"><div className="bad"><strong>附件库读不到</strong></div><pre className="block">{err}</pre></div>;
@@ -321,11 +302,7 @@ export default function FilesView() {
           onChange={(e) => setQ(e.target.value)}
         />
         <button className="btn small" onClick={() => pickerRef.current?.click()}>上传文件</button>
-        <Dropdown menu={toolMenu} trigger={['click']} placement="bottomRight">
-          <button type="button" className="btn small ghost icon-btn" aria-label="更多附件操作" title="更多附件操作">
-            <MoreOutlined />
-          </button>
-        </Dropdown>
+        <MoreMenu label="更多附件操作" items={toolItems} />
         <input
           ref={pickerRef}
           type="file"
@@ -369,16 +346,7 @@ export default function FilesView() {
               <div className="file-acts">
                 <a className="btn small ghost" href={file.downloadUrl}>下载</a>
                 <span className="grow" />
-                <Dropdown menu={fileMenu(file)} trigger={['click']} placement="bottomRight">
-                  <button
-                    type="button"
-                    className="btn small ghost icon-btn"
-                    aria-label={`更多操作：${file.name}`}
-                    title="更多操作"
-                  >
-                    <MoreOutlined />
-                  </button>
-                </Dropdown>
+                <MoreMenu label={`更多操作：${file.name}`} items={fileItems(file)} />
               </div>
             </div>
           ))}

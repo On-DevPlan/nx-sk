@@ -15,14 +15,16 @@
 //   删除 / 移除 / 关闭                       x
 //   下载                                     download
 //   复制（路径 / 定位符 / 原文）             copy
-//   编辑（进入编辑态）                       pencil
+//   编辑（进入编辑态 / 改名 / 改属性）       pencil
 //   完成 / 确认 / 勾选（grill ack 同用）     check
-//   保存进度                                 save
-//   预览 / 查看                              eye
+//   保存（进度 / 存为模板）                  save
+//   预览 / 查看 / 信息                       eye
 //   插入图片                                 image
-//   上传 / 选择文件                          upload
+//   上传 / 选择文件 / 导入 ZIP               upload
 //   检索（引用资源等）                       search
-//   更多 / 设置菜单（原 ⋮ / ⋯ 字形）        dots
+//   更多 / 设置菜单（⋯ / ⋮ 触发钮）         dots
+//   变化历史 / 时间线                        history
+//   刷新 / 重新加载                          reload
 //   peek 三态：侧边 / 居中 / 整页            pane-side / pane-center / pane-full
 //   新窗口打开                               new-tab
 //   peek 视图选项                            sliders
@@ -33,7 +35,7 @@ export type IconSize = 'sm' | 'md' | 'lg';
 
 export type IconName =
   | 'plus' | 'x' | 'download' | 'copy' | 'pencil' | 'check' | 'save' | 'eye'
-  | 'image' | 'upload' | 'search' | 'dots'
+  | 'image' | 'upload' | 'search' | 'dots' | 'history' | 'reload'
   | 'pane-side' | 'pane-center' | 'pane-full' | 'new-tab' | 'sliders';
 
 /** 尺寸三档 → token 变量（定义在 styles/tokens.css，改那里即全站生效）。 */
@@ -86,6 +88,18 @@ const PATHS: Record<IconName, ReactNode> = {
       <circle cx="8" cy="3.5" r="1.1" fill="currentColor" />
       <circle cx="8" cy="8" r="1.1" fill="currentColor" />
       <circle cx="8" cy="12.5" r="1.1" fill="currentColor" />
+    </>
+  ),
+  history: (
+    <>
+      <path d="M8 4.2V8l2.6 1.8" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M2.6 8a5.4 5.4 0 1 0 1.6-3.8L2.5 5.9M2.5 3.4v2.5H5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+    </>
+  ),
+  reload: (
+    <>
+      <path d="M13.2 8a5.2 5.2 0 1 1-1.5-3.7L13.4 6" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+      <path d="M13.5 3.4V6h-2.6" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
     </>
   ),
   'pane-side': (
