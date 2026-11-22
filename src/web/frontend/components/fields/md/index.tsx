@@ -18,6 +18,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../../api/client.ts';
 import { fileToDataUrl, listAttachments, mergeFiles, refreshAttachments } from '../../../api/files.ts';
+import { Icon } from '../../../asset/icon/index.tsx';
 import { copyText } from '../../ui/index.tsx';
 import { Lightbox } from '../../lightbox/index.tsx';
 import { MdView, imageRecord } from '../../mdView/index.tsx';
@@ -221,17 +222,20 @@ export function MdControl({ value, onChange }: ControlProps) {
 
       {editing ? (
         <div className="md-tools">
-          <button type="button" className="btn small" disabled={!!busy} onClick={() => fileRef.current?.click()}>
-            {busy ? `上传中 ${busy.done}/${busy.total}…` : '插入图片'}
-          </button>
+          {busy
+            ? <span className="hint nowrap">上传中 {busy.done}/{busy.total}…</span>
+            : (
+              <button type="button" className="btn small ghost icon-btn" onClick={() => fileRef.current?.click()} title="插入图片（Ctrl+V 同效）" aria-label="插入图片">
+                <Icon name="image" size="sm" />
+              </button>
+            )}
           <select value="" disabled={!lib.length} onChange={(e) => { insertFromLib(e.target.value); e.target.value = ''; }}>
             <option value="">{lib.length ? '从附件库插入…' : '附件库里还没有图片'}</option>
             {lib.map((f: any) => <option key={f.id} value={f.id}>{f.name}</option>)}
           </select>
-          <span className="hint">
-            语法 <code>![说明](附件id)</code>　待办 <code>- [ ]</code>　{stats}
-          </span>
-          <button type="button" className="btn small ghost" onClick={() => setEditing(false)}>完成</button>
+          <span className="hint">{stats}</span>
+          <span className="grow" />
+          <button type="button" className="btn small ghost icon-btn" onClick={() => setEditing(false)} title="完成，回到预览" aria-label="完成编辑"><Icon name="check" size="sm" /></button>
           <input
             ref={fileRef}
             type="file"
@@ -248,10 +252,8 @@ export function MdControl({ value, onChange }: ControlProps) {
         </div>
       ) : (
         <div className="md-tools">
-          <button type="button" className="btn small ghost" onClick={() => setEditing(true)}>编辑正文</button>
-          <span className="hint">
-            {text.length} 字 · {stats}　只读预览（勾选框可点，IP 点击复制）
-          </span>
+          <button type="button" className="btn small ghost icon-btn" onClick={() => setEditing(true)} title="编辑正文" aria-label="编辑正文"><Icon name="pencil" size="sm" /></button>
+          <span className="hint">{text.length} 字 · {stats}</span>
         </div>
       )}
 
@@ -269,7 +271,6 @@ export function MdControl({ value, onChange }: ControlProps) {
         <div className="md-gallery">
           <div className="md-gallery-head">
             <span>图片（{uniqueRefs.length}）</span>
-            <span className="hint">点击放大 · 滚轮缩放 · 拖动看细节</span>
           </div>
           {uniqueRefs.length ? (
             !libReady ? <span className="hint">正在加载图片…</span> : (
@@ -288,7 +289,7 @@ export function MdControl({ value, onChange }: ControlProps) {
                 })}
               </div>
             )
-          ) : <span className="hint">正文里还没有图片。粘贴/拖入的图会出现在这里。</span>}
+          ) : <span className="hint">还没有图片</span>}
         </div>
       ) : null}
 

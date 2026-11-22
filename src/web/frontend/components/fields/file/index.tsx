@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../../api/client.ts';
 import { fileToDataUrl, listAttachments, refreshAttachments } from '../../../api/files.ts';
+import { Icon } from '../../../asset/icon/index.tsx';
 import { Copyable } from '../../ui/index.tsx';
 import { useStore } from '../../../store.tsx';
 import type { ControlProps } from '../types.ts';
@@ -134,7 +135,7 @@ export function FileControl({ def, value, onChange }: ControlProps) {
               return (
                 <div className="file-preview" key={id}>
                   <span className="hint bad grow">引用的附件已不存在（{id}）—— 重新上传，或移除。</span>
-                  <button type="button" className="btn small ghost" onClick={() => removeAt(id)}>移除</button>
+                  <button type="button" className="btn small ghost icon-btn" title="移除" aria-label="移除这个引用" onClick={() => removeAt(id)}><Icon name="x" size="sm" /></button>
                 </div>
               );
             }
@@ -144,9 +145,9 @@ export function FileControl({ def, value, onChange }: ControlProps) {
                   ? <img src={rec.url} alt={rec.name} />
                   : <span className="ext-badge" style={{ fontSize: 13, width: 40, textAlign: 'center' }}>{rec.ext ? rec.ext.slice(1).toUpperCase() : 'FILE'}</span>}
                 <a className="file-preview-name grow" href={rec.url} target="_blank" rel="noreferrer" title={rec.displayPath}>{rec.name}</a>
-                <a className="btn small ghost" href={rec.downloadUrl}>下载</a>
-                <Copyable className="hint" text={rec.path} title="点击复制物理路径">路径</Copyable>
-                <button type="button" className="btn small ghost" onClick={() => removeAt(id)}>移除</button>
+                <a className="btn small ghost icon-btn" href={rec.downloadUrl} title="下载" aria-label="下载附件"><Icon name="download" size="sm" /></a>
+                <Copyable className="btn small ghost icon-btn" text={rec.path} title="点击复制物理路径"><Icon name="copy" size="sm" /></Copyable>
+                <button type="button" className="btn small ghost icon-btn" title="移除" aria-label="移除这个附件" onClick={() => removeAt(id)}><Icon name="x" size="sm" /></button>
               </div>
             );
           })}
@@ -171,7 +172,7 @@ export function FileControl({ def, value, onChange }: ControlProps) {
         >
           从附件库选…
         </button>
-        <button type="button" className="btn small" disabled={full} onClick={() => uploadRef.current?.click()}>上传文件</button>
+        <button type="button" className="btn small icon-btn" disabled={full} onClick={() => uploadRef.current?.click()} title="上传文件并关联到本字段" aria-label="上传文件"><Icon name="upload" size="sm" /></button>
         <button type="button" className="btn small ghost" onClick={() => { patchUi({ view: 'files' }); window.location.hash = '#/files'; }}>附件中心</button>
         <input
           ref={uploadRef}

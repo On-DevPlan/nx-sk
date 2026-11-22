@@ -8,6 +8,7 @@
 // 密集：列头 + 行输入框直接铺开，没有「先展开再编辑」的两段式——这类清单
 // 就是拿来快速增删查改的。空行不用管，保存时服务端会剔除全空行。
 import { useStore } from '../../../store.tsx';
+import { Icon } from '../../../asset/icon/index.tsx';
 import { reorderAt, useListDrag } from '../../listDrag/index.tsx';
 import type { ControlProps } from '../types.ts';
 
@@ -60,12 +61,12 @@ export function EntryListControl({ def, value, onChange }: ControlProps) {
               会把一行的高度和注意力都吃掉 —— 与表格字段同一口径 */}
           <span className="entrylist-acts">
             <span {...rowDrag.handleProps(i)} />
-            <button type="button" className="tf-mini" title="删除这一行" onClick={() => removeRow(i)}>×</button>
+            <button type="button" className="tf-mini" title="删除这一行" aria-label="删除这一行" onClick={() => removeRow(i)}><Icon name="x" size="sm" /></button>
           </span>
         </div>
       ))}
       <div className="entrylist-add">
-        <button type="button" className="btn small" onClick={addRow}>＋ 添加一行</button>
+        <button type="button" className="btn small ghost icon-btn" title="添加一行" aria-label="添加一行" onClick={addRow}><Icon name="plus" size="sm" /></button>
         <span className="hint" title="变长清单：空行保存时自动剔除；拖行首（cursor 变抓手处）可调顺序">{rows.length ? `${rows.length} 行` : '还没有行'}</span>
       </div>
     </div>

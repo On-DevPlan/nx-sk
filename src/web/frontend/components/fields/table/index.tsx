@@ -23,6 +23,7 @@ import type { ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { TABLE_CELL_TYPES, computeTable, columnToDef, formatCellValue } from '../../../../../shared/table.ts';
 import { useStore } from '../../../store.tsx';
+import { Icon } from '../../../asset/icon/index.tsx';
 import { reorderAt, useListDrag } from '../../listDrag/index.tsx';
 import type { ControlProps } from '../types.ts';
 
@@ -412,7 +413,7 @@ export function TableControl({ def, value, onChange }: ControlProps) {
                       const rect = e.currentTarget.getBoundingClientRect();
                       setColMenu({ idx, rect });
                     }}
-                  >⋮</button>
+                  ><Icon name="dots" size="sm" /></button>
                 </div>
               ))}
               <div className="tf-th-add">
@@ -421,12 +422,11 @@ export function TableControl({ def, value, onChange }: ControlProps) {
                   next.push(newColumn(`列${cols.length + 1}`));
                   commit({ columns: next });
                   setColMenu({ idx: next.length - 1, rect: rootRef.current!.getBoundingClientRect() });
-                }}>＋</button>
+                }}><Icon name="plus" size="sm" /></button>
               </div>
             </div>
 
-            {/* 数据行：左侧沟槽 = 行号 / 抓手 / 行菜单 */}
-            {table.rows.map((row: any, i: number) => (
+            {/* 数据行：左侧沟槽 = 行号 / 抓手 / 行菜单 */}            {table.rows.map((row: any, i: number) => (
               <div
                 key={i}
                 className={`tf-row${rowDrag.draggingIndex === i ? ' dragging' : ''}${rowDrag.dropClass(i)}`}
@@ -507,7 +507,7 @@ export function TableControl({ def, value, onChange }: ControlProps) {
               const first = cols.find((c) => !c.computed);
               if (first) setPending(`${at}:${first.key}`);
             }}>
-              <span className="tf-gutter"><span className="tf-plus">＋</span></span>
+              <span className="tf-gutter"><span className="tf-plus"><Icon name="plus" size="sm" /></span></span>
               <span className="tf-addrow-label" style={{ gridColumn: '2 / -1' }}>新建一行</span>
             </button>
           </div>

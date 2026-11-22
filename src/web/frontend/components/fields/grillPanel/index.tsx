@@ -8,6 +8,7 @@
 import { useState } from 'react';
 import { GRILL_KIND_LABELS, answerText, grillProgress, isGrillAnswered } from '../../../../../shared/grill.ts';
 import type { GrillAnswer, GrillDoc, GrillQuestion } from '../../../../../shared/fields/types.ts';
+import { Icon } from '../../../asset/icon/index.tsx';
 import { Peek } from '../../peek/index.tsx';
 import type { PeekMode } from '../../peek/index.tsx';
 
@@ -230,7 +231,7 @@ export default function GrillPanel({
             </div>
             <div className="grill-progress-caption">
               <span>必答 {p.answered}/{p.total}{p.all ? ' · 已答完' : ` · 还差 ${p.total - p.answered} 题`}</span>
-              {acked ? <span className="grill-acked">已确认 · {when(doc.ack.at)}</span> : <span className="hint">确认后 agent 会读这份 JSON 继续</span>}
+              {acked ? <span className="grill-acked">已确认 · {when(doc.ack.at)}</span> : <span className="hint">确认后 agent 按此继续</span>}
             </div>
           </header>
 
@@ -284,7 +285,7 @@ export default function GrillPanel({
             <span>{p.all ? '必答已完成' : `还有 ${p.total - p.answered} 题必答`}</span>
           </div>
           <span className="grow" />
-          <button type="button" className="btn small ghost" onClick={saveProgress} disabled={saving}>保存进度</button>
+          <button type="button" className="btn small ghost icon-btn" onClick={saveProgress} disabled={saving} title="保存进度（不生成确认回执）" aria-label="保存进度"><Icon name="save" size="sm" /></button>
           <button
             type="button"
             className="btn small grill-confirm"

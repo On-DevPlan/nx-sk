@@ -20,6 +20,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from '../../../api/client.ts';
+import { Icon } from '../../../asset/icon/index.tsx';
 import { useStore } from '../../../store.tsx';
 import { copyText } from '../../../util/entryRef.ts';
 import { controlOf } from '../index.ts';
@@ -292,8 +293,9 @@ export function DebugControl({ value, onChange }: ControlProps) {
                   type="button"
                   className="dbg-chip-x"
                   title="移除这个引用"
+                  aria-label="移除这个引用"
                   onClick={(e) => { e.stopPropagation(); removeRef(loc); }}
-                >×</button>
+                ><Icon name="x" size="sm" /></button>
               </span>
             );
           })}
@@ -302,7 +304,7 @@ export function DebugControl({ value, onChange }: ControlProps) {
       {warnings.length ? <div className="hint">引用已忽略 {warnings.length} 条：{warnings.slice(0, 3).join('　')}</div> : null}
 
       <div className="dbg-add-row" title="格子内联显示内容；悬浮底部预览整块；点格子复制定位符">
-        <button type="button" className="btn small" onClick={() => setPickerOpen((v) => !v)}>＋ 引用资源</button>
+        <button type="button" className="btn small icon-btn" onClick={() => setPickerOpen((v) => !v)} title="引用资源（检索条目/字段/附件）" aria-label="引用资源"><Icon name="search" size="sm" /></button>
       </div>
 
       {pickerOpen ? (

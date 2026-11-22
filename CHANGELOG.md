@@ -4,8 +4,20 @@
 
 ## [Unreleased]
 
-### Changed（任务 #2 / #3 · 前端优化）
+### Changed（任务 #8 · 字段控件图标化落地）
 
+- **图标系统收口 `frontend/asset/icon`**：全站唯一 SVG 图标出口（`Icon` 组件 + 17 颗线性图标），
+  「一个功能一个图标」登记表写进模块头注释（添加/删除/下载/复制/编辑/确认/保存/预览/贴图/上传/
+  检索/菜单/peek 三态/新窗口/视图），同功能禁止第二颗图标；peek 的 6 颗内联 SVG 全部收编。
+- **图标尺寸 token 化**：`tokens.css` 新增 `--icon-sm/md/lg` 三档，`Icon` 组件与 `.icon-btn`/
+  `.tf-mini`/`.dbg-chip-x` 等图标键一律取 token 尺寸——统一调整图标大小只改 tokens.css。
+- **字段控件交互图标化 + 减语**（entrylist / table / file / md / source / secret / tags /
+  grillPanel / debug）：行删 `×`、加行/加列 `＋`、列行菜单 `⋮`、上传、下载、复制路径、
+  编辑/预览/完成、保存进度、引用检索等文字/字形按钮全部换成图标按钮（title + aria-label 保留语义）；
+  md 语法提示、只读预览括注、图库操作提示、source 拖拽说明、secret/tags 长占位等说明语压缩或删除。
+  peek/清单/表格拖拽功能经 `test:web` 真 Chrome 全 SOP 用例（含拖块换序）验证无损。
+
+### Changed（任务 #2 / #3 · 前端优化）
 - **前端目录重组**（`src/web/frontend/`，57 个文件搬移、156 处 import 同步改写）：
   - 页面：`modules/<域>/view.tsx` → `pages/<域>/index.tsx`（entries / templates / export / files / settings）；
   - 组件：`components/<组件>.tsx` → `components/<组件>/index.tsx`，字段控件同样目录化（`components/fields/<名>/index.tsx`）；

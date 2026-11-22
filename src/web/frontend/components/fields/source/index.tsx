@@ -20,6 +20,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../../api/client.ts';
 import { fileToDataUrl, listAttachments } from '../../../api/files.ts';
 import { toggleTaskAtLine } from '../../../util/mdSource.ts';
+import { Icon } from '../../../asset/icon/index.tsx';
 import { Copyable, copyText } from '../../ui/index.tsx';
 import { Lightbox } from '../../lightbox/index.tsx';
 import { MdView } from '../../mdView/index.tsx';
@@ -363,7 +364,7 @@ function SourceDrawer({ items, onChange, onClose, title, templateTitle, template
             onDrop={onDrop}
           >
             <div className="source-list-tools">
-              <button type="button" className="btn small" onClick={() => fileRef.current?.click()}>＋ 选择文件</button>
+              <button type="button" className="btn small icon-btn" onClick={() => fileRef.current?.click()} title="选择文件（也可直接拖入这一栏）" aria-label="选择文件入袋"><Icon name="upload" size="sm" /></button>
               <input
                 ref={fileRef}
                 type="file"
@@ -375,7 +376,6 @@ function SourceDrawer({ items, onChange, onClose, title, templateTitle, template
                   if (list.length) upload(list);
                 }}
               />
-              <span className="hint">拖到这一栏 = 入袋成附件条目</span>
             </div>
 
             <div
@@ -387,11 +387,11 @@ function SourceDrawer({ items, onChange, onClose, title, templateTitle, template
             >
               <div className="rowgap" style={{ gap: 4 }}>
                 <span className="hint nowrap">
-                  {editing ? `正在编辑一条文字（保存后就地更新）` : '新的一条（markdown）'}
+                  {editing ? '正在编辑一条文字' : '新的一条（markdown）'}
                 </span>
                 <span className="grow" />
                 {uploading ? <span className="hint nowrap">上传中 {uploading}…</span> : null}
-                <button type="button" className="btn small ghost" onClick={() => imgRef.current?.click()} title="选图片/文件插进正文">插入图片</button>
+                <button type="button" className="btn small ghost icon-btn" onClick={() => imgRef.current?.click()} title="选图片/文件插进正文" aria-label="插入图片"><Icon name="image" size="sm" /></button>
                 <input
                   ref={imgRef}
                   type="file"
@@ -404,7 +404,7 @@ function SourceDrawer({ items, onChange, onClose, title, templateTitle, template
                   }}
                 />
                 {editing ? (
-                  <button type="button" className="btn small ghost" onClick={() => { setEditId(null); setDraft(''); }}>取消编辑</button>
+                  <button type="button" className="btn small ghost icon-btn" onClick={() => { setEditId(null); setDraft(''); }} title="取消编辑" aria-label="取消编辑"><Icon name="x" size="sm" /></button>
                 ) : null}
               </div>
               <textarea
@@ -421,7 +421,7 @@ function SourceDrawer({ items, onChange, onClose, title, templateTitle, template
                   勾选待办直接改草稿本身——预览与入袋后是同一台渲染机器。 */}
               {draft.trim() ? (
                 <div className="source-draft-preview">
-                  <div className="hint">实时预览（随输入更新；待办可直接勾）</div>
+                  <div className="hint">实时预览</div>
                   <div className="md-preview reading source-draft-md">
                     <MdView
                       text={draft}
@@ -510,11 +510,11 @@ function SourceDrawer({ items, onChange, onClose, title, templateTitle, template
                   {selected.addedAt ? <span className="muted nowrap">{fmtTime(selected.at || selected.addedAt)}</span> : null}
                   {selected.kind === 'text' ? (
                     <>
-                      <Copyable className="tag" text={selected.text || ''} title="点击复制 markdown 原文">复制</Copyable>
-                      <button type="button" className="btn small ghost" onClick={() => startEdit(selected)}>编辑</button>
+                      <Copyable className="tag" text={selected.text || ''} title="点击复制 markdown 原文"><Icon name="copy" size="sm" /></Copyable>
+                      <button type="button" className="btn small ghost icon-btn" onClick={() => startEdit(selected)} title="编辑这条文字" aria-label="编辑"><Icon name="pencil" size="sm" /></button>
                     </>
                   ) : null}
-                  <button type="button" className="btn small ghost" onClick={removeSel}>移除</button>
+                  <button type="button" className="btn small ghost icon-btn" onClick={removeSel} title="从袋里移除" aria-label="移除"><Icon name="x" size="sm" /></button>
                 </div>
 
                 <div className="source-view-body">
@@ -550,8 +550,8 @@ function SourceDrawer({ items, onChange, onClose, title, templateTitle, template
                           <div className="block">{fileRec.name}</div>
                         )}
                         <div className="rowgap">
-                          <a className="btn small ghost" href={fileRec.downloadUrl || fileRec.url} download>下载</a>
-                          <Copyable className="tag" text={fileRec.path || ''} title="点击复制物理路径">路径</Copyable>
+                          <a className="btn small ghost icon-btn" href={fileRec.downloadUrl || fileRec.url} download title="下载" aria-label="下载附件"><Icon name="download" size="sm" /></a>
+                          <Copyable className="btn small ghost icon-btn" text={fileRec.path || ''} title="点击复制物理路径"><Icon name="copy" size="sm" /></Copyable>
                         </div>
                       </div>
                     ) : (

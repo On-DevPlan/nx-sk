@@ -5,7 +5,7 @@ export function TagsControl({ def, value, onChange }: ControlProps) {
   return (
     <input
       value={text}
-      placeholder={def.maxItems ? `多个用「、」分隔，最多 ${def.maxItems} 个` : '多个用「、」分隔'}
+      placeholder={def.maxItems ? `「、」分隔，≤ ${def.maxItems}` : '「、」分隔'}
       onChange={(e) => onChange(e.target.value.split(/[,，、;；]+/).map((x) => x.trim()).filter(Boolean))}
     />
   );
