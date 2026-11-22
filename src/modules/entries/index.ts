@@ -35,8 +35,9 @@ export default {
         q: { type: 'string', hint: '关键字' },
         tag: { type: 'array', hint: '按 tag 精确过滤，可重复；默认任一命中' },
         'tag-mode': { type: 'string', default: 'any', hint: 'any（默认）或 all' },
+        'missing-desc': { type: 'boolean', hint: '只列还没写 desc（一句话说明）的条目' },
       },
-      run: (ctx: { template?: string; parent?: string; q?: string; tag?: string[]; 'tag-mode'?: string } = {}) => service.listEntries(ctx),
+      run: (ctx: { template?: string; parent?: string; q?: string; tag?: string[]; 'tag-mode'?: string; 'missing-desc'?: boolean } = {}) => service.listEntries(ctx),
       render: (d: Parameters<typeof service.renderEntryList>[0]) => service.renderEntryList(d),
     },
     {
@@ -68,8 +69,8 @@ export default {
       id: 'entry.get',
       cli: ['entry', 'get'],
       http: ['GET', '/api/entries/:ref'],
-      summary: '读单条（id 或条目名都接受）；密文字段默认原文，--mask 才打码',
-      args: ['ref'],
+      summary: '读单条（id 或条目名都接受；省略 = 默认条目）；密文字段默认原文，--mask 才打码',
+      args: [{ name: 'ref', required: false }],
       flags: {
         mask: { type: 'boolean', hint: '密文字段打码显示（投屏/截图时用）' },
         template: { type: 'string', hint: '限定条目模板，解决同名歧义' },
@@ -86,6 +87,7 @@ export default {
         template: { type: 'string', hint: '条目模板 id 或标题（按它的字段结构初始化；缺省空白模板）' },
         parent: { type: 'string', hint: '父条目 id（建成它的子条目；缺省 = 根）' },
         title: { type: 'string', hint: '条目名，缺省取条目模板的名称字段' },
+        desc: { type: 'string', hint: '一句话说明（给 agent / 人认条目用，不是字段）' },
         set: { type: 'kv', hint: '字段=值，可重复；键可用 key 或中文标签' },
         data: { type: 'json', hint: '整份 JSON，或 @文件路径' },
         tags: { type: 'array' },
@@ -98,13 +100,14 @@ export default {
       id: 'entry.update',
       cli: ['entry', 'update'],
       http: ['PATCH', '/api/entries/:ref'],
-      summary: '改条目（PATCH 语义：只改传入字段）。字典里没有的字段会自动登记，直接写就行',
-      args: ['ref'],
+      summary: '改条目（PATCH 语义：只改传入字段；省略 ref = 默认条目）。字典里没有的字段会自动登记，直接写就行',
+      args: [{ name: 'ref', required: false }],
       flags: {
         set: { type: 'kv', hint: '字段=值，可重复；键可以用 key 或中文标签，没见过的键会自动登记' },
         data: { type: 'json', hint: '整份 JSON，或 @文件路径' },
         unset: { type: 'array', hint: '要清空的字段 key，逗号分隔' },
         title: { type: 'string' },
+        desc: { type: 'string', hint: '一句话说明（空串 = 清空）' },
         tags: { type: 'array' },
         template: { type: 'string' },
         'dry-run': { type: 'boolean' },
@@ -117,7 +120,7 @@ export default {
       cli: ['entry', 'add-field'],
       http: ['POST', '/api/entries/:ref/fields'],
       summary: '在条目内添加扩展字段（指定类型/分组；写时复制，不动条目模板字典）；--value 顺手给初值',
-      args: ['ref'],
+      args: [{ name: 'ref', required: false }],
       flags: {
         key: { type: 'string', required: true, hint: '字段 key（英文字母开头）' },
         label: { type: 'string', hint: '中文名（缺省同 key）' },
@@ -138,7 +141,7 @@ export default {
       cli: ['entry', 'field-update'],
       http: ['PATCH', '/api/entries/:ref/fields/:key'],
       summary: '改条目内一个字段的属性（显示名 / 描述）：只写本条目的结构行（写时复制），不动条目模板字典与值；改整条目模板字典用 template update --set-field',
-      args: ['ref'],
+      args: [{ name: 'ref', required: false }],
       flags: {
         key: { type: 'string', required: true, hint: '字段 key（或中文标签）' },
         label: { type: 'string', hint: '新的显示名（中文名）' },
@@ -156,7 +159,7 @@ export default {
       cli: ['entry', 'history'],
       http: ['GET', '/api/entries/:ref/history'],
       summary: '一个条目的全字段变化时间线（按时间倒序，含旧值 → 新值与版本号）',
-      args: ['ref'],
+      args: [{ name: 'ref', required: false }],
       flags: {
         template: { type: 'string', hint: '限定条目模板，解决同名歧义' },
         limit: { type: 'number', hint: '最多列多少条（默认 100，上限 500）' },
@@ -169,7 +172,7 @@ export default {
       cli: ['entry', 'field-history'],
       http: ['GET', '/api/entries/:ref/fields/:key/history'],
       summary: '单个字段的历史版本（rev 倒序）与当前值；版本号用于 field-restore',
-      args: ['ref'],
+      args: [{ name: 'ref', required: false }],
       flags: {
         key: { type: 'string', required: true, hint: '字段 key（或中文标签）' },
         template: { type: 'string', hint: '限定条目模板，解决同名歧义' },
@@ -217,7 +220,7 @@ export default {
       cli: ['entry', 'table'],
       http: ['GET', '/api/tables/:ref'],
       summary: '看一个表格字段的现值：表头、数据、计算列与统计行（合计/平均/计数）。只读，公式现算',
-      args: ['ref'],
+      args: [{ name: 'ref', required: false }],
       flags: {
         field: { type: 'string', hint: '表格字段（key 或中文标签）；条目模板里只有一个表格时可不填' },
         mask: { type: 'boolean', hint: '密文列打码显示' },
@@ -364,7 +367,7 @@ export default {
       cli: ['source', 'get'],
       http: ['GET', '/api/sources/:ref'],
       summary: '看某条目的资料袋明细（原始资料长什么样、附件在哪）',
-      args: ['ref'],
+      args: [{ name: 'ref', required: false }],
       flags: {
         template: { type: 'string', hint: '限定条目模板，解决同名歧义' },
       },
@@ -376,7 +379,7 @@ export default {
       cli: ['source', 'add'],
       http: ['POST', '/api/sources/:ref'],
       summary: '往资料袋里加一条：--text 文字 | --file 本机文件 | --url 网址（原样存，不改写）',
-      args: ['ref'],
+      args: [{ name: 'ref', required: false }],
       flags: {
         template: { type: 'string', hint: '限定条目模板，解决同名歧义' },
         text: { type: 'string', hint: '粘贴进来的文字（原样落袋）' },
@@ -401,7 +404,7 @@ export default {
       cli: ['source', 'update'],
       http: ['PATCH', '/api/sources/:ref'],
       summary: '改袋里某一条的元信息（--name / --note / --mapped 整理去向）。正文不改写——改内容 = 删掉重加',
-      args: ['ref'],
+      args: [{ name: 'ref', required: false }],
       flags: {
         template: { type: 'string', hint: '限定条目模板，解决同名歧义' },
         id: { type: 'string', required: true, hint: '要改的那条资料的 id' },

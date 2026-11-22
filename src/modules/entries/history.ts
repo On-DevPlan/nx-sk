@@ -11,7 +11,7 @@ import { entryStructures, loadStore, fieldHistoryOf, entryHistoryOf, restoreEntr
 import { notFound, badInput } from '../../core/errors.ts';
 import { displaySensitive } from '../../core/sensitive.ts';
 import { sensitiveViewer } from '../../core/vault.ts';
-import { defsForEntry, resolveEntry, resolveFieldDef, resolveOwnRow } from './shared.ts';
+import { defsForEntry, resolveEntry, resolveEntryOr, resolveFieldDef, resolveOwnRow } from './shared.ts';
 import type { FieldDef } from '../../shared/fields/types.ts';
 
 const OP_LABEL: Record<string, string> = { set: '修改', clear: '清空', restore: '恢复' };
@@ -55,7 +55,7 @@ function limitOf(raw: unknown, fallback: number): number {
 /** 条目内单个字段的历史（rev 倒序）。key 可以是字段 key 或中文标签。 */
 export async function getFieldHistory(ref: unknown, key: unknown, { template, limit }: { template?: string; limit?: unknown } = {}) {
   const store = await loadStore();
-  const entry = resolveEntry(store, ref, template);
+  const entry = resolveEntryOr(store, ref, template);
   const sec = store.templates.find((s) => s.id === entry.template);
   if (!sec) throw notFound(`条目 ${entry.id} 指向的条目模板已不存在: ${entry.template}`);
   const ownRows = entryStructures(store).get(entry.id) || null;
@@ -85,7 +85,7 @@ export async function getFieldHistory(ref: unknown, key: unknown, { template, li
 /** 一个条目的全字段变化时间线（按时间倒序；已脱离字段不出现）。 */
 export async function getEntryHistory(ref: unknown, { template, limit }: { template?: string; limit?: unknown } = {}) {
   const store = await loadStore();
-  const entry = resolveEntry(store, ref, template);
+  const entry = resolveEntryOr(store, ref, template);
   const sec = store.templates.find((s) => s.id === entry.template);
   if (!sec) throw notFound(`条目 ${entry.id} 指向的条目模板已不存在: ${entry.template}`);
   const ownRows = entryStructures(store).get(entry.id) || null;

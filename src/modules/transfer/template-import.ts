@@ -279,7 +279,8 @@ export async function applyImport(ref: unknown, buffer: Buffer, { fileName, onCo
         continue;
       }
       if (onConflict === 'overwrite') {
-        await updateEntry(hit.id, { template: targetId, set: values, tags: src.tags });
+        // 老包没有 desc：undefined 时不传，别把现有说明清空。
+        await updateEntry(hit.id, { template: targetId, set: values, tags: src.tags, desc: src.desc });
         overwritten += 1;
         entryIdMap.set(src.id, hit.id);
         moved.add(src.id);
@@ -290,7 +291,7 @@ export async function applyImport(ref: unknown, buffer: Buffer, { fileName, onCo
       // 与预览里算给用户看的 copyTitle 也对不上。
     }
     const title = uniqueTitle(src.title, takenTitles);
-    const created = await addEntry({ template: targetId, title, set: values, tags: src.tags, parent: parentId || undefined });
+    const created = await addEntry({ template: targetId, title, desc: src.desc || '', set: values, tags: src.tags, parent: parentId || undefined });
     takenTitles.add(created.title!);
     entryIdMap.set(src.id, created.id!);
     moved.add(src.id);

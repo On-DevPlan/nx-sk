@@ -3,10 +3,12 @@
 import { loadStore, mutateStore, pruneHistoryNow } from '../../core/store.ts';
 import type { Store, StoreSettings } from '../../core/store.ts';
 import { findTemplate } from '../../core/fields.ts';
+import { resolveEntry } from '../../core/locator.ts';
+import { DEFAULT_SCOPE_LIMIT, MAX_SCOPE_LIMIT } from '../../core/default-entry.ts';
 import { badInput, notFound } from '../../core/errors.ts';
 import { dbFile, displayPath } from '../../core/paths.ts';
 
-export const SETTING_KEYS = ['defaultTemplate', 'navGroups', 'navHidden', 'navOrder', 'autoSaveFields', 'historyMode', 'historyCount', 'historyDays'];
+export const SETTING_KEYS = ['defaultTemplate', 'defaultEntry', 'entryScopeLimit', 'navGroups', 'navHidden', 'navOrder', 'autoSaveFields', 'historyMode', 'historyCount', 'historyDays'];
 
 interface SettingSchemaItem {
   type: string;
@@ -25,6 +27,19 @@ const SCHEMA: Record<string, SettingSchemaItem> = {
     coerce: coerceDefaultTemplate,
     // 标量项，但带校验器 —— 渲染时不要把它当成「结构化项」跳过
     listed: true,
+  },
+  defaultEntry: {
+    type: 'string',
+    hint: '默认条目 id（空 = 未设）：CLI 省略 <ref> 时作用在它上面，nx-sk status 带出它与子条目',
+    coerce: coerceDefaultEntry,
+    // 与 defaultTemplate 同理：标量项 + 校验器，渲染时别被「结构化项」跳过
+    listed: true,
+  },
+  entryScopeLimit: {
+    type: 'number',
+    min: 1,
+    max: MAX_SCOPE_LIMIT,
+    hint: `status 一次最多带多少条条目（含默认条目与其子条目，默认 ${DEFAULT_SCOPE_LIMIT}；超过 8 条 agent 容易认错条目）`,
   },
   navGroups: { type: 'json', hint: '头部导航分组：[{title, templates:[条目模板id…]}]，数组顺序 = 显示顺序', coerce: coerceNavGroups },
   navHidden: { type: 'json', hint: '头部隐藏的条目模板 id（入口不显示，`#/条目模板` 直达仍可用）', coerce: coerceNavHidden },
@@ -152,6 +167,24 @@ function coerceDefaultTemplate(value: unknown, store: Store) {
     throw badInput(`默认条目模板不存在: ${ref} —— 现有: ${have}`);
   }
   return sec.id;
+}
+
+/**
+ * 默认条目必须指向**真实存在**的条目（空 = 不设）。
+ *
+ * 与 defaultTemplate 同一个理由：写进去时才校验，否则删掉条目之后这个设置
+ * 会静默失效，而「为什么命令作用到了别的条目上」将无从解释。
+ * 存 id（不是标题）：标题会改，id 不会。
+ */
+function coerceDefaultEntry(value: unknown, store: Store) {
+  const ref = String(value ?? '').trim();
+  if (!ref) return '';
+  try {
+    return resolveEntry(store, ref).id;
+  } catch (e) {
+    const have = store.entries.slice(0, 12).map((x) => `${x.title || '（无名）'}（${x.id}）`).join('、') || '（还没有条目）';
+    throw badInput(`默认条目不存在或标题有歧义: ${ref} —— ${(e as Error).message}；现有: ${have}`);
+  }
 }
 
 function coerceSetting(key: string, value: unknown, store: Store) {

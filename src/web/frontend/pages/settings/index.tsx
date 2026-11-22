@@ -56,6 +56,25 @@ export default function SettingsView() {
 
   const templates = useMemo(() => data?.templates || [], [data]);
 
+  // 任务 #63：默认条目下拉用整棵目录树（bootstrap 已下发扁平 DFS 列表）。
+  // 缩进只做视觉提示——层级本身由 parent 决定，选择结果永远是条目 id。
+  const entryOptions = useMemo(() => {
+    const nodes = boot?.tree || [];
+    const byId = new Map(nodes.map((n) => [n.id, n]));
+    const depthOf = (id: string): number => {
+      let depth = 0;
+      let parent = byId.get(id)?.parent ?? null;
+      const seen = new Set<string>([id]);
+      while (parent && !seen.has(parent)) {
+        seen.add(parent);
+        depth += 1;
+        parent = byId.get(parent)?.parent ?? null;
+      }
+      return depth;
+    };
+    return nodes.map((n) => ({ id: n.id, title: n.title, depth: depthOf(n.id) }));
+  }, [boot]);
+
   const load = useCallback(async () => {
     try {
       const d = await api<SettingsData>('/api/settings');
@@ -80,6 +99,9 @@ export default function SettingsView() {
       body: {
         set: {
           defaultTemplate: form.defaultTemplate,
+          // 任务 #63：默认条目 + status 上下文条数
+          defaultEntry: form.defaultEntry || '',
+          entryScopeLimit: form.entryScopeLimit ?? 5,
           autoSaveFields: !!form.autoSaveFields,
           historyMode: form.historyMode || 'count',
           historyCount: form.historyCount ?? 50,
@@ -172,6 +194,44 @@ export default function SettingsView() {
                       <option value={form.defaultTemplate}>{form.defaultTemplate}（条目模板已不存在）</option>
                     ) : null}
                   </select>
+                </div>
+              </div>
+
+              {/* 任务 #63：默认条目 = agent 的当前工作条目；status 的上下文条数也在这里配 */}
+              <div className="set-row">
+                <div className="set-k">
+                  <span className="name">默认条目</span>
+                  <span className="desc">CLI 省略条目参数时作用在它上面；nx-sk status 带出它与子条目</span>
+                </div>
+                <div className="set-v">
+                  <select value={form.defaultEntry || ''} onChange={(e) => setForm({ ...form, defaultEntry: e.target.value })}>
+                    <option value="">（未设：命令必须显式给条目）</option>
+                    {entryOptions.map((e) => (
+                      <option key={e.id} value={e.id}>{`${'　'.repeat(Math.min(e.depth, 6))}${e.title}（${e.id}）`}</option>
+                    ))}
+                    {/* 指向已删条目：保留原值让人看见，保存时后端会拒绝并提示现有条目 */}
+                    {form.defaultEntry && !entryOptions.some((e) => e.id === form.defaultEntry) ? (
+                      <option value={form.defaultEntry}>{form.defaultEntry}（条目已不存在）</option>
+                    ) : null}
+                  </select>
+                </div>
+              </div>
+
+              <div className="set-row">
+                <div className="set-k">
+                  <span className="name">上下文条数上限</span>
+                  <span className="desc">status 一次最多带多少条（含默认条目与其子条目；超过 8 条容易认错条目）</span>
+                </div>
+                <div className="set-v rowgap">
+                  <input
+                    type="number"
+                    min={1}
+                    max={50}
+                    style={{ width: 72 }}
+                    value={form.entryScopeLimit ?? 5}
+                    onChange={(e) => setForm({ ...form, entryScopeLimit: Number(e.target.value) || 5 })}
+                  />
+                  <span className="muted">条</span>
                 </div>
               </div>
 

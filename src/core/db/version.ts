@@ -31,8 +31,10 @@
  * 「字段 + 条目」，密钥是普通 entrylist 字段，不再有 schema 级 KV 标记。
  * v9（2026-11-21，0.44 · 任务 #51）：模板默认标签——templates.tags；模板创建条目时
  * 把默认 tag 带进 entries.tags，agent 可用 tag 直接检索，不必记模板 id。
+ * v10（2026-11-22，任务 #63）：条目一句话说明——entries.description（API 上的 `desc`）。
+ * 默认条目 + `status` 上下文靠它让 agent 分清「这条是干什么的」；它不是字段，不进完整度。
  */
-export const CURRENT_SCHEMA_VERSION = 9;
+export const CURRENT_SCHEMA_VERSION = 10;
 
 /**
  * 运行时最低 Node 版本。

@@ -12,11 +12,11 @@ const { planMigrationPath, DIRECT_EDGES } = await import('../../src/core/db/migr
 const { CURRENT_SCHEMA_VERSION } = await import('../../src/core/db/version.ts');
 const { tx } = await import('../../src/core/db/tx.ts');
 
-test('空库 → 当前版本：建齐表并走完 v1…v9，版本写进 meta.schema_version 与 PRAGMA user_version', () => {
+test('空库 → 当前版本：建齐表并走完 v1…v10，版本写进 meta.schema_version 与 PRAGMA user_version', () => {
   const db = openRaw(':memory:');
   assert.equal(countTables(db), 0);
   const applied = migrate(db, { from: 0 });
-  assert.deepEqual(applied, [1, 2, 3, 4, 5, 6, 7, 8, 9]);
+  assert.deepEqual(applied, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
   assert.equal(schemaVersion(db), CURRENT_SCHEMA_VERSION);
   assert.equal(userVersion(db), CURRENT_SCHEMA_VERSION);
   assert.equal(getMeta(db, 'schema_version'), String(CURRENT_SCHEMA_VERSION));
@@ -74,7 +74,7 @@ test('v8 → v9：模板补默认 tag，存量条目合并模板 tags 且保留�
   db.exec("INSERT INTO templates (id, title, description, \"order\", title_label, created_at, updated_at) VALUES ('__blank__','空白','',50,'名称','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z')");
   db.exec("INSERT INTO entries (id, template_id, title, tags, created_at, updated_at) VALUES ('e1','demo','样例','[\"mine\"]','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z')");
   db.exec("INSERT INTO entries (id, template_id, title, tags, created_at, updated_at) VALUES ('e2','__blank__','自由','[]','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z')");
-  assert.deepEqual(migrate(db), [9]);
+  assert.deepEqual(migrate(db, { to: 9 }), [9], '只跑这一条边（CURRENT 之后还会继续追加）');
   const demo = db.get("SELECT tags FROM templates WHERE id = 'demo'");
   assert.deepEqual(JSON.parse(demo.tags), ['demo', '字段样例']);
   const blank = db.get("SELECT tags FROM templates WHERE id = '__blank__'");

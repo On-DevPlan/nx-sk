@@ -2,9 +2,9 @@
 
 本文件格式参考 [Keep a Changelog](https://keepachangelog.com/)，中文正文。
 
-## [Unreleased]（任务 #2 / #3 · 前端优化）
+## [Unreleased]
 
-### Changed
+### Changed（任务 #2 / #3 · 前端优化）
 
 - **前端目录重组**（`src/web/frontend/`，57 个文件搬移、156 处 import 同步改写）：
   - 页面：`modules/<域>/view.tsx` → `pages/<域>/index.tsx`（entries / templates / export / files / settings）；
@@ -21,6 +21,34 @@
   顺手修三处：`var(--strong)` 三处悬空引用收编为 token（原回退继承色，口径对齐全站 hover 前景 --ink）、
   `.drop-mask` 整块重复定义删一份、`.board-tip` 死代码删除。
   选择器集合对账：除刻意删除的三处外与旧版一一对应，构建产物三层齐备。
+
+### Added（任务 #63 · 默认条目 + `nx-sk status`）
+
+**把「当前在操作哪条」变成一条命令的交付。**
+
+- **新增 `nx-sk status [--limit N]`**（`GET /api/status`）：返回默认条目、它的祖先链、以及它这一支的条目
+  （广度优先：先带全直接子条目，再往孙条目走）。默认输出就是**给 agent 的提示词**——默认条目是谁、
+  目标树长什么样、哪些命令会省略 `<ref>`、写字段前该看什么、条目多了该怎么缩小范围；`--json` 另给结构化字段。
+- **默认条目（`settings.defaultEntry`）**：存条目 id（设置时按标题归一）。省略 `<ref>` 的
+  `entry get / update / table / history / field-history / add-field / field-update / entry context /
+  source get / add / update` 都作用在它上面。删除 / 移动 / 改标题仍必须显式给 id——破坏性动作不走默认条目。
+  默认条目被删掉时 `status` 不报错，而是明确说「设置里的默认条目不在了」并给重设指引。
+- **上下文条数（`settings.entryScopeLimit`）**：默认 5，范围 1–50。`status` 超出时明说「还有 N 条没带出来」，
+  并提示用 `entry context` / `entry list --parent` 缩小范围，避免 agent 在十几条里认错条目。
+- **条目 `desc`（Schema v10：`entries.description`）**：每条条目的一句话说明，`entry add --desc` /
+  `entry update --desc` 写入；`entry get / list / context`、`export` / `import`、面板条目页标题下方都会带上。
+  desc 是条目属性而不是字段：不占块版式、不进完整度，也不出现在 `values` 里。
+  `entry list --missing-desc` 一次列出还没写说明的条目，`status` 也会报「其中 N 条还没写 desc」。
+- **面板**：设置页「默认条目 + 上下文条数上限」两项；条目页标题下新增 desc 输入，随「保存」一起提交
+  （自动保存与字段回写同样带上）。
+- **迁移**：v9 → v10 只加一列，旧条目的值 / 结构 / 父子关系原样保留，desc 为空串。
+- **测试**：新增 `status.test.mjs`（默认条目回落、BFS 截断、desc 往返、删除后 graceful）与
+  `db-v10.test.mjs`（迁移保真）；受影响的迁移/契约断言同步到 v10。
+- **skill 文档**：SKILL.md 新增「第 0 步：先 `status` 拿上下文」与默认条目/desc 规则表；
+  A01（定位顺序）/ A02（先定父级）/ A03（回写落点）/ A04（key 不受默认条目影响）/ A06（存完设默认）/
+  A15（`--missing-desc`、tag 与 desc 分工）、B01（默认条目章节）/ B03（三个新坑）/ B04（换项目换默认条目）
+  同步融入；`skill install` 到本机后新对话直接生效。
+
 ## [0.44.0] - 2026-11-21（任务 #46 / #51 / #52 / #54）
 
 **密钥归一为普通字段：安全 list&lt;kv&gt; 进入 field + entry 模型。**

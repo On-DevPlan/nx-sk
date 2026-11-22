@@ -207,6 +207,7 @@ entries + folders             内容和目录（folders 表只存 parent_id + so
 
 | 命令 | 作用 |
 | --- | --- |
+| `nx-sk status [--limit N]` | **默认条目上下文（agent 首选入口）**：默认条目 + 它这一支的条目（广度优先，按 `settings.entryScopeLimit` 截断，默认 5）+ 一段可直接执行的提示词 |
 | `nx-sk bootstrap [--json]` | 一次拿齐上下文：版本 / 存储路径 / 条目模板 / 目录树 / 设置 / 命令表 |
 | `nx-sk health` | 存活与存储可达性检查 |
 | `nx-sk routes [--module M] [--http "POST /api/entries"]` | 命令 ↔ 路由双向对照 |
@@ -220,7 +221,8 @@ entries + folders             内容和目录（folders 表只存 parent_id + so
 | `nx-sk template sync <id> [--dry-run]` | 按预置**补齐**本条目模板缺的分组与字段（只增不改不删）——预置演进后让老条目模板追上 |
 | `nx-sk template update <id> --add-group / --rename-group / --move-group / --remove-group` | 改**分组骨架**：新增 / 改名（可换 id，字段引用跟着改）/ 上下挪 / 删（空的才让删） |
 | `nx-sk template update <id> --set-field / --move-field` | 改**字段**：改标签 / 类型 / 分组 / 提示 / 必填策略，组内上下挪（key 不可改）。面板「编辑条目模板」同源 |
-| `nx-sk entry list \| get \| add \| update \| remove` | 条目 CRUD（PATCH 语义）；`add --parent` 建子条目，删有子条目的条目会删整棵子树。`--tags` 读写条目标签，`entry list --tag` / `--tag-mode all` 按标签过滤 |
+| `nx-sk entry list \| get \| add \| update \| remove` | 条目 CRUD（PATCH 语义）；`add --parent` 建子条目，删有子条目的条目会删整棵子树。`--tags` 读写条目标签，`entry list --tag` / `--tag-mode all` 按标签过滤。`--desc` 是条目的一句话说明（给 agent / 人认条目用，不是字段、不进完整度）；`entry list --missing-desc` 专找还没写的 |
+| `nx-sk entry get \| update \| table \| history \| context`（省略 `<ref>`） | 作用在 `settings.defaultEntry` 上；删除 / 移动 / 改标题仍必须显式给 id |
 | `nx-sk entry search [--q] [--tag] [--tag-mode all|any] [--template] [--parent] [--limit]` | 轻量搜索：标题 / 模板标题 / tag / 字段标签 / 非敏感字段值；只返回命中定位信息，不返回完整 values |
 | `nx-sk entry add --tags` / `entry update --tags` | 新建时从模板继承默认 tags，显式 `--tags` 只追加；更新时整体替换条目标签 |
 | `nx-sk entry tree [--parent <父>] [--depth N]` | **目录树**：扁平节点（id / 标题 / parent / sort / 子节点数），左侧导航的唯一来源 |
@@ -241,7 +243,7 @@ entries + folders             内容和目录（folders 表只存 parent_id + so
 | `nx-sk transfer bundle-export [--templates 条目模板,条目模板] [--passphrase 口令] [--no-files] [--out 文件]` | 多条目模板/整库打包成 ZIP（`bundle.json + templates/<id>.zip`），可设口令加密 |
 | `nx-sk transfer bundle-import [--file ZIP] [--on-conflict skip\|copy\|overwrite] [--dry-run]` | 整库包解密导入；缺省「合并」只增补不覆盖 |
 | `nx-sk transfer import-new [--file ZIP] [--dry-run]` | **零配置**：自动识别单条目模板包 / 整库包，按包内结构新建（id 冲突加序号） |
-| `nx-sk setting get \| set` | 全局设置 |
+| `nx-sk setting get \| set` | 全局设置（含 `defaultEntry` 默认条目、`entryScopeLimit` status 上下文条数 1–50、`defaultTemplate`） |
 | `nx-sk skill list \| install \| get` | 把内置 skill 装给 agent / 给外部 agent 取上下文 |
 
 所有写命令都有 `--dry-run`；所有命令都支持 `--json`（标准输出**单个** JSON 值）。
@@ -253,6 +255,14 @@ pnpm install
 pnpm start                     # 构建前端 + 起面板
 # 或开发模式（vite :5180 + serve :7866，一个 Ctrl-C 关两个）
 pnpm run dev
+```
+
+让 agent 接手时先跑一条：
+
+```bash
+nx-sk setting set --set defaultEntry=<条目>        # ① 指定「当前工作条目」
+nx-sk status                                       # ② 拿到默认条目 + 子条目 + 该怎么动的提示词
+nx-sk entry update --set 字段=值                    # ③ 省略条目 = 改默认条目
 ```
 
 用 CLI 填一份档案：

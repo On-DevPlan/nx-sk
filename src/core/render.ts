@@ -72,6 +72,8 @@ export interface EntryLike {
   id: string;
   template: string;
   title: string;
+  /** v10：一句话说明；旧夹具/旧草稿可能没有。 */
+  desc?: string;
   tags: string[];
   createdAt: string | null;
   updatedAt: string | null;
@@ -182,6 +184,8 @@ export function serializeEntry(
     id: entry.id,
     template: entry.template,
     title: entry.title,
+    // v10：desc 是条目自身的属性（不是字段），面板/CLI/导出都从这一处拿。
+    desc: entry.desc || '',
     tags: entry.tags || [],
     createdAt: entry.createdAt,
     updatedAt: entry.updatedAt,

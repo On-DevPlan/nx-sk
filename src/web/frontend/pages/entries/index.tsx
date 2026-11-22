@@ -127,7 +127,7 @@ export default function TemplateView({ templateId: rawId, listHidden = false, si
       setData(d);
       const wanted = keepId || entryRef.current;
       const hit = d.entries.find((e) => e.id === wanted) || d.entries[0] || null;
-      setDraft(hit ? { id: hit.id, title: hit.title, values: { ...hit.values } } : null);
+      setDraft(hit ? { id: hit.id, title: hit.title, desc: hit.desc || '', values: { ...hit.values } } : null);
       if (hit && hit.id !== entryRef.current) patchUi({ entry: hit.id });
     } catch (e) {
       setErr((e as Error).message);
@@ -154,7 +154,7 @@ export default function TemplateView({ templateId: rawId, listHidden = false, si
     if (!entryWanted || !data) return;
     if (draft?.id === entryWanted) return;
     const hit = data.entries.find((e) => e.id === entryWanted);
-    if (hit) setDraft({ id: hit.id, title: hit.title, values: { ...hit.values } });
+    if (hit) setDraft({ id: hit.id, title: hit.title, desc: hit.desc || '', values: { ...hit.values } });
   }, [entryWanted, data, draft?.id]);
   // #18：侧栏点了「字段」结果 → 进本条目后把对应块滚进视口并短暂高亮。
   // ui.focus 由 App 的 onOpenEntry 写入；消费一次立刻清空（切条目/重进不该再闪）。
@@ -228,20 +228,24 @@ export default function TemplateView({ templateId: rawId, listHidden = false, si
   // 不是条目模板字典。任务 #25 的真根因：只遍历 data.fields 时，扩展字段的改动
   // 永远不进 dirty → 保存按钮不出现、值也存不下去（debug 引用因此看着「不更新」）。
   const dirty = useMemo(() => {
-    if (!draft || !current) return { set: {} as Record<string, unknown>, titleChanged: false, count: 0 };
+    if (!draft || !current) return { set: {} as Record<string, unknown>, titleChanged: false, descChanged: false, count: 0 };
     const set: Record<string, unknown> = {};
     const defs = current.entryFields?.length ? current.entryFields : (data?.fields || []);
     for (const f of defs) {
       if (norm(current.values[f.key]) !== norm(draft.values[f.key])) set[f.key] = draft.values[f.key];
     }
-    return { set, titleChanged: draft.title !== current.title, count: Object.keys(set).length + (draft.title !== current.title ? 1 : 0) };
+    const titleChanged = draft.title !== current.title;
+    // desc 是条目自身属性（不是字段），所以单独算一处改动。
+    const descChanged = draft.desc !== (current.desc || '');
+    return { set, titleChanged, descChanged, count: Object.keys(set).length + (titleChanged ? 1 : 0) + (descChanged ? 1 : 0) };
   }, [draft, current, data]);
 
   const save = guard(async () => {
     if (!draft || !current) return;
     if (!dirty.count) { toast('没有改动'); return; }
-    const body: { set: Record<string, unknown>; title?: string } = { set: dirty.set };
+    const body: { set: Record<string, unknown>; title?: string; desc?: string } = { set: dirty.set };
     if (dirty.titleChanged) body.title = draft.title;
+    if (dirty.descChanged) body.desc = draft.desc;
     await api(`/api/entries/${encodeURIComponent(draft.id)}`, { method: 'PATCH', body });
     toast(`已保存 ${dirty.count} 处改动`);
     await load(draft.id);
@@ -329,7 +333,7 @@ export default function TemplateView({ templateId: rawId, listHidden = false, si
     return () => {
       if (autoTimer.current) { clearTimeout(autoTimer.current); autoTimer.current = null; }
     };
-  }, [autoSave, dirty.count, dirty.set, dirty.titleChanged]);
+  }, [autoSave, dirty.count, dirty.set, dirty.titleChanged, dirty.descChanged]);
   useEffect(() => () => { if (autoTimer.current) clearTimeout(autoTimer.current); }, []);
 
   /**
@@ -348,11 +352,13 @@ export default function TemplateView({ templateId: rawId, listHidden = false, si
       if (norm(current.values[f.key]) !== norm(nextValues[f.key])) set[f.key] = nextValues[f.key];
     }
     const titleChanged = draft.title !== current.title;
-    const count = Object.keys(set).length + (titleChanged ? 1 : 0);
+    const descChanged = draft.desc !== (current.desc || '');
+    const count = Object.keys(set).length + (titleChanged ? 1 : 0) + (descChanged ? 1 : 0);
     if (!count) { toast('没有改动'); return true; }
     if (autoTimer.current) { clearTimeout(autoTimer.current); autoTimer.current = null; }
-    const body: { set: Record<string, unknown>; title?: string } = { set };
+    const body: { set: Record<string, unknown>; title?: string; desc?: string } = { set };
     if (titleChanged) body.title = draft.title;
+    if (descChanged) body.desc = draft.desc;
     await api(`/api/entries/${encodeURIComponent(draft.id)}`, { method: 'PATCH', body });
     toast(`已回写 ${count} 处改动`);
     await load(draft.id);
@@ -604,7 +610,7 @@ export default function TemplateView({ templateId: rawId, listHidden = false, si
             onPick={(e) => {
               patchUi({ entry: e.id });
               syncEntryHash(templateId, e.id);
-              setDraft({ id: e.id, title: e.title, values: { ...e.values } });
+              setDraft({ id: e.id, title: e.title, desc: e.desc || '', values: { ...e.values } });
             }}
             onCopyRef={copyEntryRef}
             onStartDrag={startColDrag}
@@ -627,6 +633,7 @@ export default function TemplateView({ templateId: rawId, listHidden = false, si
           onCopyRef={copyEntryRef}
           onSaveAsTemplate={openSaveAsTemplate}
           onDraftTitle={(title) => setDraft((d) => (d ? { ...d, title } : d))}
+          onDraftDesc={(desc) => setDraft((d) => (d ? { ...d, desc } : d))}
           onEditTags={() => setTagEdit({ scope: 'entry', tags: current?.tags || [] })}
           onAddField={() => setAf({ key: '', label: '', type: 'text', group: groups[0]?.id || '', value: '' })}
           onRestoreField={restoreField}

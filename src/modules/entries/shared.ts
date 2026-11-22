@@ -16,6 +16,11 @@ export function mustFindTemplate(store: Store, ref: unknown): StoreTemplate {  c
 
 /** 条目定位：id 优先，其次唯一标题；重名时报 CONFLICT 让调用方用 id 指定。 */
 export { resolveEntry };
+/**
+ * 任务 #63：ref 为空时回落到 settings.defaultEntry（只在读 / 改内容的命令上使用；
+ * 删除、移动、改名类动作必须显式给 id）。实现只有一份，在 core/default-entry.ts。
+ */
+export { resolveEntryOr } from '../../core/default-entry.ts';
 
 export function mergeInputs(set: unknown, data: unknown): Record<string, unknown> {
   const out: Record<string, unknown> = {};

@@ -9,6 +9,7 @@ import { blocked } from '../../core/errors.ts';
 import { compileRoute, usageOf } from '../../runtime/spec.ts';
 import { buildTree } from '../../core/tree.ts';
 import { BLANK_TEMPLATE_ID } from '../../shared/tree.ts';
+import { buildStatus, defaultEntryRef, scopeLimitOf } from '../../core/default-entry.ts';
 
 /**
  * 命令表在 runtime/registry.js，而分层规则说模块不能向上依赖 runtime。
@@ -66,6 +67,29 @@ export async function bootstrapInfo() {
     migration: migrationNote(),
     commands,
   };
+}
+
+/**
+ * 默认条目上下文（任务 #63）：一次调用就把「当前在操作哪条、它下面有什么、该怎么动」交出去。
+ *
+ * `prompt` 是**交付的正文**：CLI 默认输出直接打印它（agent 拿一次就够），
+ * `--json` 时才看结构化字段（defaultEntry / entries / scope）。这与 localtask 的
+ * 「交付即提示词」是同一条口径：知识放在返回里，别让 agent 再翻文档。
+ */
+export async function statusInfo({ limit }: { limit?: number } = {}) {
+  const store = await loadStore();
+  const ctx = buildStatus(store, { limit });
+  return {
+    status: 'ok',
+    app: { name: APP_NAME, label: APP_LABEL, version: VERSION },
+    storePath: displayPath(storePathInUse()),
+    settings: { defaultEntry: defaultEntryRef(store), entryScopeLimit: scopeLimitOf(store) },
+    ...ctx,
+  };
+}
+
+export function renderStatus(d: Awaited<ReturnType<typeof statusInfo>>) {
+  return d.prompt;
 }
 
 export async function healthInfo() {

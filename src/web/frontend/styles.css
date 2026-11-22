@@ -356,6 +356,20 @@ main.body { flex: 1; min-height: 0; overflow: auto; }
 }
 .entry-title-input:hover { background: var(--hover); }
 .entry-title-input:focus { background: var(--paper); border-color: var(--line-strong); }
+/* 条目 desc（任务 #63）：标题下的一行说明，弱化到不抢标题的注意力 */
+.entry-desc { padding-top: 0; padding-bottom: 4px; }
+.entry-desc-input {
+  width: 100%;
+  height: 26px;
+  padding: 0 6px;
+  font-size: 12px;
+  color: var(--mid);
+  background: transparent;
+  border-color: transparent;
+  border-radius: 6px;
+}
+.entry-desc-input:hover { background: var(--hover); }
+.entry-desc-input:focus { background: var(--paper); border-color: var(--line-strong); color: var(--strong); }
 /* 条目 tag：语义标签不是按钮，压低存在感；一行放不下就换行，不撑坏标题 */
 .tag-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; }
 .chip-tag { height: 18px; padding: 0 6px; font-size: 10px; background: transparent; border: 1px dashed var(--soft-2); }

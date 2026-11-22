@@ -1,4 +1,5 @@
 import * as service from './service.ts';
+import { MAX_SCOPE_LIMIT } from '../../core/default-entry.ts';
 
 export default {
   id: 'system',
@@ -14,6 +15,18 @@ export default {
       flags: {},
       run: () => service.bootstrapInfo(),
       render: (d: Parameters<typeof service.renderBootstrap>[0]) => service.renderBootstrap(d),
+    },
+    {
+      id: 'system.status',
+      cli: ['status'],
+      http: ['GET', '/api/status'],
+      summary: '默认条目上下文（agent 首选入口）：默认条目 + 子条目（按设置截断）+ 该干什么的提示词',
+      flags: {
+        // 单次覆盖设置里的条数上限；不给就用 settings.entryScopeLimit
+        limit: { type: 'number', hint: `本次最多带多少条（1–${MAX_SCOPE_LIMIT}；缺省读设置）` },
+      },
+      run: (ctx: { limit?: number } = {}) => service.statusInfo(ctx),
+      render: (d: Parameters<typeof service.renderStatus>[0]) => service.renderStatus(d),
     },
     {
       id: 'system.health',
