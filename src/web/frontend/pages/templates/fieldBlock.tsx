@@ -109,7 +109,7 @@ export function FieldBlock({ f, types, labels, locked, cls, onRowOver, onDropRow
           onDragEnd={onEnd}
           title="拖动：组内换序；拖进别的分组 = 挪过去"
           aria-label="拖动调整顺序或挪分组"
-        >⠿</span>
+        />
         <input
           className="d-label"
           value={label}

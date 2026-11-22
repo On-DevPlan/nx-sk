@@ -59,14 +59,14 @@ export function EntryListControl({ def, value, onChange }: ControlProps) {
           {/* 行内操作一律小图标键（不是 btn）：这是密集迷你表，一颗正常大小的按钮
               会把一行的高度和注意力都吃掉 —— 与表格字段同一口径 */}
           <span className="entrylist-acts">
-            <span {...rowDrag.handleProps(i)}>⠿</span>
+            <span {...rowDrag.handleProps(i)} />
             <button type="button" className="tf-mini" title="删除这一行" onClick={() => removeRow(i)}>×</button>
           </span>
         </div>
       ))}
       <div className="entrylist-add">
         <button type="button" className="btn small" onClick={addRow}>＋ 添加一行</button>
-        <span className="hint" title="变长清单：空行保存时自动剔除；拖行首 ⠿ 可调顺序">{rows.length ? `${rows.length} 行` : '还没有行'}</span>
+        <span className="hint" title="变长清单：空行保存时自动剔除；拖行首（cursor 变抓手处）可调顺序">{rows.length ? `${rows.length} 行` : '还没有行'}</span>
       </div>
     </div>
   );

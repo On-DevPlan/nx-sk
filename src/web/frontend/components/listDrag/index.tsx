@@ -48,7 +48,7 @@ export function useListDrag(onMove: (from: number, insertAt: number) => void, { 
     onDragEnd: reset,
   }), [reset]);
 
-  /** 把手：绑到 ⠿ 上（等价于 dragStartProps + 把手的样式与无障碍标注）。 */
+  /** 把手：绑到行首热区上（等价于 dragStartProps + 把手的样式与无障碍标注）。 */
   const handleProps = useCallback((index: number) => ({
     className: 'tf-grip',
     title: '拖动调整顺序',

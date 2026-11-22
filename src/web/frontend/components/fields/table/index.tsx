@@ -5,7 +5,7 @@
 // 不会影响同条目模板下的其它条目。字段定义里的 columns 只是「新建时的初始列」。
 //
 // 六条刻意的取舍：
-//   1. **行与列都有抓手**：行抓手在**左侧沟槽**（⠿ 拖动 + ⋮ 菜单），列抓手就是表头本身。
+//   1. **行与列都有抓手**：行抓手在**左侧沟槽**（cursor 抓手 + ⋮ 菜单），列抓手就是表头本身。
 //      排序是这类表最常见的编辑动作，一排 ↑↓ 按钮既占地方又说不清「会插到哪」。
 //   2. **列管理挂在列头上**（⋮ 打开）：改名 / 换类型 / 单位 / 汇总 / 默认值 / 密文 / 选项 / 公式
 //      + 左移右移、左右插入、复制属性、删除属性。以前那一大块「列设置」表单铺在表格下面，
@@ -445,7 +445,7 @@ export function TableControl({ def, value, onChange }: ControlProps) {
                       setRowMenu({ idx: i, rect });
                     }}
                   >⋮</button>
-                  <span {...rowDrag.handleProps(i)} className="tf-grip" title="拖动调整这一行的顺序">⠿</span>
+                  <span {...rowDrag.handleProps(i)} className="tf-grip" title="拖动调整这一行的顺序" />
                 </div>
                 {cols.map((c) => {
                   const err = row.errors[c.key];

@@ -2,7 +2,7 @@
 //
 // 两块「基础设施」直接复用条目正文那套（见 components/blockBoard.tsx 的手感约定）：
 //   - **拖拽逻辑**：useListDrag 同款 HTML5 DnD + 插入线。分组面板整行是把手，
-//     拖面板 = 调分组顺序（一次 PATCH 整份 groups）；字段行只有 ⠿ 把手可拖，
+//     拖面板 = 调分组顺序（一次 PATCH 整份 groups）；字段行只有行首把手可拖，
 //     拖到某行上半/下半 = 插到它前/后，**拖进别的分组 = 挪过去**（一次 PATCH 整份 fields）。
 //   - **块逻辑**：一个分组 = 一块面板，一个字段 = 面板里的一个块；
 //     字段的「所属分组」不再用下拉框表达，而是由它所在的面板表达。
@@ -373,7 +373,7 @@ export default function DictEditor({ templateId, initial, types, labels, builtin
       </div>
 
       <div className="dbar">
-        拖分组标题行调整分组顺序 · 拖字段 ⠿ 把手换序，拖进别的分组就是挪过去 · 每次改动即时保存
+        拖分组标题行调整分组顺序 · 拖字段行首（cursor 变抓手处）换序，拖进别的分组就是挪过去 · 每次改动即时保存
       </div>
 
       {/* 分组面板：一块 = 一个分组；块里的行 = 字段（组字段后面紧跟它的成员） */}
@@ -396,7 +396,6 @@ export default function DictEditor({ templateId, initial, types, labels, builtin
               }}
               onDragEnd={groupDrag.dragStartProps(gi).onDragEnd}
             >
-              <span className="panel-grip" aria-hidden>⠿</span>
               <GroupHeadInputs g={p} builtin={isBuiltin} onRename={renameGroup} />
               <span className="panel-count">{list.length} 字段</span>
               {isBuiltin ? <span className="hint">内置分组：每个条目模板自带，删了下回读又会补回来</span> : null}

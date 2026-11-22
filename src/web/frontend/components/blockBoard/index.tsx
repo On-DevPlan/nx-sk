@@ -10,8 +10,8 @@
 //      「这个条目模板怎么排」，不是「这一条内容有多高」，后者跟着每条记录变，不该落盘。
 //   2. **只能改宽，不能改高**：高度既然由内容决定，再叠一个手动高度就互相打架；
 //      拖左右边缘改宽度（单列 → 多列），内容重排后高度自己会跟。
-//   3. **整个块头就是拖拽把手**（dragConfig.handle = '.blk-head'）。只有那个 10px 的 ⠿
-//      点点可拖太难瞄准了（真实反馈：拖不动）；块头里没有输入框，整条都能按下去。
+//   3. **整个块头就是拖拽把手**（dragConfig.handle = '.blk-head'）。块头里没有输入框，
+//      整条都能按下去；可拖性只靠 cursor:grab 表达（验收反馈：⠿ 图标丑，删）。
 //      块体（输入区）仍然不能拖——否则选词会变成搬块。
 //   4. **版式与字段值两条保存链**：拖块只写 template.layout（防抖自动存），
 //      填字段仍然走「N 处改动 → 保存」。否则拖一下版式会把没填完的值一起提交。
@@ -189,7 +189,7 @@ function Block({ def, value, onPatch, ctx, onMeasure, dragProps, fieldActions, .
 
   return (
     <div {...rest} className={`blk ${rest.className || ''}`} data-block={def.key}>
-      {/* 块头整条都是把手：鼠标落在「公司名称」这行任意位置就能拖，不必去戳那个小 ⠿ */}
+      {/* 块头整条都是把手：鼠标落在「公司名称」这行任意位置就能拖 */}
       <div
         className="blk-head"
         {...dragProps}
@@ -200,7 +200,6 @@ function Block({ def, value, onPatch, ctx, onMeasure, dragProps, fieldActions, .
         }}
         title="按住这一行拖动：插到别的块上方 / 下方"
       >
-        <span className="blk-grip" aria-hidden>⠿</span>
         <span className="blk-label nowrap" title={`${def.label}（${def.key}）`}>{def.label}</span>
         {def.sensitive ? <span className="tag bad">密文</span> : null}
         {def.fill && def.fill !== 'normal' ? <span className="tag">{def.fillLabel || def.fill}</span> : null}
@@ -402,7 +401,6 @@ function Panel({ group, layoutGroup, index, drag, draft, onPatch, ctx, onLayouts
         }}
         onDragEnd={drag.dragStartProps(index).onDragEnd}
       >
-        <span className="panel-grip" aria-hidden>⠿</span>
         <button type="button" className="panel-toggle" onClick={() => onCollapse(group.id, !collapsed)} title={collapsed ? '展开这一组' : '折叠这一组'}>
           {collapsed ? '▸' : '▾'}
         </button>

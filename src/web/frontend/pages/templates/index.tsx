@@ -681,7 +681,7 @@ function TreeTemplate({
           onDragEnd={onDragEnd}
           title="拖动调整条目模板顺序"
           aria-label="拖动调整条目模板顺序"
-        >⠿</span>
+        />
         <button
           type="button"
           className="tree-chev"
