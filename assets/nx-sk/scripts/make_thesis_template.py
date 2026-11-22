@@ -13,7 +13,13 @@
     - 附件2 毕业论文（设计）模板              p.20-30
 
 用法：
+  # 生成空白模板（身份字段是 {{student}} / {{studentId}} 等占位符）——可提交进仓库
   python make_thesis_template.py --out ../templates/毕业论文模板-设计开发类.docx
+
+  # 生成填好的版本（含真实姓名/学号）——必须写到仓库之外，不要提交
+  python make_thesis_template.py --out /tmp/我的毕业论文.docx \
+      --student "某某" --student-id "000000000" --advisor "某老师" \
+      --title "某某某某某某某某" --title-en "Some Title" --year 2027
 """
 
 from __future__ import annotations
@@ -921,21 +927,28 @@ def add_comments(doc):
             doc.add_comment(p.runs, text=text, author="格式要求", initials="FMT")
 
 
-def build(out_path: Path):
-    meta = {
-        "title": "{{title}}",
-        "titleEn": "{{titleEn}}",
-        "college": "信息工程学院",
-        "major": "物联网工程",
-        "majorEn": "Internet of Things Engineering",
-        "student": "{{student}}",
-        "studentEn": "{{studentEn}}",
-        "studentId": "{{studentId}}",
-        "advisor": "{{advisor}}",
-        "advisorEn": "{{advisorEn}}",
-        "advisorTitle": "讲师",
-        "year": "{{year}}",
-    }
+# 模板元数据：身份类字段一律留成 {{占位符}}，生成的是「可直接填」的空白模板。
+# 需要填好的版本时，用 --student / --student-id / --advisor / --title ... 覆盖。
+# ⚠ 填好的版本含个人真实信息，请写到仓库之外（--out 指向仓库外路径），不要提交进 git。
+DEFAULT_META = {
+    "title": "{{title}}",
+    "titleEn": "{{titleEn}}",
+    "college": "信息工程学院",
+    "major": "物联网工程",
+    "majorEn": "Internet of Things Engineering",
+    "student": "{{student}}",
+    "studentEn": "{{studentEn}}",
+    "studentId": "{{studentId}}",
+    "advisor": "{{advisor}}",
+    "advisorEn": "{{advisorEn}}",
+    "advisorTitle": "讲师",
+    "year": "{{year}}",
+}
+
+
+def build(out_path: Path, meta_overrides: dict | None = None):
+    meta = dict(DEFAULT_META)
+    meta.update({k: v for k, v in (meta_overrides or {}).items() if v})
 
     doc = Document()
     build_styles(doc)
@@ -977,8 +990,30 @@ def main():
     parser = argparse.ArgumentParser(description="生成本科毕业论文模板 docx")
     parser.add_argument("--out", default=str(Path(__file__).resolve().parent.parent /
                                              "templates" / "毕业论文模板-设计开发类.docx"))
+    for flag, dest, helptext in (
+        ("--title", "title", "论文题目（中文）"),
+        ("--title-en", "titleEn", "论文题目（英文）"),
+        ("--college", "college", "学院"),
+        ("--major", "major", "专业"),
+        ("--major-en", "majorEn", "专业（英文）"),
+        ("--student", "student", "学生姓名"),
+        ("--student-en", "studentEn", "学生姓名（拼音）"),
+        ("--student-id", "studentId", "学号"),
+        ("--advisor", "advisor", "导师姓名"),
+        ("--advisor-en", "advisorEn", "导师姓名（拼音）"),
+        ("--advisor-title", "advisorTitle", "导师职称"),
+        ("--year", "year", "届别年份，如 2027"),
+    ):
+        parser.add_argument(flag, dest=dest, default=None, help=helptext)
     args = parser.parse_args()
-    path = build(Path(args.out))
+    meta = {
+        "title": args.title, "titleEn": args.titleEn,
+        "college": args.college, "major": args.major, "majorEn": args.majorEn,
+        "student": args.student, "studentEn": args.studentEn, "studentId": args.studentId,
+        "advisor": args.advisor, "advisorEn": args.advisorEn,
+        "advisorTitle": args.advisorTitle, "year": args.year,
+    }
+    path = build(Path(args.out), meta)
     print(f"已生成: {path}")
 
 
