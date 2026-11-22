@@ -160,6 +160,7 @@ export function seedEntries(at: string): StoreEntry[] {
     id: entryId,
     template: DEMO_TPL.id,
     title: values.name,
+    desc: '示例条目：每种字段都填了一点，照着改就是你的数据',
     tags: ['样例'],
     values,
     createdAt: at,

@@ -27,10 +27,12 @@ export interface TemplateDump {
   entries: SerializedEntry[];
 }
 
-/** 正在编辑的草稿：id + 标题 + 值（与 `current` 对比算脏值）。 */
+/** 正在编辑的草稿：id + 标题 + 一句话说明 + 值（与 `current` 对比算脏值）。 */
 export interface Draft {
   id: string;
   title: string;
+  /** 任务 #63：条目 desc（给 agent / 人认条目用，不是字段）。 */
+  desc: string;
   values: Record<string, unknown>;
 }
 

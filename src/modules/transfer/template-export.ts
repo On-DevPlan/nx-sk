@@ -33,13 +33,15 @@ export async function buildTemplateZip(ref: unknown, { entryIds, passphrase, inc
     if (missing.length) throw badInput(`找不到条目: ${missing.join(', ')}（用 'nx-sk entry list --template ${template.id}' 看现有条目）`);
   }
 
-  const entries: Array<{ id: string; title: string; tags: string[]; parent: string | null; sort: number; createdAt: string | null; updatedAt: string | null; values: Record<string, unknown> }> = [];
+  const entries: Array<{ id: string; title: string; desc: string; tags: string[]; parent: string | null; sort: number; createdAt: string | null; updatedAt: string | null; values: Record<string, unknown> }> = [];
   const rowIds = new Set(rows.map((e) => e.id));
   for (const e of rows) {
     const plain = await plainValues(defsOf(e), e.values);
     entries.push({
       id: e.id,
       title: e.title,
+      // 任务 #63：desc 是条目属性，不是字段——不带出去，导入后 status 就认不出这条是什么了。
+      desc: e.desc || '',
       tags: e.tags || [],
       // 只保留「父也在本包里」的父子关系：选子树时父可能没被选，导入后它就是根，
       // 不能让它指向包里不存在的 id。

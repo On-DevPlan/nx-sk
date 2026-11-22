@@ -102,6 +102,8 @@ interface RawEntry {
   parent?: unknown;
   sort?: unknown;
   title?: unknown;
+  /** v10：条目一句话说明（API 上的 `desc`）。 */
+  desc?: unknown;
   tags?: unknown;
   values?: unknown;
   createdAt?: unknown;
@@ -111,6 +113,11 @@ interface RawEntry {
 export function defaultSettings(): StoreSettings {
   return {
     defaultTemplate: 'demo',
+    // 任务 #63：默认条目 = agent 的「当前工作条目」。空 = 没设，status 会给出选择指引。
+    // 存条目 id（标题会改；设置项写入时按 id 归一）。
+    defaultEntry: '',
+    // status 一次最多带多少条（默认条目 + 其子条目）。默认 5：超过 8 条 agent 就开始认错条目。
+    entryScopeLimit: 5,
     // 头部导航分组：[{ title, templates: [条目模板 id…] }]，数组顺序 = 显示顺序。
     // 缺省空数组 = 全部条目模板平铺（保持老行为）；条目模板建得多了再在设置页收拢。
     navGroups: [],
@@ -213,6 +220,8 @@ function normalizeEntry(raw: RawEntry | null | undefined): StoreEntry | null {
     id: String(raw.id),
     template: String(raw.template || raw.section || '__blank__'),
     title: String(raw.title || ''),
+    // v10：desc 缺省空串（旧 store.json / 旧库都没有这个键）。
+    desc: String(raw.desc ?? ''),
     tags: Array.isArray(raw.tags) ? raw.tags.map(String) : [],
     values: raw.values && typeof raw.values === 'object' ? { ...(raw.values as Record<string, unknown>) } : {},
     parent: raw.parent == null || raw.parent === '' ? null : String(raw.parent),

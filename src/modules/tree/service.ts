@@ -6,6 +6,7 @@ import { loadStore, mutateStore } from '../../core/store.ts';
 import { ancestorsOf, buildTree, childrenOf, nextSort, subtreeOf, wouldCycle } from '../../core/tree.ts';
 import { badInput, blocked } from '../../core/errors.ts';
 import { resolveEntry } from '../../core/locator.ts';
+import { resolveEntryOr } from '../../core/default-entry.ts';
 import { nowIso } from '../../core/ids.ts';
 
 export async function treeView({ parent, depth }: { parent?: string; depth?: number } = {}) {
@@ -29,11 +30,20 @@ export async function treeView({ parent, depth }: { parent?: string; depth?: num
 /** 一个条目的直接子条目 + 祖先链（agent 读上下文用）。 */
 export async function entryContext(ref: unknown, { template }: { template?: string } = {}) {
   const store = await loadStore();
-  const e = resolveEntry(store, ref, template);
+  // 任务 #63：省略 ref = 默认条目（status 提示里让 agent 用它下钻更大范围）。
+  const e = resolveEntryOr(store, ref, template);
+  const tpl = store.templates.find((s) => s.id === e.template);
   return {
-    entry: { id: e.id, title: e.title, template: e.template, parent: e.parent ?? null, sort: e.sort ?? 0 },
-    ancestors: ancestorsOf(store, e.id).map((x) => ({ id: x.id, title: x.title })),
-    children: childrenOf(store, e.id).map((x) => ({ id: x.id, title: x.title, hasChildren: childrenOf(store, x.id).length > 0 })),
+    entry: {
+      id: e.id, title: e.title, desc: e.desc || '', template: e.template,
+      templateTitle: tpl?.title || e.template,
+      parent: e.parent ?? null, sort: e.sort ?? 0,
+    },
+    ancestors: ancestorsOf(store, e.id).map((x) => ({ id: x.id, title: x.title, desc: x.desc || '' })),
+    children: childrenOf(store, e.id).map((x) => ({
+      id: x.id, title: x.title, desc: x.desc || '',
+      hasChildren: childrenOf(store, x.id).length > 0,
+    })),
   };
 }
 

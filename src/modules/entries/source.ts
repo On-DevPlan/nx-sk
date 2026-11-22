@@ -7,7 +7,7 @@ import { mdImageIds, rewriteMdImages } from '../../core/mdimages.ts';
 import { displayPath } from '../../core/paths.ts';
 import { normalizeSourceItem, normalizeSourceItems, resolveSourceConflicts, sourceItemTimeLabel } from '../../core/source.ts';
 import type { SourceItem } from '../../shared/fields/types.ts';
-import { mustFindTemplate, resolveEntry } from './shared.ts';
+import { mustFindTemplate, resolveEntry, resolveEntryOr } from './shared.ts';
 
 // —— 原始资料袋（source 字段）——
 //
@@ -75,7 +75,7 @@ export async function listSource({ template }: { template?: string } = {}) {
 /** source get：某条目的袋明细。 */
 export async function getSource(ref: unknown, { template }: { template?: string } = {}) {
   const store = await loadStore();
-  const entry = resolveEntry(store, ref, template);
+  const entry = resolveEntryOr(store, ref, template);
   const sec = mustFindTemplate(store, entry.template);
   const items = sourceItemsOf(entry);
   return {
@@ -108,7 +108,7 @@ export async function addSourceItem(ref: unknown, { template, text, file, url, n
   'dry-run'?: boolean;
 } = {}) {
   const store = await loadStore();
-  const target = resolveEntry(store, ref, template);
+  const target = resolveEntryOr(store, ref, template);
   const sec = mustFindTemplate(store, target.template);
   if (!sec.fields.some((f) => f.type === 'source')) {
     throw badInput(`条目模板「${sec.title}」没有「原始资料」字段（source）——先跑 nx-sk source ensure 补上`);
@@ -160,7 +160,7 @@ export async function updateSourceItem(ref: unknown, { template, id, name, note,
   'dry-run'?: boolean;
 } = {}) {
   const store = await loadStore();
-  const target = resolveEntry(store, ref, template);
+  const target = resolveEntryOr(store, ref, template);
   const items = sourceItemsOf(target);
   const key = String(id || '').trim();
   const idx = items.findIndex((x) => x.id === key);

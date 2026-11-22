@@ -72,7 +72,8 @@ test('template dump：字段字典 + 条目 + 完整度', async () => {
     // 条目上除下列键外只允许 `tables`（表格现值，按需附带）
     // #20：`detachedFields`（已脱离模板字段清单）随 serializeEntry 恒输出
     assert.deepEqual(keysOf(e), [
-      'completeness', 'createdAt', 'detachedFields', 'entryFields', 'excluded', 'id', 'missing', 'template',
+      // v10：desc 是条目属性（不是字段），与 title/tags 同级恒输出
+      'completeness', 'createdAt', 'desc', 'detachedFields', 'entryFields', 'excluded', 'id', 'missing', 'template',
       ...(e.tables ? ['tables'] : []), 'tags', 'title', 'updatedAt', 'values',
     ].sort());
     assert.deepEqual(Object.keys(e.values).sort(), fieldKeys, 'values 的键集必须恒等于字段字典');

@@ -1,6 +1,6 @@
 ---
 name: nx-sk
-description: 本机个人资源管理器——条目化存储个人信息、场景凭据（账号/密码/令牌/大模型 API Key）、可复用部署配置（Dockerfile / compose / k8s）、原始资料与附件，用条目目录树组织，条目模板只负责初始化并自带默认 tag；CLI 与 Web 面板同源，支持按 tag 检索与轻量快速搜索，敏感字段密文落盘。当用户要记录/更新个人信息、填求职档案、记账号密码或存 API Key、把凭据渲染成配置文件、存/取部署配置、把一堆杂乱资料整理进库、把 PDF 转成图文 SOP、搬条目模板/导出资料、排毕业论文格式，或起一个个人资料面板时使用。触发词：nx-sk、个人资源管理器、个人信息、求职档案、条目、条目模板、目录树、文件夹、分组、字段、密钥、API key、密文、凭据、账号密码、令牌、token、配置渲染、导出、导入、迁移、面板、serve、部署配置、Dockerfile、docker-compose、k8s、原始资料、source、整理、归档、PDF、SOP、图文步骤、毕业论文、格式规范、三线表、参考文献、needdo、收件箱、混乱数据、tag、标签、搜索、entry search。不适用：纯问答与不需要落盘的临时讨论；也不适用于把密钥同步/上传到远程服务——nx-sk 只在本机落盘，不做任何上传。
+description: 本机个人资源管理器——条目化存储个人信息、场景凭据（账号/密码/令牌/大模型 API Key）、可复用部署配置（Dockerfile / compose / k8s）、原始资料与附件，用条目目录树组织，条目模板只负责初始化并自带默认 tag；CLI 与 Web 面板同源，支持按 tag 检索与轻量快速搜索，敏感字段密文落盘。当用户要记录/更新个人信息、填求职档案、记账号密码或存 API Key、把凭据渲染成配置文件、存/取部署配置、把一堆杂乱资料整理进库、把 PDF 转成图文 SOP、搬条目模板/导出资料、排毕业论文格式，或起一个个人资料面板时使用。触发词：nx-sk、个人资源管理器、个人信息、求职档案、条目、条目模板、目录树、文件夹、分组、字段、密钥、API key、密文、凭据、账号密码、令牌、token、配置渲染、导出、导入、迁移、面板、serve、部署配置、Dockerfile、docker-compose、k8s、原始资料、source、整理、归档、PDF、SOP、图文步骤、毕业论文、格式规范、三线表、参考文献、needdo、收件箱、混乱数据、tag、标签、搜索、entry search、默认条目、status、desc、条目说明。不适用：纯问答与不需要落盘的临时讨论；也不适用于把密钥同步/上传到远程服务——nx-sk 只在本机落盘，不做任何上传。
 ---
 
 # nx-sk · 本机个人资源管理器
@@ -62,8 +62,22 @@ description: 本机个人资源管理器——条目化存储个人信息、场�
 ## 先跑这一条
 
 ```bash
+nx-sk status                  # 默认条目 + 它这一支的条目（含 desc）+ 该怎么动的提示词
 nx-sk bootstrap --json        # 版本 / 存储路径 / 条目模板 / 目录树 / 设置 / 命令表
 ```
+
+`status` 是**交付即提示词**的入口：一次调用就告诉你「当前在操作哪条、它下面有什么、
+写字段前该看什么」。没有默认条目时它会给出候选，并告诉你用
+`nx-sk setting set --set defaultEntry=<条目>` 指定。
+
+- **默认条目**：省略 `<ref>` 的命令（`entry get/update/table/history/context`、`source get/add/update` 等）
+  都作用在它上面；删除 / 移动 / 改标题仍必须显式给 id。
+- **上下文条数**：`status` 只带 `settings.entryScopeLimit` 条（默认 5，1–50）。
+  条目多于这个数时它会明说「还有 N 条没带出来」——先用 `entry context` / `entry list --parent` 缩小范围，
+  不要靠标题猜。
+- **desc**：每条条目都该有一句话说明（`entry add --desc "…"` / `entry update --desc "…"`）。
+  它不是字段，不进完整度，但 `status` 与 `entry list` 靠它区分同名/相近的条目。
+  要一次找齐还没写说明的条目：`nx-sk entry list --missing-desc`。
 
 零知识主力命令：
 
@@ -71,7 +85,9 @@ nx-sk bootstrap --json        # 版本 / 存储路径 / 条目模板 / 目录树
 nx-sk entry fields --template job --json    # ① 看条目模板建议字段 + 这条条目实际写过什么
 nx-sk entry update <条目id或名> --set 字段=值
 nx-sk entry tree --json                    # 目录树（左侧导航同源）
-nx-sk entry add --title 新条目 --template job --parent <父条目>
+nx-sk entry add --title 新条目 --template job --parent <父条目> --desc "一句话说明"
+nx-sk entry get                                # 省略 <ref> = 读默认条目
+nx-sk entry update --set 字段=值                # 省略 <ref> = 改默认条目
 nx-sk entry save-as-template <条目> --id my_tpl --title 我的条目模板
 nx-sk template dump job --json              # ③ 条目模板全量 + 用它初始化过的条目与未填清单
 nx-sk template list --json                  # 现有条目模板（先查后建）

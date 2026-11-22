@@ -169,7 +169,8 @@ export function renderHelp(entries: CommandEntry[], topic?: unknown): string {
     lines.push('');
   }
   lines.push('常用姿势：');
-  lines.push('  nx-sk bootstrap --json                          一次拿齐上下文（agent 首选入口）');
+  lines.push('  nx-sk status                                    默认条目上下文 + 提示词（agent 首选入口）');
+  lines.push('  nx-sk bootstrap --json                          一次拿齐上下文（版本 / 模板 / 目录树 / 命令表）');
   lines.push('  nx-sk template dump job --json                   一个条目模板的全部信息（字段 + 全部条目 + 未填清单）');
   lines.push('  nx-sk entry fields --template job                字段字典：填之前先看，别猜字段名');
   lines.push('  nx-sk entry update 张三 --set 微信=zhangsan 改一个字段（PATCH 语义）');

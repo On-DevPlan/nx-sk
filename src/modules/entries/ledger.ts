@@ -477,7 +477,7 @@ export async function keyConsolidate(
   if (!target) {
     const parent = holders.length ? (holders[0].parent ?? null) : null;
     target = {
-      id: newId('e'), template: updatedSec.id, title: sec.title || '密钥', tags: [],
+      id: newId('e'), template: updatedSec.id, title: sec.title || '密钥', desc: '', tags: [],
       parent, sort: nextSortFor(store, parent), values: {}, createdAt: updatedAt, updatedAt,
     };
     store.entries.push(target);

@@ -47,6 +47,8 @@ export interface Entry {
   /** 创建时用过的模板 id；不参与导航、不参与级联删除。 */
   template: string;
   title: string;
+  /** v10：一句话说明——给 agent / 人认条目用，不是字段值，不参与完整度。 */
+  desc: string;
   tags: string[];
   values: Record<string, unknown>;
   /** folders 表：父条目；根节点为 null。 */
@@ -62,6 +64,8 @@ export interface SerializedEntry {
   id: string;
   template: string;
   title: string;
+  /** v10：一句话说明（旧数据/未设置时为空串）。 */
+  desc?: string;
   tags: string[];
   parent?: string | null;
   sort?: number;
@@ -87,6 +91,10 @@ export interface NavGroup {
 /** 设置（`store.settings`，也是 `/api/bootstrap` 下发的 settings）。 */
 export interface Settings {
   defaultTemplate: string;
+  /** 任务 #63：默认条目 id（空 = 未设）。CLI 省略 <ref> 时作用在它上面。 */
+  defaultEntry?: string;
+  /** 任务 #63：`status` 一次最多带多少条条目（默认条目 + 子条目，默认 5，上限 50）。 */
+  entryScopeLimit?: number;
   navGroups: NavGroup[];
   /** 任务 #26：编辑字段后防抖自动保存（默认关；关 = 只走手动保存，行为与之前一致）。 */
   autoSaveFields?: boolean;

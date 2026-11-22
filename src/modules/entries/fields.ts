@@ -11,7 +11,7 @@ import { computeTable, renderTableText } from '../../shared/table.ts';
 import { FIELD_TYPES, type FieldDef } from '../../shared/fields/types.ts';
 import { boardGroupsOf, structureOf } from '../../shared/fields/structure.ts';
 import { getEntry, renderEntryGet, updateEntry } from './crud.ts';
-import { defsForEntry, mustFindTemplate, resolveEntry } from './shared.ts';
+import { defsForEntry, mustFindTemplate, resolveEntry, resolveEntryOr } from './shared.ts';
 
 /** 字段字典的读侧形状：渲染只读这些键，不同字段类型各带其中一部分。 */
 interface FieldDictEntry {
@@ -93,7 +93,7 @@ export async function addEntryField(ref: unknown, ctx: {
     throw badInput(`未知字段类型 "${type}"（可用: ${FIELD_TYPES.join(', ')}）`);
   }
   const store = await loadStore();
-  const target = resolveEntry(store, ref, ctx.template);
+  const target = resolveEntryOr(store, ref, ctx.template);
   const sec = mustFindTemplate(store, target.template);
   const rows = entryStructures(store).get(target.id) || [];
   const hit = rows.find((r) => r.key === key);
@@ -231,7 +231,7 @@ export async function updateEntryFieldDef(ref: unknown, ctx: {
   }
   if (label !== undefined && !label) throw badInput('--label 不能为空（要恢复成 key 请显式传 key）');
   const store = await loadStore();
-  const target = resolveEntry(store, ref, ctx.template);
+  const target = resolveEntryOr(store, ref, ctx.template);
   const sec = mustFindTemplate(store, target.template);
   const rows = entryStructures(store).get(target.id) || [];
   const row = findOwnRow(rows, ctx.key);
@@ -287,7 +287,7 @@ export function renderEntryUpdateField(d: Awaited<ReturnType<typeof updateEntryF
 
 export async function getTable(ref: unknown, { field, mask, template }: { field?: unknown; mask?: boolean; template?: string } = {}) {
   const store = await loadStore();
-  const entry = resolveEntry(store, ref, template);
+  const entry = resolveEntryOr(store, ref, template);
   const sec = mustFindTemplate(store, entry.template);
   const structures = entryStructures(store);
   const ownRows = structures.get(entry.id) || null;

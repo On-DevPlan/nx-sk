@@ -14,7 +14,7 @@ import { boardGroupsOf, structureOf } from '../../shared/fields/structure.ts';
 import type { FieldDef } from '../../shared/fields/types.ts';
 import {
   autoTitle, defsForEntry, isPlainRow, mergeInputs, mustFindTemplate,
-  prepareValue, prepareWrite, resolveEntry, resolveFieldDef, resolveOwnRow,
+  prepareValue, prepareWrite, resolveEntry, resolveEntryOr, resolveFieldDef, resolveOwnRow,
 } from './shared.ts';
 import { entryMatchesTags } from './search.ts';
 
@@ -30,7 +30,7 @@ import { entryMatchesTags } from './search.ts';
 // quickAdd **不再登记进字典**——推断出的 def 只用于封装本次值，
 // 写后由 upsertEntryFields 把条目自身的占位行归正（type/label/spec）。
 
-export async function listEntries({ template, q, parent, tag, 'tag-mode': tagMode }: { template?: string; q?: unknown; parent?: string; tag?: unknown; 'tag-mode'?: string } = {}) {
+export async function listEntries({ template, q, parent, tag, 'tag-mode': tagMode, 'missing-desc': missingDesc }: { template?: string; q?: unknown; parent?: string; tag?: unknown; 'tag-mode'?: string; 'missing-desc'?: boolean } = {}) {
   const store = await loadStore();
   const structures = entryStructures(store);
   let list = store.entries;
@@ -64,7 +64,10 @@ export async function listEntries({ template, q, parent, tag, 'tag-mode': tagMod
     }
     out.push({ ...item, templateTitle: sec.title });
   }
-  return { count: out.length, total: store.entries.length, entries: out };
+  // 任务 #63：desc 是 agent 认条目的标签。`--missing-desc` 专门用来找「还没写说明」的条目，
+  // 让「给每条补 desc」这件事有可执行的入口，而不是靠人全量翻一遍。
+  const filtered = missingDesc ? out.filter((e) => !e.desc) : out;
+  return { count: filtered.length, total: store.entries.length, entries: filtered };
 }
 
 /** 搜索文本：行对象（entrylist）与表格文档要摊成 JSON 才能按里面的账号/链接搜到条目。 */
@@ -77,7 +80,7 @@ function hayText(v: unknown): string {
 
 export async function getEntry(ref: unknown, { mask, template }: { mask?: boolean; template?: string } = {}) {
   const store = await loadStore();
-  const entry = resolveEntry(store, ref, template);
+  const entry = resolveEntryOr(store, ref, template);
   // 模板只记录出身（0.43）：模板删掉/改 id 之后，条目仍按空白模板 + 自身结构行读。
   const sec = store.templates.find((s) => s.id === entry.template)
     || store.templates.find((s) => s.blank || s.id === BLANK_TEMPLATE_ID);
@@ -148,10 +151,11 @@ export async function getEntry(ref: unknown, { mask, template }: { mask?: boolea
   };
 }
 
-export async function addEntry({ template, parent, title, set, data, tags, 'dry-run': dryRun }: {
+export async function addEntry({ template, parent, title, desc, set, data, tags, 'dry-run': dryRun }: {
   template?: string;
   parent?: string;
   title?: unknown;
+  desc?: unknown;
   set?: unknown;
   data?: unknown;
   tags?: unknown;
@@ -190,7 +194,7 @@ export async function addEntry({ template, parent, title, set, data, tags, 'dry-
   // 模板默认 tag 跟着条目走；条目自己的 --tags 是追加，不覆盖模板语义。
   const finalTags = [...new Set([...(sec.tags || []), ...givenTags])];
   const entry = {
-    id: newId('e'), template: sec.id, title: finalTitle, tags: finalTags,
+    id: newId('e'), template: sec.id, title: finalTitle, desc: String(desc ?? '').trim(), tags: finalTags,
     parent: parentId, sort: nextSort(store, parentId),
     values, createdAt: nowIso(), updatedAt: nowIso(),
   };
@@ -205,7 +209,7 @@ export async function addEntry({ template, parent, title, set, data, tags, 'dry-
   });
   if (newFields.length) await upsertEntryFields(entry.id, newFields);
   return {
-    status: 'ok', created: true, id: entry.id, title: entry.title, template: sec.id,
+    status: 'ok', created: true, id: entry.id, title: entry.title, desc: entry.desc, template: sec.id,
     parent: parentId,
     completeness: completeness(sec, entry), createdFields: newFields.map((f) => f.key),
   };
@@ -215,7 +219,7 @@ export async function updateEntry(ref: unknown, patch: Record<string, any> = {})
   // TODO(P4): patch 是 CLI/HTTP 原样传入的键值集合（set/unset/title/tags/...），逐键校验在下方 errors 里
   const dryRun = patch['dry-run'];
   const store = await loadStore();
-  const target = resolveEntry(store, ref, patch.template);
+  const target = resolveEntryOr(store, ref, patch.template);
   const sec = store.templates.find((s) => s.id === target.template)
     || store.templates.find((s) => s.blank || s.id === BLANK_TEMPLATE_ID)
     || mustFindTemplate(store, BLANK_TEMPLATE_ID);
@@ -223,8 +227,8 @@ export async function updateEntry(ref: unknown, patch: Record<string, any> = {})
   const unset: string[] = patch.unset || [];
 
   const changedKeys = [...Object.keys(incoming), ...unset.map((k) => `-${k}`)];
-  if (!changedKeys.length && patch.title === undefined && patch.tags === undefined) {
-    throw badInput('没有要改的内容：用 --set 字段=值 / --data @file.json / --unset 字段 / --title / --tags');
+  if (!changedKeys.length && patch.title === undefined && patch.tags === undefined && patch.desc === undefined) {
+    throw badInput('没有要改的内容：用 --set 字段=值 / --data @file.json / --unset 字段 / --title / --desc / --tags');
   }
   const ownRows = entryStructures(store).get(target.id) || null;
   // 先把 unset 的字段名解析出来（错别字要在写盘前就报掉）：条目自身行优先，再字典。
@@ -262,6 +266,8 @@ export async function updateEntry(ref: unknown, patch: Record<string, any> = {})
     for (const [k, v] of Object.entries(values)) e.values[k] = v;
     for (const k of unsetKeys) e.values[k] = null;
     if (patch.title !== undefined) e.title = String(patch.title);
+    // v10：--desc 是清空语义也要能表达：传空串 = 清掉说明。
+    if (patch.desc !== undefined) e.desc = String(patch.desc ?? '').trim();
     if (Array.isArray(patch.tags)) {
       e.tags = [...new Set(patch.tags.map(String).map((x) => x.trim()).filter(Boolean))];
     }
@@ -273,7 +279,7 @@ export async function updateEntry(ref: unknown, patch: Record<string, any> = {})
   const finalEntry = after.entries.find((x) => x.id === target.id)!;
   const finalSec = after.templates.find((x) => x.id === finalEntry.template)!;
   return {
-    status: 'ok', id: finalEntry.id, title: finalEntry.title, template: finalEntry.template,
+    status: 'ok', id: finalEntry.id, title: finalEntry.title, desc: finalEntry.desc, template: finalEntry.template,
     // 报**解析后**的字段 key，而不是用户敲的中文标签——调用方/agent 拿它去对比字典
     changed: [...Object.keys(values), ...unsetKeys.map((k) => `-${k}`)],
     newFields: newFields.map((f) => f.key),
@@ -312,6 +318,8 @@ export function renderEntryList(d: Awaited<ReturnType<typeof listEntries>>) {
   const lines = [`${d.count} 条 / 共 ${d.total} 条`];
   for (const e of d.entries) {
     lines.push(`  ${e.id}  ${(e.title || '（无名）').padEnd(16)} ${String(e.completeness.ratio).padStart(3)}% 完整度　[${e.template}]`);
+    // v10：desc 是「这条是什么」的一句话，列表里就带出来——agent 不用逐条 entry get 才知道。
+    if (e.desc) lines.push(`      ${e.desc}`);
     const missing = e.missing.slice(0, 6).map((m) => m.label).join('、');
     if (missing) lines.push(`      未填: ${missing}${e.missing.length > 6 ? ` 等 ${e.missing.length} 项` : ''}`);
     // 「不填」只报**真的空着**的可选字段。可选字段填了值还列出来，会让人以为
@@ -373,6 +381,7 @@ export function renderEntryGet(d: Awaited<ReturnType<typeof getEntry>>) {
     + (skipped.length ? ` · 另有 ${skipped.length} 项已标不填` : '')
     + `${d.mask ? ' · 已打码' : ''}`,
   ];
+  if (d.desc) lines.push(`  ${d.desc}`);
   for (const [k, v] of Object.entries(d.values)) {
     if (v === null) continue;
     const rendered = valueLines(d, v, k);

@@ -27,6 +27,7 @@ export default function EntryDetailColumn({
   onCopyRef,
   onSaveAsTemplate,
   onDraftTitle,
+  onDraftDesc,
   onEditTags,
   onAddField,
   onRestoreField,
@@ -50,6 +51,8 @@ export default function EntryDetailColumn({
   onCopyRef: (entry: { id: string; title: string } | null) => void;
   onSaveAsTemplate: () => void;
   onDraftTitle: (title: string) => void;
+  /** 任务 #63：条目 desc（一句话说明），随「保存」一起提交。 */
+  onDraftDesc: (desc: string) => void;
   onEditTags: () => void;
   onAddField: () => void;
   onRestoreField: (key: string, label: string) => void;
@@ -139,6 +142,18 @@ export default function EntryDetailColumn({
                 <TagsOutlined />
               </button>
             )}
+          </div>
+
+          {/* 任务 #63：条目 desc —— 给 agent / 人「这条是什么」的一句话。
+              它不是字段（不进完整度、不占块版式），所以放在标题下、字段区之前。 */}
+          <div className="entry-desc pad">
+            <input
+              className="entry-desc-input"
+              value={draft.desc}
+              onChange={(e) => onDraftDesc(e.target.value)}
+              placeholder="一句话说明：这条是什么（给 agent 认条目用，可留空）"
+              aria-label="条目说明"
+            />
           </div>
 
           {/* 条目内字段扩展正门（类型/分组可选）。#19：「字段=值 快填」旁路按验收反馈撤除 */}

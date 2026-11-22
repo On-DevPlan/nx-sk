@@ -150,6 +150,8 @@ export function readStore(db: Conn): LoadedRaw {
     id: String(e.id),
     template: String(e.template_id ?? BLANK_TEMPLATE_ID),
     title: String(e.title ?? ''),
+    // v10：一句话说明（desc）；旧库刚加列时全是空串。
+    desc: String(e.description ?? ''),
     tags: (parseJson(e.tags, []) as unknown[]).map(String),
     values: valuesByEntry.get(String(e.id)) || {},
     parent: e.folder_parent == null ? null : String(e.folder_parent),
@@ -238,8 +240,8 @@ export function writeStore(db: Conn, store: Store, { expectedRev = null }: Write
       VALUES (:id, :title, :description, :order, :source, :blank, :titleField, :titleLabel, :tags, :layout, :createdAt, :updatedAt)`;
     const insField = `INSERT INTO template_fields (template_id, key, label, type, fill, hint, sensitive, sort, spec, default_value)
       VALUES (:templateId, :key, :label, :type, :fill, :hint, :sensitive, :sort, :spec, :defaultValue)`;
-    const insEntry = `INSERT INTO entries (id, template_id, title, tags, created_at, updated_at)
-      VALUES (:id, :templateId, :title, :tags, :createdAt, :updatedAt)`;
+    const insEntry = `INSERT INTO entries (id, template_id, title, description, tags, created_at, updated_at)
+      VALUES (:id, :templateId, :title, :desc, :tags, :createdAt, :updatedAt)`;
     const insFolder = `INSERT INTO folders (entry_id, parent_id, sort, created_at) VALUES (:entryId, :parentId, :sort, :at)`;
     const insSetting = 'INSERT INTO settings (key, value, updated_at) VALUES (:key, :value, :at)';
 
@@ -273,6 +275,7 @@ export function writeStore(db: Conn, store: Store, { expectedRev = null }: Write
     for (const e of store.entries) {
       conn.run(insEntry, {
         id: e.id, templateId: e.template || BLANK_TEMPLATE_ID, title: e.title,
+        desc: e.desc || '',
         tags: JSON.stringify(e.tags || []),
         createdAt: e.createdAt ?? null, updatedAt: e.updatedAt ?? null,
       });

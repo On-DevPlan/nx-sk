@@ -40,6 +40,7 @@ export const DIRECT_EDGES: MigrationStep[] = [
   { from: 6, to: 7, file: 'v7.sql', title: '条目模板→模板 + 条目树：sections/fields 改名 templates/template_fields，entries 用 template_id，新增 folders 父子关系', apply: applyV7 },
   { from: 7, to: 8, file: 'v8.sql', title: 'KV 模板标记退役：删除 templates.kv；模板结构只剩字段 + 条目' },
   { from: 8, to: 9, file: 'v9.sql', title: '模板默认标签：templates.tags；模板创建条目时继承 tag，CLI 可按 tag 检索', apply: applyV9 },
+  { from: 9, to: 10, file: 'v10.sql', title: '条目一句话说明：entries.description（desc）——默认条目上下文的辨识标签，不是字段' },
 ];
 
 const keyOf = (from: number, to: number) => `${from}->${to}`;
