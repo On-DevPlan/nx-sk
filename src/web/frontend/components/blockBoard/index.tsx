@@ -74,8 +74,8 @@ interface BlockProps {
 /**
  * 块头右上角的「⋯」菜单 —— 全站统一 MoreMenu 的块头薄壳（任务 #9）。
  *
- * 只传 items：按钮（icon-btn + dots）、portal/fixed 定位、关闭口径（点任意处 / Esc /
- * 滚动 / 改窗口尺寸）全部在 components/menu 里，与其他更多菜单同一副面孔。
+ * 只传 items：按钮（icon-btn + dots）与 antd Dropdown 面板（= 条目头菜单同款，
+ * 默认 portal 到 body，块根 overflow:hidden 裁不到）都在 components/menu 里。
  * `buttonClass="blk-menu-btn"` 保留块头的 hover 浮现节奏（静止态不抢正文注意力）。
  */
 function BlockMenu({ def, actions }: { def: FieldDef; actions: FieldActions }) {

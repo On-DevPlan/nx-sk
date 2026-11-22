@@ -253,49 +253,12 @@ main.body { flex: 1; min-height: 0; overflow: auto; }
 .blk-head:hover .blk-key { opacity: 1; }
 /* 任务 #20/#24 + 任务 #9：块头字段操作入口（更多菜单触发钮）。
    按钮本体已统一为 .icon-btn 基座（components/menu 的 MoreMenu），
-   这里只留块头的 hover 浮现节奏（与 .blk-key 同一套，静止态不抢正文注意力） */
+   这里只留块头的 hover 浮现节奏（与 .blk-key 同一套，静止态不抢正文注意力）。
+   下拉面板由 antd Dropdown 按 ConfigProvider 主题渲染（= 条目头菜单同款，验收纠偏：
+   其他菜单跟随条目样式），不在 css 里另画一份。 */
 .blk-menu-btn { opacity: 0; transition: opacity .12s; }
 .blk-head:hover .blk-menu-btn,
 .blk-menu-btn:focus-visible { opacity: 1; }
-
-/* ═ 全站统一的「更多」下拉面板（components/menu 的 MoreMenu，任务 #9）═══
-   条目头 / 块板 / 条目模板 / 附件页共用这一份：按钮一律 .btn.small.ghost.icon-btn
-   + dots 图标；面板 portal 到 body + fixed（块根 overflow:hidden 会裁 antd 弹层）。 */
-.more-menu {
-  position: fixed;
-  z-index: 1200;
-  width: 176px;
-  padding: 4px;
-  display: flex;
-  flex-direction: column;
-  background: var(--paper);
-  border: var(--border);
-  border-radius: var(--radius-btn);
-  box-shadow: var(--shadow-float);
-}
-.more-menu button {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 28px;
-  padding: 5px 8px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--ink);
-  font: inherit;
-  font-size: var(--fs-core);
-  text-align: left;
-  cursor: pointer;
-}
-.more-menu button:hover { background: var(--hover); }
-.more-menu button svg { flex-shrink: 0; color: var(--mid); }
-.more-menu button.danger-item { color: var(--danger); }
-.more-menu button.danger-item svg { color: var(--danger); }
-.more-menu button.danger-item:hover { background: var(--danger-soft); }
-.more-menu button:disabled { color: var(--mid); opacity: .5; cursor: default; }
-.more-menu button:disabled:hover { background: transparent; }
-.more-menu-divider { height: 1px; margin: 4px 6px; background: var(--line); }
 /* 字段详情弹窗：定义行 + 只读值预览 */
 .fldinfo { border: var(--border); border-radius: 6px; overflow: hidden; }
 .fldinfo-row { display: flex; gap: 12px; padding: 6px 10px; font-size: 12px; border-top: var(--border); }
