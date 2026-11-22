@@ -19,6 +19,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import { Icon } from '../../asset/icon/index.tsx';
 import { FlexPeekShell } from '../flexPeek/index.tsx';
 
 export type PeekMode = 'side' | 'center' | 'fullpage';
@@ -66,60 +67,30 @@ function focusableIn(root: HTMLElement): HTMLElement[] {
   ));
 }
 
-/* ── 内联图标（16×16，Notion 菜单的线性图标同构） ───────────────── */
+/* ── 图标：统一走 asset/icon（一功能一颗；peek 三态/新窗口/视图选项都在登记表里） ── */
 
 function IconSide() {
-  return (
-    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden focusable="false">
-      <rect x="2.4" y="2.6" width="11.2" height="10.8" rx="2.1" fill="none" stroke="currentColor" strokeWidth="1.3" />
-      <rect x="3.5" y="3.7" width="3.4" height="8.6" rx="1.1" fill="currentColor" />
-    </svg>
-  );
+  return <Icon name="pane-side" size="lg" />;
 }
 
 function IconCenter() {
-  return (
-    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden focusable="false">
-      <rect x="2.4" y="2.6" width="11.2" height="10.8" rx="2.1" fill="none" stroke="currentColor" strokeWidth="1.3" />
-      <rect x="5.2" y="4.8" width="5.6" height="6.4" rx="1.1" fill="currentColor" />
-    </svg>
-  );
+  return <Icon name="pane-center" size="lg" />;
 }
 
 function IconFull() {
-  return (
-    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden focusable="false">
-      <rect x="2.4" y="2.6" width="11.2" height="10.8" rx="2.1" fill="none" stroke="currentColor" strokeWidth="1.3" />
-      <path d="M3.6 5.9h8.8" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" />
-    </svg>
-  );
+  return <Icon name="pane-full" size="lg" />;
 }
 
 function IconNewTab() {
-  return (
-    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden focusable="false">
-      <rect x="4.6" y="2.4" width="8.9" height="9.6" rx="2" fill="none" stroke="currentColor" strokeWidth="1.3" />
-      <rect x="2.5" y="4.8" width="8.9" height="8.8" rx="2" style={{ fill: 'var(--paper)' }} stroke="currentColor" strokeWidth="1.3" />
-    </svg>
-  );
+  return <Icon name="new-tab" size="lg" />;
 }
 
 function IconDefault() {
-  return (
-    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden focusable="false">
-      <path d="M2.6 5.2h10.8M2.6 10.8h10.8" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
-      <circle cx="6.1" cy="5.2" r="1.7" style={{ fill: 'var(--paper)' }} stroke="currentColor" strokeWidth="1.3" />
-      <circle cx="10" cy="10.8" r="1.7" style={{ fill: 'var(--paper)' }} stroke="currentColor" strokeWidth="1.3" />
-    </svg>
-  );
+  return <Icon name="sliders" size="lg" />;
 }
 
 function IconCheck() {
-  return (
-    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden focusable="false">
-      <path d="M3.2 8.4l3.1 3.1 6.5-7" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
+  return <Icon name="check" size="lg" />;
 }
 
 function ModeIcon({ mode }: { mode: PeekMode }) {

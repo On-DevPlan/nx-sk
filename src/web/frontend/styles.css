@@ -1138,6 +1138,11 @@ a.file-name:hover { text-decoration: underline; }
 .tf-plus { color: var(--mid); font-size: 12px; }
 .tf-addrow-label { padding: 0 8px; }
 
+/* 图标键里的 svg：一律吃 token 尺寸（--icon-sm/md/lg），组件不写死宽高（任务 #8） */
+.tf-mini svg, .tf-th-add-btn svg, .tf-th-more svg, .tf-row-more svg, .tf-plus svg {
+  display: block; width: var(--icon-sm); height: var(--icon-sm); margin: auto;
+}
+
 .tf-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .tf-errors { display: flex; flex-direction: column; gap: 1px; }
 .tf-empty { padding: 10px 12px; border: 1px dashed var(--soft-2); border-radius: var(--radius-btn); }
@@ -1619,7 +1624,9 @@ body.col-resizing, body.col-resizing * { cursor: col-resize !important; user-sel
 .dbg-chip-x {
   border: 0; background: none; cursor: pointer; color: var(--mid);
   font-size: 13px; line-height: 1; padding: 0 2px; border-radius: 3px;
+  display: inline-flex; align-items: center;
 }
+.dbg-chip-x svg { width: var(--icon-sm); height: var(--icon-sm); }
 .dbg-chip-x:hover { color: var(--ink); background: var(--soft-2); }
 .dbg-add-row { display: flex; align-items: center; gap: 8px; }
 .dbg-pick-panel {

@@ -92,7 +92,14 @@ input:focus, select:focus, textarea:focus {
 }
 label.inline { display: inline-flex; align-items: center; gap: 6px; }
 
+/* 图标按钮：内容就是一颗 Icon（asset/icon，功能 → 图标登记表见彼处）。
+   尺寸走 token（--icon-sm/md/lg），改 tokens.css 即全站统一调整。 */
 .icon-btn { width: 26px; padding: 0; justify-content: center; }
+.icon-btn svg { display: block; width: var(--icon-md); height: var(--icon-md); }
+.btn.small.icon-btn { width: 22px; padding: 0; }
+.btn.small.icon-btn svg { width: var(--icon-sm); height: var(--icon-sm); }
+/* 图标与文字并排的按钮：图标吃到当前文字色，不另设色 */
+.btn svg { flex-shrink: 0; }
 
 /* ── 卡片：不投影、不 margin、不用大 padding；靠 1px 底线分隔 ── */
 .card { border-bottom: var(--border); }

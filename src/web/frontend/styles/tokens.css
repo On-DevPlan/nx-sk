@@ -33,6 +33,12 @@
   --btn-h: 32px;
   --fs-core: 12px;
 
+  /* 图标尺寸三档（asset/icon 的 Icon 组件取用）：全站 svg 图标一律走这三档，
+     要统一调整图标大小只改这里；组件里禁止写死宽高（任务 #8 第 4 轮）。 */
+  --icon-sm: 12px;
+  --icon-md: 14px;
+  --icon-lg: 16px;
+
   --radius-btn: 8px;
   --radius-box: 10px;
   /* 悬浮加深的色块：所有 hover/.active/.selected 底色统一用它（Notion #eeeceb） */
