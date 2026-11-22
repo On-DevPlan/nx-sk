@@ -77,3 +77,7 @@ workbuddy-ai/
 # 验证脚本与截图（含真实库数据的页面截图，PII）；临时测试 home 目录
 /temp/
 /.tmp-*/
+
+# Python 脚本运行产物（nx-sk 的论文模板生成器等）
+__pycache__/
+*.pyc
