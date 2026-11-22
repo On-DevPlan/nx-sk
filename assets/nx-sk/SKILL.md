@@ -23,8 +23,8 @@ description: 本机个人资源管理器——条目化存储个人信息、场�
 
 | 要做的动作（A） | ref | 一句话 |
 | --- | --- | --- |
-| 记一条、改一条、补字段 | `A01-填一条信息` | 条目优先：先定位/新建条目，再看字段台账写值；特殊字段转对应 ref |
-| 把一堆乱资料整进库 | `A02-整理一堆乱资料` | 先找已有条目/可复用模板 → 定字段 → 逐条填 |
+| 记一条、改一条、补字段 | `A01-填一条信息` | 先 `status` 认默认条目 → 定位/新建 → 看台账写值；特殊字段转对应 ref |
+| 把一堆乱资料整进库 | `A02-整理一堆乱资料` | 先 `status` 定父级 → 找已有条目/可复用模板 → 定字段 → 逐条填 |
 | 把邮件/截图/PDF 摘录回写进条目 | `A03-把原件回写进条目` | 原件先进 `source` 袋，再映射字段并留痕 |
 | 存一把密钥或一组场景账号 | `A04-存密钥和凭据` | 通用 key 进 `secret` 的 `keys` 字段（安全 list&lt;kv&gt;）；场景凭据进场景条目模板；取真值渲染 |
 | 收一张简历头像进附件库 | `A05-收一份附件` | `file add/list/cleanup/restore`，值的形状是附件 id 数组 |
@@ -41,10 +41,10 @@ description: 本机个人资源管理器——条目化存储个人信息、场�
 
 | 要查的知识（B） | ref | 内容 |
 | --- | --- | --- |
-| 「东西该放哪个条目模板」「条目模板/条目/分组/字段是什么关系」 | `B01-概念与放置` | 心智模型、放置规则、四个聚合点 |
+| 「东西该放哪个条目模板」「默认条目是什么」「条目模板/条目/分组/字段是什么关系」 | `B01-概念与放置` | 心智模型、放置规则、默认条目与 desc、聚合点 |
 | 「某种字段的值怎么写」「表格公式/清单列/md 图片/附件 id」 | `B02-字段类型与格式` | 全字段形状、格式规矩、错误对照表 |
 | 「这个坑是不是踩过」 | `B03-踩坑合集` | PDF、论文、归档三组真实踩坑 |
-| 「一个项目该怎么搭、条目越建越乱」 | `B04-项目组织架构与布局` | 项目根 → 分区 → 事项；导航与版式分离 |
+| 「一个项目该怎么搭、条目越建越乱」 | `B04-项目组织架构与布局` | 项目根 → 分区 → 事项；项目根设为默认条目；导航与版式分离 |
 
 > A 引用 B、不复制 B：A 只说「做这步 → 见 B0x」。机械格式（值形状、公式、列定义）只在 B02 写一份。
 > 起名规矩：**A 一律是动词开头的动作**（填 / 整理 / 回写 / 存 / 收 / 排 / 搬 / 转），**B 一律是名词知识**。
@@ -59,39 +59,57 @@ description: 本机个人资源管理器——条目化存储个人信息、场�
 3. **失败抛异常（退出码 1），业务结果返回 `{status}`（退出码 0）。** `conflict` / `blocked` / `skipped`
    都是正常返回，看 `status` 而不是退出码。
 
-## 先跑这一条
+## 第 0 步：先 `status` 拿上下文
+
+每次会话开头、或换了一个话题 / 条目，先跑这一条：
 
 ```bash
-nx-sk status                  # 默认条目 + 它这一支的条目（含 desc）+ 该怎么动的提示词
-nx-sk bootstrap --json        # 版本 / 存储路径 / 条目模板 / 目录树 / 设置 / 命令表
+nx-sk status                    # 默认条目 + 它这一支的条目（含 desc）+ 该怎么动的提示词
+nx-sk status --json             # 同一份上下文的结构化形态（要精确取字段时用）
 ```
 
-`status` 是**交付即提示词**的入口：一次调用就告诉你「当前在操作哪条、它下面有什么、
-写字段前该看什么」。没有默认条目时它会给出候选，并告诉你用
-`nx-sk setting set --set defaultEntry=<条目>` 指定。
+它一次回答三件事：**在操作哪条**（默认条目与祖先链）、**周围有什么**（广度优先的子条目，
+最多 `entryScopeLimit` 条，默认 5；默认先带直接子条目，再往孙条目走）、**该怎么动**
+（哪些命令能省略 `<ref>`、写值前该看什么）。默认输出就是提示词，不需要再翻文档。
 
-- **默认条目**：省略 `<ref>` 的命令（`entry get/update/table/history/context`、`source get/add/update` 等）
-  都作用在它上面；删除 / 移动 / 改标题仍必须显式给 id。
-- **上下文条数**：`status` 只带 `settings.entryScopeLimit` 条（默认 5，1–50）。
-  条目多于这个数时它会明说「还有 N 条没带出来」——先用 `entry context` / `entry list --parent` 缩小范围，
-  不要靠标题猜。
-- **desc**：每条条目都该有一句话说明（`entry add --desc "…"` / `entry update --desc "…"`）。
-  它不是字段，不进完整度，但 `status` 与 `entry list` 靠它区分同名/相近的条目。
-  要一次找齐还没写说明的条目：`nx-sk entry list --missing-desc`。
+- 没设默认条目：`status` 会给候选，并提示 `nx-sk setting set --set defaultEntry=<条目id或标题>`。
+  先设再动，不要靠猜。
+- 上下文被截断（「还有 N 条没带出来」）：先用 `entry context` / `entry list --parent` 下钻，
+  不要凭标题猜。默认只带 5 条——超过 8 条 agent 就开始认串；该数在设置里可调（1–50）。
+- 换了项目 / 话题：顺手把默认条目改到新条目，后面所有省略 `<ref>` 的命令才落在正确的地方。
+
+### 默认条目如何影响命令
+
+| 场景 | 省略 `<ref>` 时 | 必须显式给 id |
+| --- | --- | --- |
+| 读 / 改内容 | `entry get/update/table/history/field-history/add-field/field-update`、`entry context`、`source get/add/update` → 默认条目 | — |
+| 新建子条目 | `entry add --parent <默认条目>` 是常见用法，但父级仍要写 | — |
+| 破坏性动作 | —（刻意不回落） | `entry remove` / `entry move` / 改标题 / `save-as-template` |
+| 密钥 | `key set/get/list/remove` 作用于 `secret` 的承载条目 | — |
+
+> 破坏性动作不回落是设计：一次手滑的 `entry remove` 不该删掉默认条目整棵子树。
+> 这张表对 A 序列各篇**同样生效**——各篇里的 `<条目>` 都遵循「省略 = 默认条目」，不逐篇重复。
+
+### desc：每条条目的「一句话」
+
+- 新建就写：`nx-sk entry add --title "名" --desc "这条是什么"`；补写：`entry update <id> --desc "…"`。
+- 它不是字段：不进 `values`、不进完整度、不占块版式；`status` / `entry list` / `entry get` 会带出来，
+  导出 / 导入也保留。
+- 找还没写的：`nx-sk entry list --missing-desc`；`status` 也会报「其中 N 条还没写 desc」。
+- 与 tag 的分工：tag 是**横切分类**（客户 / 部署 / 论文），desc 是**这一条自己的说明**，两者互补。
 
 零知识主力命令：
 
 ```bash
-nx-sk entry fields --template job --json    # ① 看条目模板建议字段 + 这条条目实际写过什么
-nx-sk entry update <条目id或名> --set 字段=值
-nx-sk entry tree --json                    # 目录树（左侧导航同源）
-nx-sk entry add --title 新条目 --template job --parent <父条目> --desc "一句话说明"
-nx-sk entry get                                # 省略 <ref> = 读默认条目
-nx-sk entry update --set 字段=值                # 省略 <ref> = 改默认条目
-nx-sk entry save-as-template <条目> --id my_tpl --title 我的条目模板
-nx-sk template dump job --json              # ③ 条目模板全量 + 用它初始化过的条目与未填清单
+nx-sk entry fields --template job --json    # 填之前先看台账，别猜字段名
+nx-sk entry get                             # 省略 <ref> = 读默认条目（含 desc / 完整度 / 未填清单）
+nx-sk entry update --set 字段=值              # 省略 <ref> = 改默认条目；先加 --dry-run
+nx-sk entry add --title "新条目" --template job --parent <父条目> --desc "一句话说明"
+nx-sk entry tree --json                     # 目录树（左侧导航同源）
+nx-sk entry search --q "关键词" --json       # 轻量定位；找不到再新建
+nx-sk template dump job --json              # 条目模板全量 + 条目 + 未填清单
 nx-sk template list --json                  # 现有条目模板（先查后建）
-nx-sk template reorder job,projects         # 按给定顺序重排（面板拖动排序的 CLI 入口）
+nx-sk template reorder job,projects         # 重排条目模板（面板拖动排序的 CLI 入口）
 ```
 
 ## 字段速查（细节全在 B02）
